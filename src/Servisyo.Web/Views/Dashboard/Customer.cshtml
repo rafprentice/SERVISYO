@@ -1,0 +1,199 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model CustomerDashboardViewModel
+@{
+    ViewData["Title"] = "Customer Dashboard";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "dashboard";
+
+    var inv = CultureInfo.InvariantCulture;
+    var cur = Model.Current;
+    var info = DashboardStates.Describe(Model.State, cur?.Fee ?? 0m, cur?.ProviderName ?? "your provider");
+    string Money(decimal v) => "₱" + v.ToString("#,##0.##", inv);
+    string BadgeClass(string status) => status switch
+    {
+        "Accepted" => "sv-tag--accepted",
+        "Completed" => "sv-tag--completed",
+        "In Progress" => "sv-tag--progress",
+        "Pending" => "sv-tag--pending",
+        _ => "sv-tag--muted"
+    };
+}
+
+<p class="sv-eyebrow">Customer Dashboard</p>
+<h1 class="sv-dash__title">Welcome back, @Model.Shell.FirstName</h1>
+<p class="sv-dash__sub">
+    @(Model.State == DashboardState.NoBooking
+        ? "You have no active bookings. Ready to book a service?"
+        : "Here's your current booking status and next action.")
+</p>
+
+@if (cur is null)
+{
+    <section class="sv-panel sv-empty-hero" aria-labelledby="empty-title">
+        <div class="sv-empty-hero__icon">@Icons.Svg("bag", 22)</div>
+        <h2 id="empty-title" class="sv-empty-hero__title">Need help at home?</h2>
+        <p class="sv-empty-hero__text">Find trusted plumbing, cleaning, and repair professionals near you.</p>
+        <a class="sv-btn sv-btn--primary" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Service</a>
+    </section>
+}
+else
+{
+    <section class="sv-booking" data-tone="@info.Tone" aria-labelledby="current-booking">
+        <div class="sv-booking__head">
+            <span class="sv-dot" aria-hidden="true"></span>
+            <strong id="current-booking">Current Booking</strong>
+            <span class="sv-booking__ref">#@cur.Reference</span>
+            <span class="sv-pill">@info.Label</span>
+        </div>
+
+        <div class="sv-booking__body">
+            <div class="sv-booking__top">
+                <div>
+                    <h2 class="sv-booking__title">@cur.Title</h2>
+                    <p class="sv-booking__meta">
+                        <span>@Icons.Svg("user", 13) Provider: <strong>@cur.ProviderName</strong></span>
+                        <span>@Icons.Svg("calendar", 13) @cur.Date.ToString("MMM d, yyyy", inv) • @cur.Time.ToString("h:mm tt", inv)</span>
+                    </p>
+                </div>
+                @if (Model.State == DashboardState.QuotationReceived)
+                {
+                    <div class="sv-quote">
+                        <span class="sv-quote__label">Quotation</span>
+                        <strong class="sv-quote__amount">@Money(cur.Fee)</strong>
+                    </div>
+                }
+            </div>
+
+            <partial name="_Stepper" model="info" />
+
+            @if (Model.State == DashboardState.BookingConfirmed && cur.UpcomingText is not null)
+            {
+                <div class="sv-upcoming">
+                    @Icons.Svg("calendar", 16)
+                    <div>
+                        <div class="sv-upcoming__label">Upcoming service</div>
+                        <div>@cur.UpcomingText</div>
+                    </div>
+                </div>
+            }
+
+            <div class="sv-booking__foot">
+                <p class="sv-booking__msg">
+                    @if (Model.State == DashboardState.WaitingForQuotation)
+                    {
+                        <span class="sv-spin">@Icons.Svg("loader", 14)</span>
+                    }
+                    else if (Model.State == DashboardState.ServiceCompleted)
+                    {
+                        <span class="sv-ok">@Icons.Svg("check", 14)</span>
+                    }
+                    else
+                    {
+                        <span class="sv-dot sv-dot--sm" aria-hidden="true"></span>
+                    }
+                    <span>@info.Message</span>
+                </p>
+                <div class="sv-booking__actions">
+                    @if (info.ActionLabel is not null)
+                    {
+                        <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" disabled
+                                title="Available in an upcoming update">
+                            @if (Model.State == DashboardState.ServiceCompleted) { @Icons.Svg("star", 14, filled: true) }
+                            @info.ActionLabel
+                        </button>
+                    }
+                    <span class="sv-link-muted" title="Available in an upcoming update">View booking details @Icons.Svg("arrow-right", 12)</span>
+                </div>
+            </div>
+        </div>
+    </section>
+}
+
+<div class="sv-dash__grid">
+    <section class="sv-panel" aria-labelledby="recent-title">
+        <div class="sv-panel__head">
+            <h2 id="recent-title" class="sv-panel__title">Recent Bookings</h2>
+            <span class="sv-link-muted" title="Available in an upcoming update">View all @Icons.Svg("arrow-right", 12)</span>
+        </div>
+        @if (Model.Recent.Count == 0)
+        {
+            <p class="sv-panel__empty">No bookings yet. When you book a service, it will show up here.</p>
+        }
+        else
+        {
+            <ul class="sv-list">
+                @foreach (var b in Model.Recent)
+                {
+                    <li class="sv-list__item">
+                        <div>
+                            <div class="sv-list__title">@b.Title</div>
+                            <div class="sv-list__meta">@b.ProviderName · @b.Date.ToString("MMM d, yyyy", inv)</div>
+                        </div>
+                        <div class="sv-list__right">
+                            <span class="sv-tag @BadgeClass(b.Status)">@b.Status</span>
+                            @if (b.Status == "Completed")
+                            {
+                                <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled
+                                        title="Available in an upcoming update">Book Again</button>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <div class="sv-dash__side">
+        <section class="sv-cta-dark">
+            <h2 class="sv-cta-dark__title">Need a service?</h2>
+            <p>Find trusted plumbing, cleaning, and repair professionals near you.</p>
+            <a class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Service</a>
+        </section>
+
+        <section class="sv-panel" aria-labelledby="rec-title">
+            <div class="sv-panel__head"><h2 id="rec-title" class="sv-panel__title">Recommended Providers</h2></div>
+            @if (Model.Recommended.Count == 0)
+            {
+                <p class="sv-panel__empty">No providers to recommend yet.</p>
+            }
+            else
+            {
+                <ul class="sv-list">
+                    @foreach (var p in Model.Recommended)
+                    {
+                        <li class="sv-rec">
+                            <span class="sv-avatar" aria-hidden="true">@p.Initials</span>
+                            <div class="sv-rec__body">
+                                <div class="sv-rec__name">@p.Name <span class="sv-verified">✓ Approved</span></div>
+                                <div class="sv-rec__rating">
+                                    @if (p.ReviewCount > 0 && p.AvgRating is decimal rating)
+                                    {
+                                        <span class="sv-stars" aria-hidden="true">
+                                            @for (var s = 1; s <= 5; s++)
+                                            {
+                                                <span class="@(s <= Math.Round(rating) ? "is-on" : "")">@Icons.Svg("star", 12, filled: true)</span>
+                                            }
+                                        </span>
+                                        <span>@rating.ToString("0.0", inv)</span>
+                                    }
+                                    else
+                                    {
+                                        <span>New</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(p.CategoryName)) { <span>· @p.CategoryName</span> }
+                                </div>
+                                @if (!string.IsNullOrEmpty(p.AvailabilityText))
+                                {
+                                    <div class="sv-rec__avail">@p.AvailabilityText</div>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    </div>
+</div>

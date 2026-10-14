@@ -20,9 +20,7 @@ public class HomePageService : IHomePageService
     public async Task<HomePageViewModel> GetHomePageAsync(CancellationToken ct = default)
     {
         // One eligibility rule for the whole page: Approved provider AND Active user account.
-        var eligibleProviders = _db.Providers.AsNoTracking()
-            .Where(p => p.ApprovalStatus == ApprovalStatuses.Approved
-                     && p.User.AccountStatus == AccountStatuses.Active);
+        var eligibleProviders = _db.Providers.AsNoTracking().WhereEligible();
 
         // ---- Statistics (real counts only) ----
         var approvedProviders = await eligibleProviders.CountAsync(ct);

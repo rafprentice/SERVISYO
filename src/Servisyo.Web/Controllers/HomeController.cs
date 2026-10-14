@@ -25,13 +25,14 @@ public class HomeController : Controller
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Log the details for the developer; show only a friendly notice to visitors.
             _logger.LogError(ex, "Could not load the home page data.");
             return View(new HomePageViewModel { LoadFailed = true });
         }
     }
 
     public IActionResult Privacy() => View();
+
+    public IActionResult Terms() => View();
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public IActionResult Error()

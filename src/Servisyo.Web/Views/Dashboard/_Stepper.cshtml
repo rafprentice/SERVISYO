@@ -1,0 +1,17 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model DashboardStateInfo
+<ol class="sv-stepper" aria-label="Booking progress">
+    @for (var i = 0; i < DashboardStates.StepLabels.Length; i++)
+    {
+        var step = i + 1;
+        var done = Model.AllDone || step < Model.ActiveStep;
+        var current = !Model.AllDone && step == Model.ActiveStep;
+        <li class="sv-step @(done ? "is-done" : "") @(current ? "is-active" : "")" aria-current="@(current ? "step" : null)">
+            <span class="sv-step__dot">
+                @if (done) { @Icons.Svg("check", 12) } else { <span>@step</span> }
+            </span>
+            <span class="sv-step__label">@DashboardStates.StepLabels[i]</span>
+        </li>
+    }
+</ol>

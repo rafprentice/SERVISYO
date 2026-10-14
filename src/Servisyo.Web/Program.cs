@@ -17,7 +17,10 @@ builder.Services.AddDbContext<ServisyoDbContext>(options =>
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IHomePageService, HomePageService>();
-
+builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();
+builder.Services.AddScoped<IProviderDashboardService, ProviderDashboardService>();
+builder.Services.AddScoped<IAdminDashboardService, AdminDashboardService>();
+builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {

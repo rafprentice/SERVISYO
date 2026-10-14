@@ -35,6 +35,18 @@
                 <div class="sv-actions">
                     @if (User.Identity?.IsAuthenticated == true)
                     {
+                        @if (User.IsInRole("Customer"))
+                        {
+                            <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="Dashboard" asp-action="Customer">Dashboard</a>
+                        }
+                        else if (User.IsInRole("Service Provider"))
+                        {
+                            <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="Dashboard" asp-action="Provider">Dashboard</a>
+                        }
+                        else if (User.IsInRole("Administrator"))
+                        {
+                            <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="Dashboard" asp-action="Admin">Dashboard</a>
+                        }
                         <span class="sv-user">@User.Identity.Name</span>
                         <form asp-controller="Account" asp-action="Logout" method="post" class="sv-inline-form">
                             <button type="submit" class="sv-btn sv-btn--outline sv-btn--sm">Sign Out</button>

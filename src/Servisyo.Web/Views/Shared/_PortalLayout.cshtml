@@ -1,0 +1,132 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@{
+    var shell = ViewData["Shell"] as PortalShellViewModel ?? new PortalShellViewModel();
+    var active = ViewData["ActiveNav"] as string ?? "dashboard";
+    var isProvider = shell.Role == "Provider";
+    var isAdmin = shell.Role == "Admin";
+    var roleLabel = isAdmin ? "Admin" : isProvider ? "Service Provider" : "Customer";
+    var sidebarLogout = isProvider || isAdmin;   // customers keep Sign Out in the top bar
+
+    // Url = null means "not built yet": shown greyed out. Give it a URL when that stage is built.
+    var items = isAdmin
+        ? new List<(string Key, string Label, string Icon, string? Url, int Badge)>
+        {
+            ("dashboard",  "Dashboard",  "home",     Url.Action("Admin", "Dashboard"), 0),
+            ("users",      "Users",      "users",    Url.Action("Index", "AdminUsers"), 0),
+            ("providers",  "Providers",  "wrench",   null, 0),
+            ("bookings",   "Bookings",   "calendar", null, 0),
+            ("categories", "Categories", "list",     null, 0),
+            ("reviews",    "Reviews",    "star",     null, 0)
+        }
+        : isProvider
+        ? new List<(string Key, string Label, string Icon, string? Url, int Badge)>
+        {
+            ("dashboard",    "Dashboard",    "home",     Url.Action("Provider", "Dashboard"), 0),
+            ("availability", "Availability", "clock",    null, 0),
+            ("services",     "My Services",  "wrench",   null, 0),
+            ("bookings",     "Bookings",     "calendar", null, 0),
+            ("messages",     "Messages",     "message",  null, shell.UnreadMessages),
+            ("profile",      "My Profile",   "user",     null, 0)
+        }
+        : new List<(string Key, string Label, string Icon, string? Url, int Badge)>
+        {
+            ("dashboard", "Dashboard",     "home",     Url.Action("Customer", "Dashboard"), 0),
+            ("find",      "Find Services", "search",   Url.Action("Index", "Home", null, null, null, "providers"), 0),
+            ("bookings",  "My Bookings",   "calendar", null, 0),
+            ("messages",  "Messages",      "message",  null, shell.UnreadMessages),
+            ("profile",   "My Profile",    "user",     null, 0)
+        };
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - SERVISYO</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/css/portal.css" asp-append-version="true" />
+</head>
+<body class="sv-portal-body">
+    <header class="sv-top">
+        <div class="sv-top__left">
+            <a class="sv-brand" asp-controller="Home" asp-action="Index" aria-label="SERVISYO home">
+                <span class="sv-brand__icon">@Icons.Svg("home", 16)</span>
+                <span>SERVISYO</span>
+            </a>
+            <span class="sv-role">@roleLabel</span>
+        </div>
+        <div class="sv-top__right">
+            <a class="sv-btn sv-btn--outline sv-btn--xs" asp-controller="Home" asp-action="Index">Home</a>
+            <span class="sv-bell" role="img" aria-label="@(shell.UnreadNotifications) unread notifications">
+                @Icons.Svg("bell", 18)
+                @if (shell.UnreadNotifications > 0)
+                {
+                    <span class="sv-count sv-count--float">@shell.UnreadNotifications</span>
+                }
+            </span>
+            @if (!sidebarLogout)
+            {
+                <form asp-controller="Account" asp-action="Logout" method="post" class="sv-inline-form">
+                    <button type="submit" class="sv-btn sv-btn--outline sv-btn--xs">Sign Out</button>
+                </form>
+            }
+        </div>
+    </header>
+
+    <div class="sv-portal">
+        <aside class="sv-side" aria-label="@roleLabel navigation">
+            <div class="sv-side__user">
+                <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@shell.Initials</span>
+                <div>
+                    <div class="sv-side__name">@shell.FullName</div>
+                    <div class="sv-side__sub">@shell.Subtitle</div>
+                </div>
+            </div>
+
+            <nav class="sv-side__nav">
+                @foreach (var item in items)
+                {
+                    if (item.Url is not null)
+                    {
+                        <a class="sv-side__link @(item.Key == active ? "is-active" : "")" href="@item.Url"
+                           aria-current="@(item.Key == active ? "page" : null)">
+                            @Icons.Svg(item.Icon, 16)
+                            <span>@item.Label</span>
+                            @if (item.Badge > 0) { <span class="sv-count">@item.Badge</span> }
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="sv-side__link is-disabled" aria-disabled="true" title="Available in an upcoming update">
+                            @Icons.Svg(item.Icon, 16)
+                            <span>@item.Label</span>
+                            @if (item.Badge > 0) { <span class="sv-count">@item.Badge</span> }
+                        </span>
+                    }
+                }
+            </nav>
+
+            @if (sidebarLogout)
+            {
+                <form asp-controller="Account" asp-action="Logout" method="post" class="sv-side__foot">
+                    <button type="submit" class="sv-side__logout">@Icons.Svg("log-out", 16)<span>Logout</span></button>
+                </form>
+            }
+            else
+            {
+                <a class="sv-side__back" asp-controller="Home" asp-action="Index">
+                    @Icons.Svg("log-out", 14)
+                    <span>Back to Home</span>
+                </a>
+            }
+        </aside>
+
+        <main class="sv-portal__main" id="main">@RenderBody()</main>
+    </div>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

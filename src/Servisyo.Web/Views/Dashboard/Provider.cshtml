@@ -1,0 +1,201 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model ProviderDashboardViewModel
+@{
+    ViewData["Title"] = "Provider Dashboard";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "dashboard";
+
+    var inv = CultureInfo.InvariantCulture;
+    var soon = "Available in an upcoming update";
+}
+
+<h1 class="sv-dash__title">Welcome back, @Model.Shell.FirstName</h1>
+<p class="sv-dash__sub">@(Model.BusinessName + (string.IsNullOrWhiteSpace(Model.City) ? "" : " · " + Model.City))</p>
+
+<!-- Key numbers -->
+<div class="sv-metrics">
+    <div class="sv-metric">
+        <div class="sv-metric__value">@Model.NewRequests</div>
+        <div class="sv-metric__title">New Requests</div>
+        <div class="sv-metric__sub">awaiting your response</div>
+    </div>
+    <div class="sv-metric">
+        <div class="sv-metric__value">@Model.Upcoming</div>
+        <div class="sv-metric__title">Upcoming</div>
+        <div class="sv-metric__sub">accepted, not started</div>
+    </div>
+    <div class="sv-metric">
+        <div class="sv-metric__value">@Model.InProgress</div>
+        <div class="sv-metric__title">In Progress</div>
+        <div class="sv-metric__sub">currently active</div>
+    </div>
+    <div class="sv-metric">
+        <div class="sv-metric__value">@(Model.AvgRating is decimal r ? r.ToString("0.0", inv) : "—")</div>
+        <div class="sv-metric__title">Avg Rating</div>
+        <div class="sv-metric__sub">@(Model.ReviewCount == 0 ? "no reviews yet" : Model.ReviewCount + (Model.ReviewCount == 1 ? " review" : " reviews"))</div>
+    </div>
+</div>
+
+<!-- Need your attention -->
+<section class="sv-panel sv-attn" aria-labelledby="attn-title">
+    <div class="sv-panel__head sv-panel__head--soft">
+        <h2 id="attn-title" class="sv-panel__title sv-attn__title">
+            <span class="sv-attn__icon">@Icons.Svg("alert", 14)</span>
+            Need Your Attention
+            @if (Model.Attention.Count > 0) { <span class="sv-attn__count">@Model.Attention.Count</span> }
+        </h2>
+    </div>
+    @if (Model.Attention.Count == 0)
+    {
+        <p class="sv-panel__empty">You're all caught up. New requests and jobs that need action will show up here.</p>
+    }
+    else
+    {
+        <ul class="sv-list">
+            @foreach (var a in Model.Attention)
+            {
+                <li class="sv-attn__row">
+                    <span class="sv-attn__text"><span class="sv-dot sv-dot--@a.Tone" aria-hidden="true"></span>@a.Text</span>
+                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">@a.ActionLabel</button>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+<div class="sv-dash__grid">
+    <!-- Recent booking requests -->
+    <section class="sv-panel" aria-labelledby="req-title">
+        <div class="sv-panel__head sv-panel__head--soft">
+            <h2 id="req-title" class="sv-panel__title">Recent Booking Requests</h2>
+            <span class="sv-link-muted" title="@soon">View All @Icons.Svg("arrow-right", 12)</span>
+        </div>
+        @if (Model.RecentRequests.Count == 0)
+        {
+            <p class="sv-panel__empty">No booking requests yet. Once customers book your services, they will appear here.</p>
+        }
+        else
+        {
+            <ul class="sv-list">
+                @foreach (var j in Model.RecentRequests)
+                {
+                    <li class="sv-job">
+                        <div class="sv-job__top">
+                            <div class="sv-job__title">@j.Title</div>
+                            <span class="sv-tag sv-tag--@j.Display.Tone">@j.Display.Badge</span>
+                        </div>
+                        <div class="sv-job__meta">
+                            <span>@Icons.Svg("user", 12) @j.CustomerName</span>
+                            <span>@Icons.Svg("calendar", 12) @j.Date.ToString("MMM d, yyyy", inv) • @j.Time.ToString("h:mm tt", inv)</span>
+                            @if (!string.IsNullOrEmpty(j.Location))
+                            {
+                                <span>@Icons.Svg("map-pin", 12) @j.Location</span>
+                            }
+                        </div>
+                        <div class="sv-job__foot">
+                            <span class="sv-link-muted" title="@soon">View booking details @Icons.Svg("arrow-right", 11)</span>
+                            @if (j.Display.ActionLabel is not null)
+                            {
+                                <button type="button" class="sv-btn sv-btn--primary sv-btn--xs" disabled title="@soon">@j.Display.ActionLabel</button>
+                            }
+                            else if (j.Display.SideText is not null)
+                            {
+                                <span class="sv-job__side">@j.Display.SideText</span>
+                            }
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <div class="sv-dash__side">
+        <!-- Today's schedule -->
+        <section class="sv-panel" aria-labelledby="sched-title">
+            <div class="sv-panel__head">
+                <h2 id="sched-title" class="sv-panel__title sv-attn__title">
+                    <span class="sv-sched__icon">@Icons.Svg("clock", 12)</span> Today's Schedule
+                </h2>
+                <span class="sv-link-muted" title="@soon">View @Icons.Svg("arrow-right", 12)</span>
+            </div>
+            @if (Model.Today.Count == 0)
+            {
+                <p class="sv-panel__empty">No jobs scheduled for today.</p>
+            }
+            else
+            {
+                <ul class="sv-list">
+                    @foreach (var s in Model.Today)
+                    {
+                        <li class="sv-sched @(s.Status == "In Progress" ? "is-active" : "")">
+                            <span class="sv-sched__time">@s.Time.ToString("h:mm tt", inv)</span>
+                            <div class="sv-sched__body">
+                                <div class="sv-sched__title">@s.Title</div>
+                                <div class="sv-sched__who">@s.CustomerName</div>
+                                @if (s.Status == "In Progress") { <span class="sv-tag sv-tag--progress">In Progress</span> }
+                            </div>
+                        </li>
+                    }
+                </ul>
+            }
+            <div class="sv-sched__foot">
+                <span><span class="sv-dot sv-dot--success sv-dot--sm" aria-hidden="true"></span> @Model.AvailabilityText</span>
+                <span class="sv-link-muted" title="@soon">Manage @Icons.Svg("arrow-right", 12)</span>
+            </div>
+        </section>
+
+        <!-- Profile strength -->
+        <section class="sv-panel sv-strength" aria-labelledby="strength-title">
+            <div class="sv-strength__head">
+                <h2 id="strength-title" class="sv-panel__title">Profile Strength</h2>
+                <strong class="sv-strength__pct">@Model.ProfilePercent%</strong>
+            </div>
+            <div class="sv-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Model.ProfilePercent" aria-labelledby="strength-title">
+                <span style="width:@(Model.ProfilePercent)%"></span>
+            </div>
+            <p class="sv-strength__hint">
+                @(Model.ProfileNextStep is null ? "Your profile is complete." : Model.ProfileNextStep + " to reach 100%")
+            </p>
+            @if (Model.ProfileNextStep is not null)
+            {
+                <button type="button" class="sv-btn sv-btn--soft sv-btn--block sv-btn--sm" disabled title="@soon">Complete Profile</button>
+            }
+        </section>
+
+        <!-- Recent reviews -->
+        <section class="sv-panel" aria-labelledby="rev-title">
+            <div class="sv-panel__head">
+                <h2 id="rev-title" class="sv-panel__title">Recent Reviews</h2>
+                <span class="sv-link-muted" title="@soon">View all @Icons.Svg("arrow-right", 12)</span>
+            </div>
+            @if (Model.Reviews.Count == 0)
+            {
+                <p class="sv-panel__empty">No reviews yet. Completed jobs can be reviewed by your customers.</p>
+            }
+            else
+            {
+                <ul class="sv-list">
+                    @foreach (var rv in Model.Reviews)
+                    {
+                        <li class="sv-review">
+                            <div class="sv-review__rating">
+                                <span class="sv-stars" aria-hidden="true">
+                                    @for (var n = 1; n <= 5; n++)
+                                    {
+                                        <span class="@(n <= rv.Rating ? "is-on" : "")">@Icons.Svg("star", 14, filled: true)</span>
+                                    }
+                                </span>
+                                <strong>@rv.Rating.ToString("0.0", inv)</strong>
+                            </div>
+                            @if (!string.IsNullOrEmpty(rv.Comment)) { <p class="sv-review__text">@rv.Comment</p> }
+                            <div class="sv-review__by">@rv.Author · @rv.Date.ToString("MMM d, yyyy", inv)</div>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    </div>
+</div>

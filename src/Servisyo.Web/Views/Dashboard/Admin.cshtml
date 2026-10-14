@@ -1,0 +1,136 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model AdminDashboardViewModel
+@{
+    ViewData["Title"] = "Admin Dashboard";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "dashboard";
+
+    // Buttons for screens that are built in later stages stay visible but greyed out.
+    var soon = "Available in an upcoming update";
+}
+
+<p class="sv-eyebrow">Overview</p>
+<h1 class="sv-dash__title">Admin Dashboard</h1>
+<p class="sv-dash__sub">Platform-wide overview. Manage users, providers, bookings, and reviews.</p>
+
+<!-- Needs admin attention: only rows that are really waiting -->
+<section class="sv-panel sv-attn" aria-labelledby="attn-title">
+    <div class="sv-panel__head sv-panel__head--soft">
+        <h2 id="attn-title" class="sv-panel__title">Needs Admin Attention</h2>
+    </div>
+    @if (Model.Attention.Count == 0)
+    {
+        <p class="sv-panel__empty">All clear. Applications, flagged reviews, suspended accounts and reported issues that need you will show up here.</p>
+    }
+    else
+    {
+        <ul class="sv-list">
+            @foreach (var a in Model.Attention)
+            {
+                <li class="sv-attn__row">
+                    <span class="sv-attn__text">
+                        <span class="sv-attn__mark" aria-hidden="true">
+                            @if (a.Tone == "alert")
+                            {
+                                <span class="sv-attn__icon">@Icons.Svg("alert", 16)</span>
+                            }
+                            else
+                            {
+                                <span class="sv-dot sv-dot--@a.Tone"></span>
+                            }
+                        </span>
+                        @a.Text
+                    </span>
+                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">@a.ActionLabel</button>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+<!-- Key numbers -->
+<div class="sv-metrics">
+    <div class="sv-metric">
+        <div class="sv-metric__value sv-metric__value--ink">@Model.TotalUsers</div>
+        <div class="sv-metric__title">Total Users</div>
+        <div class="sv-metric__sub">@Plural.Of(Model.Customers, "customer"), @Plural.Of(Model.Providers, "provider")</div>
+    </div>
+    <div class="sv-metric">
+        <div class="sv-metric__value">@Model.PendingApprovals</div>
+        <div class="sv-metric__title">Pending Approvals</div>
+        <div class="sv-metric__sub">@(Model.PendingApprovals == 1 ? "provider application" : "provider applications")</div>
+    </div>
+    <div class="sv-metric">
+        <div class="sv-metric__value sv-metric__value--ink">@Model.TotalBookings</div>
+        <div class="sv-metric__title">Total Bookings</div>
+        <div class="sv-metric__sub">across all statuses</div>
+    </div>
+    <div class="sv-metric">
+        <div class="sv-metric__value sv-metric__value--amber">@Model.FlaggedReviews</div>
+        <div class="sv-metric__title">Flagged Reviews</div>
+        <div class="sv-metric__sub">@(Model.FlaggedReviews == 1 ? "needs moderation" : "need moderation")</div>
+    </div>
+</div>
+
+<div class="sv-dash__grid">
+    <!-- Recent bookings -->
+    <section class="sv-panel" aria-labelledby="bk-title">
+        <div class="sv-panel__head">
+            <h2 id="bk-title" class="sv-panel__title">Recent Bookings</h2>
+            <span class="sv-link-muted" title="@soon">View all @Icons.Svg("arrow-right", 12)</span>
+        </div>
+        @if (Model.RecentBookings.Count == 0)
+        {
+            <p class="sv-panel__empty">No bookings yet. Bookings made on the platform will appear here.</p>
+        }
+        else
+        {
+            <ul class="sv-list">
+                @foreach (var b in Model.RecentBookings)
+                {
+                    <li class="sv-list__item">
+                        <div>
+                            <div class="sv-list__title">@b.Title</div>
+                            <div class="sv-list__meta">@b.CustomerName → @b.ProviderName</div>
+                        </div>
+                        <span class="sv-tag sv-tag--@b.Display.Tone">@b.Display.Badge</span>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <!-- Pending applications -->
+    <section class="sv-panel" aria-labelledby="app-title">
+        <div class="sv-panel__head">
+            <h2 id="app-title" class="sv-panel__title">Pending Applications</h2>
+            <span class="sv-link-muted" title="@soon">View all @Icons.Svg("arrow-right", 12)</span>
+        </div>
+        @if (Model.PendingApplications.Count == 0)
+        {
+            <p class="sv-panel__empty">No applications waiting. New provider sign-ups will appear here.</p>
+        }
+        else
+        {
+            <ul class="sv-list">
+                @foreach (var p in Model.PendingApplications)
+                {
+                    <li class="sv-app">
+                        <div class="sv-app__who">
+                            <span class="sv-avatar sv-avatar--ink" aria-hidden="true">@p.Initials</span>
+                            <div>
+                                <div class="sv-app__name">@p.Name</div>
+                                <div class="sv-app__meta">@p.Details</div>
+                            </div>
+                        </div>
+                        <button type="button" class="sv-btn sv-btn--outline sv-btn--xs sv-app__btn" disabled title="@soon">
+                            Review Applications @Icons.Svg("arrow-right", 12)
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>

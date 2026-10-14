@@ -24,24 +24,24 @@ public class AccountController : Controller
     public IActionResult Register()
     {
         if (User.Identity?.IsAuthenticated == true) return RedirectToAction("Index", "Home");
-        return View(new RegisterCustomerViewModel());
+        return View(new CustomerRegistrationViewModel());
     }
 
     [HttpPost]
-    public async Task<IActionResult> Register(RegisterCustomerViewModel vm)
+    public async Task<IActionResult> Register(CustomerRegistrationViewModel form)
     {
-        if (!ModelState.IsValid) return View(vm);
+        if (!ModelState.IsValid) return View(form);
 
-        var result = await _auth.RegisterCustomerAsync(vm);
+        var result = await _auth.RegisterCustomerAsync(form.ToServiceModel());
         if (!result.Succeeded)
         {
-            ModelState.AddModelError(nameof(vm.Email), result.Error!);
-            return View(vm);
+            ModelState.AddModelError(nameof(form.Email), result.Error!);
+            return View(form);
         }
 
         _logger.LogInformation("Customer registered. UserId={UserId}", result.User!.UserId);
-        await SignInUserAsync(result.User!);
-        return RedirectToAction("Index", "Home");
+        await SignInUserAsync(result.User!, rememberMe: false);
+        return RedirectAfterSignIn(result.User!);
     }
 
     // ---------- Provider registration ----------
@@ -65,7 +65,7 @@ public class AccountController : Controller
         }
 
         _logger.LogInformation("Provider applied. UserId={UserId}", result.User!.UserId);
-        await SignInUserAsync(result.User!);
+        await SignInUserAsync(result.User!, rememberMe: false);
         return RedirectToAction(nameof(PendingApproval));
     }
 
@@ -92,16 +92,17 @@ public class AccountController : Controller
         {
             _logger.LogWarning("Failed sign-in attempt.");
             ModelState.AddModelError(string.Empty, result.Error!);
+            vm.Password = string.Empty;
             return View(vm);
         }
 
-        await SignInUserAsync(result.User!);
+        await SignInUserAsync(result.User!, vm.RememberMe);
         _logger.LogInformation("User signed in. UserId={UserId}", result.User!.UserId);
 
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             return LocalRedirect(returnUrl);
 
-        return RedirectToAction("Index", "Home");
+        return RedirectAfterSignIn(result.User!);
     }
 
     [HttpPost]
@@ -112,11 +113,23 @@ public class AccountController : Controller
         return RedirectToAction("Index", "Home");
     }
 
+    // Password reset is not built yet; this page says so honestly instead of a dead link.
+    [HttpGet]
+    public IActionResult ForgotPassword() => View();
+
     [HttpGet]
     public IActionResult AccessDenied() => View();
 
-    // ---------- helper ----------
-    private async Task SignInUserAsync(Servisyo.Web.Models.User user)
+    // ---------- helpers ----------
+    private IActionResult RedirectAfterSignIn(Servisyo.Web.Models.User user) => user.Role switch
+    {
+        Servisyo.Web.Models.Roles.Customer => RedirectToAction("Customer", "Dashboard"),
+        Servisyo.Web.Models.Roles.ServiceProvider => RedirectToAction("Provider", "Dashboard"),
+        Servisyo.Web.Models.Roles.Administrator => RedirectToAction("Admin", "Dashboard"),
+        _ => RedirectToAction("Index", "Home")
+    };
+
+    private async Task SignInUserAsync(Servisyo.Web.Models.User user, bool rememberMe)
     {
         var claims = new List<Claim>
         {
@@ -126,9 +139,12 @@ public class AccountController : Controller
             new(ClaimTypes.Role, user.Role)
         };
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var props = new AuthenticationProperties { IsPersistent = rememberMe };
+        if (rememberMe) props.ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30);
+
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             new ClaimsPrincipal(identity),
-            new AuthenticationProperties { IsPersistent = false });
+            props);
     }
 }
