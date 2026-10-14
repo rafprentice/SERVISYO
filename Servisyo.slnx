@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Servisyo.Web/Servisyo.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Servisyo.Tests/Servisyo.Tests.csproj" />
+  </Folder>
+</Solution>
