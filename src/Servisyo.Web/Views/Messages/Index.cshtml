@@ -1,0 +1,165 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model MessagesPageViewModel
+@{
+    ViewData["Title"] = "Messages";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "messages";
+    ViewData["MainClass"] = "sv-portal__main--chat";      // the chat fills the whole area, edge to edge
+
+    var selected = Model.Selected;
+}
+
+<div class="sv-ms"
+     data-ms
+     data-poll-url="@Url.Action("Poll", "Messages")"
+     data-partner="@(selected?.PartnerUserId)"
+     data-last-id="@Model.LastMessageId"
+     data-me-initials="@Model.Shell.Initials"
+     data-partner-initials="@(selected?.Initials)"
+     data-max-length="@MessageRules.MaxLength">
+
+    <!-- Conversation list -->
+    <aside class="sv-ms__list" aria-label="Conversations">
+        <h1 class="sv-ms__title">Messages</h1>
+        <div class="sv-ms__search">
+            <span class="sv-ms__searchicon" aria-hidden="true">@Icons.Svg("search", 14)</span>
+            <input type="search" placeholder="Search conversations..." autocomplete="off" maxlength="60"
+                   aria-label="Search conversations" data-ms-search />
+        </div>
+
+        <ul class="sv-ms__convs" data-ms-convs>
+            @foreach (var c in Model.Conversations)
+            {
+                var isOpen = selected is not null && c.PartnerUserId == selected.PartnerUserId;
+                <li data-ms-item data-partner="@c.PartnerUserId" data-search="@c.SearchText">
+                    <a class="@("sv-ms__conv" + (isOpen ? " is-active" : ""))" href="@Url.Action("Index", "Messages", new { with = c.PartnerUserId })"
+                       aria-current="@(isOpen ? "true" : null)">
+                        <span class="sv-avatar sv-avatar--lg" aria-hidden="true" data-f="initials">@c.Initials</span>
+                        <span class="sv-ms__convbody">
+                            <span class="sv-ms__convtop">
+                                <strong data-f="name">@c.Name</strong>
+                                <time data-f="time">@c.TimeText</time>
+                            </span>
+                            <span class="sv-ms__ctx" data-f="context">@c.ContextText</span>
+                            <span class="sv-ms__convbot">
+                                <span class="sv-ms__preview" data-f="preview">@c.Preview</span>
+                                <span class="sv-count" data-f="unread" hidden="@(c.Unread > 0 ? null : "hidden")"
+                                      aria-label="@c.Unread unread messages">@c.Unread</span>
+                            </span>
+                        </span>
+                    </a>
+                </li>
+            }
+        </ul>
+        <p class="sv-ms__none" data-ms-nomatch hidden>No conversations match your search.</p>
+        @if (Model.Conversations.Count == 0)
+        {
+            <p class="sv-ms__none">No conversations yet.</p>
+        }
+    </aside>
+
+    <!-- Open conversation -->
+    <section class="sv-ms__chat" aria-label="@(selected is null ? "Conversation" : "Conversation with " + selected.Name)">
+        @if (selected is null)
+        {
+            <div class="sv-ms__empty">
+                <span class="sv-empty-hero__icon" aria-hidden="true">@Icons.Svg("message", 22)</span>
+                <h2 class="sv-empty-hero__title">No conversations yet</h2>
+                <p class="sv-empty-hero__text">
+                    You can message a @Model.PartnerNoun once you share a booking. Your conversations will show up here.
+                </p>
+                @if (Model.Shell.Role == "Customer")
+                {
+                    <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="FindServices" asp-action="Index">Find a Service</a>
+                }
+            </div>
+        }
+        else
+        {
+            <header class="sv-ms__head">
+                <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@selected.Initials</span>
+                <div class="sv-ms__who">
+                    <h2 class="sv-ms__name">@selected.Name</h2>
+                    <p class="sv-ms__sub" data-ms-context>@selected.ContextText</p>
+                </div>
+                <span class="@("sv-tag sv-tag--" + selected.StatusTone)" data-ms-status>@selected.StatusText</span>
+            </header>
+
+            @if (!string.IsNullOrEmpty(Model.FlashMessage))
+            {
+                <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok") sv-ms__flash" role="status">@Model.FlashMessage</div>
+            }
+
+            <div class="sv-ms__stream" data-ms-stream role="log" aria-live="polite" aria-label="Messages">
+                @if (Model.Messages.Count == 0)
+                {
+                    <p class="sv-ms__hello" data-ms-hello>No messages yet. Say hello to @(selected.Name.Split(' ')[0])!</p>
+                }
+                @foreach (var m in Model.Messages)
+                {
+                    <div class="@("sv-ms__row" + (m.Mine ? " sv-ms__row--mine" : ""))" data-mid="@m.Id">
+                        <span class="sv-avatar sv-avatar--soft" aria-hidden="true">@(m.Mine ? Model.Shell.Initials : selected.Initials)</span>
+                        <div class="sv-ms__col">
+                            <div class="sv-ms__bubble">@m.Text</div>
+                            <time>@m.TimeText</time>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <form class="sv-ms__composer" method="post" asp-controller="Messages" asp-action="Send" asp-route-partnerId="@selected.PartnerUserId" data-ms-form>
+                <p class="sv-ms__error" role="alert" data-ms-error hidden></p>
+                @if (selected.CanSend)
+                {
+                    <div class="sv-ms__composerrow">
+                        <button type="button" class="sv-ms__attach" disabled title="Attachments are coming in a later update" aria-label="Attach a file (coming soon)">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        </button>
+                        <textarea name="Text" rows="1" maxlength="@MessageRules.MaxLength" placeholder="Type a message..."
+                                  aria-label="Message to @selected.Name" data-ms-input></textarea>
+                        <button type="submit" class="sv-ms__send" aria-label="Send message" data-ms-send>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>
+                        </button>
+                    </div>
+                    <p class="sv-ms__hint">Press Enter to send · Shift+Enter for a new line</p>
+                }
+                else
+                {
+                    <p class="sv-ms__hint sv-ms__hint--off">This account can't receive messages right now, so you can't send a new one. The conversation stays here to read.</p>
+                }
+            </form>
+        }
+    </section>
+
+    <!-- Pieces the script copies when something new arrives -->
+    <template data-ms-tpl-msg>
+        <div class="sv-ms__row" data-mid="">
+            <span class="sv-avatar sv-avatar--soft" aria-hidden="true" data-f="avatar"></span>
+            <div class="sv-ms__col">
+                <div class="sv-ms__bubble" data-f="text"></div>
+                <time data-f="time"></time>
+            </div>
+        </div>
+    </template>
+    <template data-ms-tpl-conv>
+        <li data-ms-item data-partner="" data-search="">
+            <a class="sv-ms__conv" href="">
+                <span class="sv-avatar sv-avatar--lg" aria-hidden="true" data-f="initials"></span>
+                <span class="sv-ms__convbody">
+                    <span class="sv-ms__convtop"><strong data-f="name"></strong><time data-f="time"></time></span>
+                    <span class="sv-ms__ctx" data-f="context"></span>
+                    <span class="sv-ms__convbot">
+                        <span class="sv-ms__preview" data-f="preview"></span>
+                        <span class="sv-count" data-f="unread" hidden></span>
+                    </span>
+                </span>
+            </a>
+        </li>
+    </template>
+</div>
+
+@section Scripts {
+    <script src="~/js/messages.js" asp-append-version="true"></script>
+}

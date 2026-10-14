@@ -1,0 +1,127 @@
+@using Servisyo.Web.Models
+@using Servisyo.Web.ViewModels
+@model ProviderApplicationViewModel
+@{
+    // Where "Close" / "Cancel" goes when JavaScript is not opening this as a dialog.
+    var closeUrl = Model.ReturnTo == ApplicationReturn.Providers
+        ? Url.Action("Index", "AdminProviders", new { status = Model.ReturnStatus == ProviderStatuses.All ? null : Model.ReturnStatus, page = Model.ReturnPage })
+        : Url.Action("Admin", "Dashboard");
+}
+<div class="sv-rv" data-sv-review>
+    <div class="sv-rv__head">
+        <div>
+            <h2 class="sv-rv__title" id="sv-rv-title">Review Provider Application</h2>
+            <p class="sv-rv__id">Applicant ID: <strong>#@Model.ApplicantNumber</strong></p>
+        </div>
+        <a class="sv-rv__x" href="@closeUrl" data-sv-close aria-label="Close">&times;</a>
+    </div>
+
+    <dl class="sv-rv__grid">
+        <div class="sv-rv__row">
+            <dt>Name</dt>
+            <dd>@Model.Name</dd>
+        </div>
+        <div class="sv-rv__row">
+            <dt>Business Name</dt>
+            <dd>@Model.BusinessName</dd>
+        </div>
+        <div class="sv-rv__row">
+            <dt>Location</dt>
+            <dd>
+                @if (Model.Location is null)
+                {
+                    <span class="sv-rv__none">Not provided</span>
+                }
+                else
+                {
+                    <span>@Model.Location</span>
+                }
+            </dd>
+        </div>
+        <div class="sv-rv__row">
+            <dt>Services Offered</dt>
+            <dd>
+                @if (Model.Services.Count > 0)
+                {
+                    <span class="sv-rv__chips">
+                        @foreach (var s in Model.Services)
+                        {
+                            <span class="sv-chip">@s</span>
+                        }
+                    </span>
+                }
+                else
+                {
+                    <span class="sv-rv__none">None listed yet</span>
+                }
+            </dd>
+        </div>
+        @if (Model.Description is not null)
+        {
+            <div class="sv-rv__row">
+                <dt>About the Business</dt>
+                <dd class="sv-rv__text">@Model.Description</dd>
+            </div>
+        }
+        @if (Model.BaseFee is not null)
+        {
+            <div class="sv-rv__row">
+                <dt>Starting Fee</dt>
+                <dd>@Model.BaseFeeText</dd>
+            </div>
+        }
+        <div class="sv-rv__row">
+            <dt>Contact Email</dt>
+            <dd>@Model.Email</dd>
+        </div>
+        @if (Model.Phone is not null)
+        {
+            <div class="sv-rv__row">
+                <dt>Phone</dt>
+                <dd>@Model.Phone</dd>
+            </div>
+        }
+        <div class="sv-rv__row">
+            <dt>Applied On</dt>
+            <dd>@Model.AppliedText</dd>
+        </div>
+        <div class="sv-rv__row">
+            <dt>Submitted Documents</dt>
+            <dd><span class="sv-rv__none">No documents are collected at sign-up in this version.</span></dd>
+        </div>
+    </dl>
+
+    @if (Model.AccountStatus != AccountStatuses.Active)
+    {
+        <p class="sv-rv__warn">This provider's account is currently <strong>@Model.AccountStatus</strong>.</p>
+    }
+
+    @if (Model.CanDecide)
+    {
+        <form asp-controller="AdminApplications" asp-action="Decide" asp-route-providerId="@Model.ProviderId"
+              method="post" class="sv-rv__form" data-sv-decision-form>
+            <input type="hidden" name="ReturnTo" value="@Model.ReturnTo" />
+            <input type="hidden" name="ReturnStatus" value="@Model.ReturnStatus" />
+            <input type="hidden" name="ReturnPage" value="@Model.ReturnPage" />
+
+            <div class="sv-rv__note">
+                <label for="sv-rv-reason">Note <span>(optional)</span></label>
+                <textarea id="sv-rv-reason" name="Reason" rows="2" maxlength="255"
+                          placeholder="Saved in the admin activity log. The applicant does not see it."></textarea>
+            </div>
+
+            <div class="sv-rv__foot">
+                <button type="submit" name="Decision" value="Reject" class="sv-btn sv-btn--sm sv-btn--danger-outline"
+                        data-confirm="Reject @(Model.Name)'s application? This cannot be undone from this screen.">Reject Application</button>
+                <button type="submit" name="Decision" value="Approve" class="sv-btn sv-btn--sm sv-btn--primary">Approve &amp; Activate Provider</button>
+            </div>
+        </form>
+    }
+    else
+    {
+        <div class="sv-rv__decided">
+            <p>This application has already been <strong>@Model.ApprovalStatus.ToLowerInvariant()</strong>. No further action is needed.</p>
+            <a class="sv-btn sv-btn--sm sv-btn--outline" href="@closeUrl" data-sv-close>Close</a>
+        </div>
+    }
+</div>

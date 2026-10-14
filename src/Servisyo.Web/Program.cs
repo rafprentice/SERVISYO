@@ -18,11 +18,21 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IHomePageService, HomePageService>();
 builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();
+builder.Services.AddScoped<IFindServicesService, FindServicesService>();
+builder.Services.AddScoped<ICustomerBookingsService, CustomerBookingsService>();
+builder.Services.AddScoped<IMessagingService, MessagingService>();
 builder.Services.AddScoped<IProviderDashboardService, ProviderDashboardService>();
 builder.Services.AddScoped<IAdminDashboardService, AdminDashboardService>();
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 builder.Services.AddScoped<IProviderManagementService, ProviderManagementService>();
 builder.Services.AddScoped<IBookingMonitorService, BookingMonitorService>();
+builder.Services.AddScoped<ICategoryManagementService, CategoryManagementService>();
+builder.Services.AddScoped<IReviewModerationService, ReviewModerationService>();
+builder.Services.AddScoped<IProviderAvailabilityService, ProviderAvailabilityService>();
+builder.Services.AddScoped<IProviderApprovalService, ProviderApprovalService>();
+builder.Services.AddScoped<IProviderOfferingsService, ProviderOfferingsService>();
+builder.Services.AddScoped<IProviderBookingsService, ProviderBookingsService>();
+builder.Services.AddScoped<IProviderProfileService, ProviderProfileService>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {

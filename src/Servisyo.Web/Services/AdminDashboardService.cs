@@ -95,7 +95,8 @@ public class AdminDashboardService : IAdminDashboardService
             PendingApprovals = pending,
             TotalBookings = totalBookings,
             FlaggedReviews = flagged,
-            Attention = AdminAttention.Build(pending, flagged, suspended, openReports),
+            Attention = AdminAttention.Build(pending, flagged, suspended, openReports,
+                firstPendingProviderId: applicationRows.Select(a => (int?)a.ProviderId).FirstOrDefault()),
             RecentBookings = bookingRows.Select(r => new AdminBookingRowViewModel
             {
                 BookingId = r.BookingId,

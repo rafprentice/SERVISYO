@@ -1,0 +1,175 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model ProviderProfilePageViewModel
+@{
+    ViewData["Title"] = "My Profile";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "profile";
+
+    var inv = CultureInfo.InvariantCulture;
+    var form = Model.Form;
+
+    // the problem text for each box (null = no problem)
+    var nameError = Model.ErrorFor("FullName");
+    var businessError = Model.ErrorFor("BusinessName");
+    var phoneError = Model.ErrorFor("PhoneNumber");
+    var emailError = Model.ErrorFor("Email");
+    var cityError = Model.ErrorFor("City");
+    var addressError = Model.ErrorFor("Address");
+    var bioError = Model.ErrorFor("Description");
+}
+
+<div class="sv-pf">
+    <p class="sv-eyebrow">My Profile</p>
+    <h1 class="sv-dash__title">Provider Profile</h1>
+    <p class="sv-dash__sub">Manage your public profile and business information.</p>
+
+    @if (!string.IsNullOrEmpty(Model.FlashMessage))
+    {
+        <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+    }
+
+    <!-- Profile header + strength -->
+    <section class="sv-panel sv-pf__head" aria-label="Profile summary">
+        <div class="sv-pf__avatarwrap">
+            <span class="sv-avatar sv-avatar--ink sv-pf__avatar" aria-hidden="true">@Model.Initials</span>
+            <button type="button" class="sv-pf__edit" disabled title="Photo upload is coming in a later update" aria-label="Change profile photo (coming soon)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+            </button>
+        </div>
+        <div class="sv-pf__who">
+            <div class="sv-pf__name">@Model.FullName</div>
+            <div class="sv-pf__biz">@Model.HeaderLine</div>
+            <div class="sv-pf__strength">
+                <div class="sv-pf__strengthrow">
+                    <span id="pf-strength-label">Profile Strength</span>
+                    <strong>@Model.StrengthPercent%</strong>
+                </div>
+                <div class="sv-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Model.StrengthPercent" aria-labelledby="pf-strength-label">
+                    <span style="width:@(Model.StrengthPercent)%"></span>
+                </div>
+                <p class="sv-pf__hint">@Model.StrengthHint</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Business information -->
+    <section class="sv-panel sv-pf__card" aria-labelledby="pf-info-title">
+        <h2 id="pf-info-title" class="sv-pf__title">Business Information</h2>
+
+        <form method="post" asp-controller="ProviderProfile" asp-action="Save" class="sv-pf__form" data-sv-once>
+            @if (!string.IsNullOrEmpty(Model.FormError))
+            {
+                <p class="sv-formerr" role="alert">@Model.FormError</p>
+            }
+
+            <div class="sv-fld">
+                <label for="pf-name">Full Name</label>
+                <input id="pf-name" name="FullName" type="text" value="@form.FullName" required maxlength="155" autocomplete="name"
+                       aria-invalid="@(nameError is null ? null : "true")" />
+                @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-business">Business Name</label>
+                <input id="pf-business" name="BusinessName" type="text" value="@form.BusinessName" required maxlength="155" autocomplete="organization"
+                       aria-invalid="@(businessError is null ? null : "true")" />
+                @if (businessError is not null) { <p class="sv-fld__err" role="alert">@businessError</p> }
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-phone">Phone Number</label>
+                <input id="pf-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="20" autocomplete="tel" placeholder="e.g. +63 917 555 1234"
+                       aria-invalid="@(phoneError is null ? null : "true")" />
+                @if (phoneError is not null) { <p class="sv-fld__err" role="alert">@phoneError</p> }
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-email">Email Address</label>
+                <input id="pf-email" name="Email" type="email" value="@form.Email" required maxlength="155" autocomplete="email"
+                       aria-invalid="@(emailError is null ? null : "true")" />
+                @if (emailError is not null) { <p class="sv-fld__err" role="alert">@emailError</p> }
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-city">City / Location</label>
+                <input id="pf-city" name="City" type="text" value="@form.City" maxlength="50" autocomplete="address-level2" placeholder="e.g. Cebu City"
+                       aria-invalid="@(cityError is null ? null : "true")" />
+                @if (cityError is not null) { <p class="sv-fld__err" role="alert">@cityError</p> }
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-address">Address <span class="sv-fld__opt">(optional)</span></label>
+                <input id="pf-address" name="Address" type="text" value="@form.Address" maxlength="255" autocomplete="street-address" placeholder="Street, barangay"
+                       aria-invalid="@(addressError is null ? null : "true")" />
+                @if (addressError is not null) { <p class="sv-fld__err" role="alert">@addressError</p> }
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-bio">About / Bio <span class="sv-fld__opt">(up to 255 characters)</span></label>
+                <textarea id="pf-bio" name="Description" rows="3" maxlength="255"
+                          aria-invalid="@(bioError is null ? null : "true")">@form.Description</textarea>
+                @if (bioError is not null) { <p class="sv-fld__err" role="alert">@bioError</p> }
+            </div>
+
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm">Save Changes</button>
+        </form>
+    </section>
+
+    <!-- Services offered -->
+    <section class="sv-panel sv-pf__card" aria-labelledby="pf-svc-title">
+        <h2 id="pf-svc-title" class="sv-pf__title">Services Offered</h2>
+        @if (Model.ServiceNames.Count == 0)
+        {
+            <p class="sv-pf__empty">You have no active services yet. <a asp-controller="ProviderServices" asp-action="Index">Add a service</a> so customers can find and book you.</p>
+        }
+        else
+        {
+            <ul class="sv-pf__pills">
+                @foreach (var name in Model.ServiceNames)
+                {
+                    <li class="sv-pf__pill">@name</li>
+                }
+            </ul>
+        }
+    </section>
+
+    <!-- Reviews -->
+    <section class="sv-panel sv-pf__card" aria-labelledby="pf-rev-title">
+        <h2 id="pf-rev-title" class="sv-pf__title">Reviews</h2>
+        @if (Model.Reviews.Count == 0)
+        {
+            <p class="sv-pf__empty">No reviews yet. Completed jobs can be reviewed by your customers.</p>
+        }
+        else
+        {
+            <ul class="sv-pf__reviews">
+                @foreach (var rv in Model.Reviews)
+                {
+                    <li class="sv-pf__review">
+                        <div class="sv-pf__rate">
+                            <span class="sv-stars" role="img" aria-label="Rated @rv.Rating out of 5">
+                                @for (var n = 1; n <= 5; n++)
+                                {
+                                    <span class="@(n <= rv.Rating ? "is-on" : "")">@Icons.Svg("star", 14, filled: true)</span>
+                                }
+                            </span>
+                            <strong>@rv.Rating.ToString("0.0", inv)</strong>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(rv.Comment))
+                        {
+                            <p class="sv-pf__quote">@rv.Comment</p>
+                        }
+                        <div class="sv-pf__by">@rv.Author · @rv.Date.ToString("MMM d, yyyy", inv)</div>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>
+
+@section Scripts {
+    <script src="~/js/provider-profile.js" asp-append-version="true"></script>
+}

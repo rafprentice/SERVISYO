@@ -24,6 +24,8 @@
     string? StatusParam() => Model.Status == "All" ? null : Model.Status;
 }
 
+<partial name="_AdminToast" />
+
 <p class="sv-eyebrow">Management</p>
 <h1 class="sv-dash__title">Service Providers</h1>
 <p class="sv-dash__sub">Review applications and manage approved providers.</p>
@@ -109,7 +111,15 @@ else
                             <span class="sv-tag sv-tag--@b.Tone">@b.Text</span>
                         }
                     </div>
-                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">View Details</button>
+                    @if (c.ApprovalStatus == "Pending")
+                    {
+                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                           href="@Url.Action("Review", "AdminApplications", new { providerId = c.ProviderId, returnTo = "providers", status = StatusParam(), page = Model.Page })">Review Application</a>
+                    }
+                    else
+                    {
+                        <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">View Details</button>
+                    }
                 </div>
             </article>
         }
@@ -132,4 +142,10 @@ else
             }
         </span>
     </nav>
+}
+
+<partial name="_ApplicationReviewDialog" />
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
 }

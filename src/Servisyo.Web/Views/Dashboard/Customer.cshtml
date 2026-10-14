@@ -36,7 +36,7 @@
         <div class="sv-empty-hero__icon">@Icons.Svg("bag", 22)</div>
         <h2 id="empty-title" class="sv-empty-hero__title">Need help at home?</h2>
         <p class="sv-empty-hero__text">Find trusted plumbing, cleaning, and repair professionals near you.</p>
-        <a class="sv-btn sv-btn--primary" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Service</a>
+        <a class="sv-btn sv-btn--primary" asp-controller="FindServices" asp-action="Index">Find a Service</a>
     </section>
 }
 else
@@ -105,7 +105,7 @@ else
                             @info.ActionLabel
                         </button>
                     }
-                    <span class="sv-link-muted" title="Available in an upcoming update">View booking details @Icons.Svg("arrow-right", 12)</span>
+                    <a class="sv-link-muted sv-link-muted--live" asp-controller="CustomerBookings" asp-action="Index" asp-fragment="@("booking-" + cur.BookingId)">View booking details @Icons.Svg("arrow-right", 12)</a>
                 </div>
             </div>
         </div>
@@ -116,7 +116,7 @@ else
     <section class="sv-panel" aria-labelledby="recent-title">
         <div class="sv-panel__head">
             <h2 id="recent-title" class="sv-panel__title">Recent Bookings</h2>
-            <span class="sv-link-muted" title="Available in an upcoming update">View all @Icons.Svg("arrow-right", 12)</span>
+            <a class="sv-link-muted sv-link-muted--live" asp-controller="CustomerBookings" asp-action="Index">View all @Icons.Svg("arrow-right", 12)</a>
         </div>
         @if (Model.Recent.Count == 0)
         {
@@ -150,7 +150,7 @@ else
         <section class="sv-cta-dark">
             <h2 class="sv-cta-dark__title">Need a service?</h2>
             <p>Find trusted plumbing, cleaning, and repair professionals near you.</p>
-            <a class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Service</a>
+            <a class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm" asp-controller="FindServices" asp-action="Index">Find a Service</a>
         </section>
 
         <section class="sv-panel" aria-labelledby="rec-title">

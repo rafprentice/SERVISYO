@@ -10,6 +10,17 @@
 
     var inv = CultureInfo.InvariantCulture;
     var soon = "Available in an upcoming update";
+
+    // Links to the Booking Requests page. The tab key (pending, accepted, in-progress, ...) comes from the status or
+    // from the button label these two services already produce; an unknown one simply opens the "All" tab.
+    string? TabForStatus(string status) => ProviderBookingTab.All.FirstOrDefault(t => t.Status != null && t.Status == status)?.Key;
+    string? TabForLabel(string label) => label switch
+    {
+        "Review Request" => "pending",
+        "Start Service" => "accepted",
+        "Complete Service" => "in-progress",
+        _ => null
+    };
 }
 
 <h1 class="sv-dash__title">Welcome back, @Model.Shell.FirstName</h1>
@@ -59,7 +70,7 @@
             {
                 <li class="sv-attn__row">
                     <span class="sv-attn__text"><span class="sv-dot sv-dot--@a.Tone" aria-hidden="true"></span>@a.Text</span>
-                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">@a.ActionLabel</button>
+                    <a class="sv-btn sv-btn--soft sv-btn--xs" href="@Url.Action("Index", "ProviderBookings", new { status = TabForLabel(a.ActionLabel) })">@a.ActionLabel</a>
                 </li>
             }
         </ul>
@@ -71,7 +82,7 @@
     <section class="sv-panel" aria-labelledby="req-title">
         <div class="sv-panel__head sv-panel__head--soft">
             <h2 id="req-title" class="sv-panel__title">Recent Booking Requests</h2>
-            <span class="sv-link-muted" title="@soon">View All @Icons.Svg("arrow-right", 12)</span>
+            <a class="sv-link-muted sv-link-muted--live" asp-controller="ProviderBookings" asp-action="Index">View All @Icons.Svg("arrow-right", 12)</a>
         </div>
         @if (Model.RecentRequests.Count == 0)
         {
@@ -96,10 +107,10 @@
                             }
                         </div>
                         <div class="sv-job__foot">
-                            <span class="sv-link-muted" title="@soon">View booking details @Icons.Svg("arrow-right", 11)</span>
+                            <a class="sv-link-muted sv-link-muted--live" href="@Url.Action("Index", "ProviderBookings", new { status = TabForStatus(j.Status) }, null, null, "booking-" + j.BookingId)">View booking details @Icons.Svg("arrow-right", 11)</a>
                             @if (j.Display.ActionLabel is not null)
                             {
-                                <button type="button" class="sv-btn sv-btn--primary sv-btn--xs" disabled title="@soon">@j.Display.ActionLabel</button>
+                                <a class="sv-btn sv-btn--primary sv-btn--xs" href="@Url.Action("Index", "ProviderBookings", new { status = TabForStatus(j.Status) }, null, null, "booking-" + j.BookingId)">@j.Display.ActionLabel</a>
                             }
                             else if (j.Display.SideText is not null)
                             {
@@ -119,7 +130,7 @@
                 <h2 id="sched-title" class="sv-panel__title sv-attn__title">
                     <span class="sv-sched__icon">@Icons.Svg("clock", 12)</span> Today's Schedule
                 </h2>
-                <span class="sv-link-muted" title="@soon">View @Icons.Svg("arrow-right", 12)</span>
+                <a class="sv-link-muted sv-link-muted--live" asp-controller="ProviderBookings" asp-action="Index">View @Icons.Svg("arrow-right", 12)</a>
             </div>
             @if (Model.Today.Count == 0)
             {
@@ -143,7 +154,7 @@
             }
             <div class="sv-sched__foot">
                 <span><span class="sv-dot sv-dot--success sv-dot--sm" aria-hidden="true"></span> @Model.AvailabilityText</span>
-                <span class="sv-link-muted" title="@soon">Manage @Icons.Svg("arrow-right", 12)</span>
+                <a class="sv-link-muted sv-link-muted--live" asp-controller="ProviderAvailability" asp-action="Index">Manage @Icons.Svg("arrow-right", 12)</a>
             </div>
         </section>
 
@@ -161,7 +172,7 @@
             </p>
             @if (Model.ProfileNextStep is not null)
             {
-                <button type="button" class="sv-btn sv-btn--soft sv-btn--block sv-btn--sm" disabled title="@soon">Complete Profile</button>
+                <a class="sv-btn sv-btn--soft sv-btn--block sv-btn--sm" asp-controller="ProviderProfile" asp-action="Index">Complete Profile</a>
             }
         </section>
 

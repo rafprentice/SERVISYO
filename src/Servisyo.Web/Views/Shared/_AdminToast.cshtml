@@ -1,0 +1,14 @@
+@using Servisyo.Web.Helpers
+@* A short message that appears after an action and fades away by itself. Set with TempData["Toast"] / TempData["ToastKind"]. *@
+@{
+    var message = TempData["Toast"] as string;
+    var kind = TempData["ToastKind"] as string == "error" ? "error" : "ok";
+}
+@if (!string.IsNullOrEmpty(message))
+{
+    <div class="sv-toast sv-toast--@kind" role="status" aria-live="polite" data-sv-toast>
+        <span class="sv-toast__icon" aria-hidden="true">@(kind == "ok" ? Icons.Svg("check", 16) : Icons.Svg("alert", 16))</span>
+        <span class="sv-toast__text">@message</span>
+        <button type="button" class="sv-toast__close" data-sv-toast-close aria-label="Dismiss message">&times;</button>
+    </div>
+}

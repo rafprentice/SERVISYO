@@ -1,0 +1,197 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.Services
+@using Servisyo.Web.ViewModels
+@model AvailabilityPageViewModel
+@{
+    ViewData["Title"] = "Availability";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "availability";
+
+    var inv = CultureInfo.InvariantCulture;
+    var form = Model.Form;
+    string T(TimeOnly? t) => t?.ToString("HH:mm", inv) ?? string.Empty;
+    var hasErrors = Model.Errors.Count > 0;
+}
+
+<p class="sv-eyebrow">Schedule</p>
+<h1 class="sv-dash__title">Availability</h1>
+<p class="sv-dash__sub">Set which days and hours you are available to accept bookings.</p>
+
+@if (!string.IsNullOrEmpty(Model.FlashMessage))
+{
+    <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+}
+
+@if (hasErrors)
+{
+    <div class="sv-flash sv-flash--error" role="alert">
+        <strong>Your schedule was not saved.</strong>
+        <ul class="sv-av__errors">
+            @foreach (var e in Model.Errors)
+            {
+                <li>@e</li>
+            }
+        </ul>
+    </div>
+}
+
+@if (Model.IsSuggested)
+{
+    <div class="sv-flash sv-flash--info" role="status">
+        You have not saved a schedule yet. Monday to Friday, 8:00 am to 5:00 pm is suggested below. Change it if you like, then press <strong>Save Schedule</strong>. Customers cannot book you until a schedule is saved.
+    </div>
+}
+
+<form method="post" asp-controller="ProviderAvailability" asp-action="Save" id="sv-av-form" novalidate>
+
+    <!-- Weekly schedule -->
+    <section class="sv-panel sv-av__panel" aria-labelledby="av-week-title">
+        <div class="sv-panel__head">
+            <h2 id="av-week-title" class="sv-panel__title">Weekly Schedule</h2>
+            <button type="button" class="sv-btn sv-btn--slate sv-btn--xs" id="sv-av-copy">Copy Mon → Weekdays</button>
+        </div>
+
+        <ul class="sv-av__days" id="sv-av-days">
+            @for (var i = 0; i < form.Days.Count; i++)
+            {
+                var d = form.Days[i];
+                var name = AvailabilityDays.Names[d.DayOfWeek];
+                <li class="sv-av__day @(d.IsAvailable ? "" : "is-off")" data-index="@i" data-dow="@d.DayOfWeek">
+                    <input type="hidden" name="Days[@i].DayOfWeek" value="@d.DayOfWeek" />
+
+                    <div class="sv-av__row">
+                        <label class="sv-switch">
+                            <input type="checkbox" name="Days[@i].IsAvailable" value="true" @(d.IsAvailable ? "checked" : null) data-day-toggle />
+                            <span class="sv-switch__track" aria-hidden="true"></span>
+                            <span class="sv-sr-only">@name is available</span>
+                        </label>
+                        <input type="hidden" name="Days[@i].IsAvailable" value="false" />
+
+                        <span class="sv-av__name">@name</span>
+
+                        <div class="sv-av__times">
+                            <input type="time" class="sv-av__time" name="Days[@i].Start" value="@T(d.Start)" aria-label="@name start time" data-start />
+                            <span class="sv-av__to">to</span>
+                            <input type="time" class="sv-av__time" name="Days[@i].End" value="@T(d.End)" aria-label="@name end time" data-end />
+                        </div>
+                        <span class="sv-av__off">Unavailable</span>
+                    </div>
+
+                    <div class="sv-av__breaks" data-breaks>
+                        @for (var k = 0; k < d.Breaks.Count; k++)
+                        {
+                            var b = d.Breaks[k];
+                            <div class="sv-av__break" data-break>
+                                <span class="sv-av__breaklabel">Break</span>
+                                <input type="time" class="sv-av__time" name="Days[@i].Breaks[@k].Start" value="@T(b.Start)" aria-label="@name break start" data-b-start />
+                                <span class="sv-av__to">to</span>
+                                <input type="time" class="sv-av__time" name="Days[@i].Breaks[@k].End" value="@T(b.End)" aria-label="@name break end" data-b-end />
+                                <button type="button" class="sv-av__x" data-remove-break aria-label="Remove break">✕</button>
+                            </div>
+                        }
+                    </div>
+                    <button type="button" class="sv-av__addbreak" data-add-break>+ Add break</button>
+                </li>
+            }
+        </ul>
+    </section>
+
+    <!-- Unavailable dates -->
+    <section class="sv-panel sv-av__panel" aria-labelledby="av-dates-title">
+        <div class="sv-panel__head">
+            <div>
+                <h2 id="av-dates-title" class="sv-panel__title">Unavailable Dates</h2>
+                <p class="sv-av__hint">Mark specific dates when you are not available.</p>
+            </div>
+            <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" id="sv-av-add-date">+ Add date</button>
+        </div>
+
+        <ul class="sv-av__dates" id="sv-av-dates">
+            @for (var j = 0; j < form.Dates.Count; j++)
+            {
+                var dt = form.Dates[j];
+                var saved = dt.Date is not null && !hasErrors;
+                <li class="sv-av__date @(saved ? "is-saved" : "")" data-date-row>
+                    <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
+                    <div class="sv-av__dateview">
+                        <strong>@(dt.Date?.ToString("MMM d, yyyy", inv))</strong>
+                        <span>@(string.IsNullOrWhiteSpace(dt.Reason) ? "No reason given" : dt.Reason)</span>
+                    </div>
+                    <div class="sv-av__dateedit">
+                        <input type="date" name="Dates[@j].Date" value="@(dt.Date?.ToString("yyyy-MM-dd", inv))" min="@Model.Today.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
+                        <input type="text" name="Dates[@j].Reason" value="@dt.Reason" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
+                    </div>
+                    <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>
+                </li>
+            }
+        </ul>
+        <p class="sv-av__empty" id="sv-av-dates-empty" @(form.Dates.Count > 0 ? "hidden" : null)>No unavailable dates. Add one when you need a day off.</p>
+    </section>
+
+    <!-- Booking settings -->
+    <section class="sv-panel sv-av__panel" aria-labelledby="av-settings-title">
+        <div class="sv-panel__head">
+            <h2 id="av-settings-title" class="sv-panel__title">Booking Settings</h2>
+        </div>
+        <div class="sv-av__settings">
+            <div class="sv-av__setting">
+                <label for="sv-av-notice">Minimum Booking Notice</label>
+                <select id="sv-av-notice" name="MinNoticeDays" class="sv-av__select">
+                    @foreach (var o in Model.NoticeOptions)
+                    {
+                        <option value="@o.Value" selected="@(o.Value == form.MinNoticeDays)">@o.Label</option>
+                    }
+                </select>
+                <p class="sv-av__hint" id="sv-av-notice-hint">
+                    @(form.MinNoticeDays == 0 ? "Customers can book for the same day." : $"Customers must book at least {Plural.Of(form.MinNoticeDays, "day")} in advance.")
+                </p>
+            </div>
+
+            <div class="sv-av__setting">
+                <label for="sv-av-max">Maximum Jobs Per Day</label>
+                <div class="sv-stepper">
+                    <button type="button" data-step="-1" aria-label="One fewer job per day">−</button>
+                    <input id="sv-av-max" name="MaxJobsPerDay" type="number" inputmode="numeric" min="1" max="@ProviderAvailabilityService.MaxJobsLimit" value="@form.MaxJobsPerDay" />
+                    <button type="button" data-step="1" aria-label="One more job per day">+</button>
+                </div>
+                <p class="sv-av__hint" id="sv-av-max-hint">Max @Plural.Of(form.MaxJobsPerDay, "job") will be accepted per day.</p>
+            </div>
+        </div>
+    </section>
+
+    <p class="sv-av__protect">
+        <span aria-hidden="true">@Icons.Svg("alert", 14)</span>
+        Double-booking protection is active — accepted bookings automatically block the same slot.
+    </p>
+
+    <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" id="sv-av-save">Save Schedule</button>
+</form>
+
+<!-- Templates used by provider-availability.js -->
+<template id="sv-break-tpl">
+    <div class="sv-av__break" data-break>
+        <span class="sv-av__breaklabel">Break</span>
+        <input type="time" class="sv-av__time" value="12:00" aria-label="Break start" data-b-start />
+        <span class="sv-av__to">to</span>
+        <input type="time" class="sv-av__time" value="13:00" aria-label="Break end" data-b-end />
+        <button type="button" class="sv-av__x" data-remove-break aria-label="Remove break">✕</button>
+    </div>
+</template>
+
+<template id="sv-date-tpl">
+    <li class="sv-av__date" data-date-row>
+        <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
+        <div class="sv-av__dateview"><strong></strong><span></span></div>
+        <div class="sv-av__dateedit">
+            <input type="date" min="@Model.Today.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
+            <input type="text" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
+        </div>
+        <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>
+    </li>
+</template>
+
+@section Scripts {
+    <script src="~/js/provider-availability.js" asp-append-version="true"></script>
+}

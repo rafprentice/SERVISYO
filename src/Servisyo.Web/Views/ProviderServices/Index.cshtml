@@ -1,0 +1,148 @@
+@using System.Globalization
+@using Servisyo.Web.ViewModels
+@model ServicesPageViewModel
+@{
+    ViewData["Title"] = "My Services";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "services";
+
+    var inv = CultureInfo.InvariantCulture;
+    var form = Model.Form;
+    var noCategories = Model.Categories.Count == 0;
+
+    // the problem text for each box (null = no problem)
+    var nameError = Model.ErrorFor("ServiceName");
+    var catError = Model.ErrorFor("CategoryId");
+    var descError = Model.ErrorFor("Description");
+    var priceError = Model.ErrorFor("Price");
+    var durError = Model.ErrorFor("DurationMinutes");
+}
+
+<div class="sv-pagehead">
+    <div>
+        <p class="sv-eyebrow">Offerings</p>
+        <h1 class="sv-dash__title">My Services</h1>
+        <p class="sv-dash__sub">Manage the services you offer to customers.</p>
+    </div>
+    <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" id="sv-svc-open"
+            aria-haspopup="dialog" aria-controls="sv-svc-add">+ Add Service</button>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.FlashMessage))
+{
+    <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+}
+
+@if (Model.Cards.Count == 0)
+{
+    <div class="sv-panel sv-svc__empty">
+        <p class="sv-panel__empty">You have not added any services yet. Use <strong>+ Add Service</strong> to list what you offer, so customers can find and book you.</p>
+    </div>
+}
+else
+{
+    <ul class="sv-svc__list">
+        @foreach (var c in Model.Cards)
+        {
+            <li class="sv-svc @(c.IsActive ? "" : "is-off")">
+                <div class="sv-svc__body">
+                    <div class="sv-svc__top">
+                        <h2 class="sv-svc__name">@c.Name</h2>
+                        <span class="sv-tag sv-tag--@c.StatusTone">@c.StatusText</span>
+                    </div>
+                    @if (c.Description is not null)
+                    {
+                        <p class="sv-svc__desc">@c.Description</p>
+                    }
+                    <p class="sv-svc__meta"><strong class="sv-svc__price">@c.PriceText</strong> <span>· @c.MetaText</span></p>
+                </div>
+
+                <form method="post" asp-controller="ProviderServices" asp-action="SetStatus" asp-route-serviceId="@c.ServiceId"
+                      class="sv-inline-form" data-sv-once>
+                    <input type="hidden" name="Activate" value="@(c.IsActive ? "false" : "true")" />
+                    <button type="submit" class="sv-act @(c.IsActive ? "sv-act--warn" : "sv-act--ok")"
+                            aria-label="@(c.IsActive ? "Deactivate" : "Activate") @c.Name">@(c.IsActive ? "Deactivate" : "Activate")</button>
+                </form>
+            </li>
+        }
+    </ul>
+}
+
+<!-- Add New Service: opened by "+ Add Service" (provider-services.js). It opens again by itself when the server rejected the form. -->
+<dialog id="sv-svc-add" class="sv-dialog" aria-labelledby="sv-svc-add-title" data-open="@(Model.ShowAddDialog ? "true" : null)">
+    <form method="post" asp-controller="ProviderServices" asp-action="Create" class="sv-dialog__form sv-svcform">
+        <div class="sv-svcform__head">
+            <h2 id="sv-svc-add-title" class="sv-dialog__title">Add New Service</h2>
+            <button type="button" class="sv-svcform__x" data-sv-close aria-label="Close">&times;</button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(Model.FormError))
+        {
+            <p class="sv-formerr" role="alert">@Model.FormError</p>
+        }
+        @if (noCategories)
+        {
+            <p class="sv-formerr" role="alert">No service categories are available yet. Please ask an administrator to add one.</p>
+        }
+
+        <div class="sv-fld">
+            <label for="sv-svc-name">Service Name <span aria-hidden="true">*</span></label>
+            <input id="sv-svc-name" name="ServiceName" type="text" value="@form.ServiceName" required maxlength="100"
+                   placeholder="e.g. Pipe Repair" autofocus
+                   aria-invalid="@(nameError is null ? null : "true")" />
+            @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
+        </div>
+
+        <div class="sv-fld">
+            <label for="sv-svc-cat">Category <span aria-hidden="true">*</span></label>
+            <select id="sv-svc-cat" name="CategoryId" required disabled="@(noCategories ? "disabled" : null)"
+                    aria-invalid="@(catError is null ? null : "true")">
+                <option value="">Choose a category</option>
+                @foreach (var cat in Model.Categories)
+                {
+                    <option value="@cat.CategoryId" selected="@(form.CategoryId == cat.CategoryId ? "selected" : null)">@cat.Name</option>
+                }
+            </select>
+            @if (catError is not null) { <p class="sv-fld__err" role="alert">@catError</p> }
+        </div>
+
+        <div class="sv-fld">
+            <label for="sv-svc-desc">Description <span class="sv-fld__opt">(optional)</span></label>
+            <textarea id="sv-svc-desc" name="Description" rows="3" maxlength="255"
+                      placeholder="What does this service include?"
+                      aria-invalid="@(descError is null ? null : "true")">@form.Description</textarea>
+            @if (descError is not null) { <p class="sv-fld__err" role="alert">@descError</p> }
+        </div>
+
+        <div class="sv-svcform__row">
+            <div class="sv-fld">
+                <label for="sv-svc-price">Price (₱, informational) <span aria-hidden="true">*</span></label>
+                <input id="sv-svc-price" name="Price" type="number" inputmode="decimal" min="0" max="99999999.99" step="0.01" required
+                       value="@(form.Price?.ToString("0.##", inv))" placeholder="e.g. 800"
+                       aria-invalid="@(priceError is null ? null : "true")" />
+                @if (priceError is not null) { <p class="sv-fld__err" role="alert">@priceError</p> }
+            </div>
+            <div class="sv-fld">
+                <label for="sv-svc-dur">Usual duration <span aria-hidden="true">*</span></label>
+                <select id="sv-svc-dur" name="DurationMinutes" required data-default="60"
+                        aria-invalid="@(durError is null ? null : "true")">
+                    @foreach (var d in Model.DurationOptions)
+                    {
+                        <option value="@d.Minutes" selected="@(form.DurationMinutes == d.Minutes ? "selected" : null)">@d.Label</option>
+                    }
+                </select>
+                @if (durError is not null) { <p class="sv-fld__err" role="alert">@durError</p> }
+            </div>
+        </div>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" disabled="@(noCategories ? "disabled" : null)">Add Service</button>
+        </div>
+    </form>
+</dialog>
+
+@section Scripts {
+    <script src="~/js/provider-services.js" asp-append-version="true"></script>
+}

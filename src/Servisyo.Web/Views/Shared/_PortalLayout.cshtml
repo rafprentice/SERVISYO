@@ -16,25 +16,25 @@
             ("users",      "Users",      "users",    Url.Action("Index", "AdminUsers"), 0),
             ("providers",  "Providers",  "wrench",   Url.Action("Index", "AdminProviders"), 0),
             ("bookings",   "Bookings",   "calendar", Url.Action("Index", "AdminBookings"), 0),
-            ("categories", "Categories", "list",     null, 0),
-            ("reviews",    "Reviews",    "star",     null, 0)
+            ("categories", "Categories", "list",     Url.Action("Index", "AdminCategories"), 0),
+            ("reviews",    "Reviews",    "star",     Url.Action("Index", "AdminReviews"), 0)
         }
         : isProvider
         ? new List<(string Key, string Label, string Icon, string? Url, int Badge)>
         {
             ("dashboard",    "Dashboard",    "home",     Url.Action("Provider", "Dashboard"), 0),
-            ("availability", "Availability", "clock",    null, 0),
-            ("services",     "My Services",  "wrench",   null, 0),
-            ("bookings",     "Bookings",     "calendar", null, 0),
-            ("messages",     "Messages",     "message",  null, shell.UnreadMessages),
-            ("profile",      "My Profile",   "user",     null, 0)
+            ("bookings",     "Bookings",     "calendar", Url.Action("Index", "ProviderBookings"), 0),
+            ("services",     "My Services",  "wrench",   Url.Action("Index", "ProviderServices"), 0),
+            ("availability", "Availability", "clock",    Url.Action("Index", "ProviderAvailability"), 0),
+            ("messages",     "Messages",     "message",  Url.Action("Index", "Messages"), shell.UnreadMessages),
+            ("profile",      "My Profile",   "user",     Url.Action("Index", "ProviderProfile"), 0)
         }
         : new List<(string Key, string Label, string Icon, string? Url, int Badge)>
         {
             ("dashboard", "Dashboard",     "home",     Url.Action("Customer", "Dashboard"), 0),
-            ("find",      "Find Services", "search",   Url.Action("Index", "Home", null, null, null, "providers"), 0),
-            ("bookings",  "My Bookings",   "calendar", null, 0),
-            ("messages",  "Messages",      "message",  null, shell.UnreadMessages),
+            ("find",      "Find Services", "search",   Url.Action("Index", "FindServices"), 0),
+            ("bookings",  "My Bookings",   "calendar", Url.Action("Index", "CustomerBookings"), 0),
+            ("messages",  "Messages",      "message",  Url.Action("Index", "Messages"), shell.UnreadMessages),
             ("profile",   "My Profile",    "user",     null, 0)
         };
 }
@@ -96,7 +96,12 @@
                            aria-current="@(item.Key == active ? "page" : null)">
                             @Icons.Svg(item.Icon, 16)
                             <span>@item.Label</span>
-                            @if (item.Badge > 0) { <span class="sv-count">@item.Badge</span> }
+                            @if (item.Key == "messages")
+                            {
+                                @* always on the page (hidden at 0) so the chat script can update it without a reload *@
+                                <span class="sv-count" data-sv-msg-badge hidden="@(item.Badge > 0 ? null : "hidden")">@item.Badge</span>
+                            }
+                            else if (item.Badge > 0) { <span class="sv-count">@item.Badge</span> }
                         </a>
                     }
                     else
@@ -125,7 +130,7 @@
             }
         </aside>
 
-        <main class="sv-portal__main" id="main">
+        <main class="sv-portal__main @(ViewData["MainClass"])" id="main">
             <div class="sv-portal__inner">@RenderBody()</div>
         </main>
     </div>

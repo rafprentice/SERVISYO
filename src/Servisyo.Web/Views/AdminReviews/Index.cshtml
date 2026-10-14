@@ -1,0 +1,148 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.Models
+@using Servisyo.Web.Services
+@using Servisyo.Web.ViewModels
+@model ReviewsPageViewModel
+@{
+    ViewData["Title"] = "Reviews";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "reviews";
+
+    var inv = CultureInfo.InvariantCulture;
+    string? StatusParam() => Model.Status == "All" ? null : Model.Status;
+}
+
+<p class="sv-eyebrow">Moderation</p>
+<h1 class="sv-dash__title">Reviews</h1>
+<p class="sv-dash__sub">Moderate customer reviews. Keep or hide content that violates platform guidelines.</p>
+
+@if (!string.IsNullOrEmpty(Model.FlashMessage))
+{
+    <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+}
+
+<nav class="sv-tabs sv-tabs--inline" aria-label="Filter by review status">
+    @foreach (var t in Model.Tabs)
+    {
+        <a class="sv-tab @(t.Key == Model.Status ? "is-active" : "")"
+           href="@Url.Action("Index", "AdminReviews", new { status = t.Key == "All" ? null : t.Key })"
+           aria-current="@(t.Key == Model.Status ? "page" : null)">
+            @t.Label <span class="sv-tab__n">(@t.Count)</span>
+        </a>
+    }
+</nav>
+
+@if (Model.Cards.Count == 0)
+{
+    <div class="sv-panel sv-reviews__empty">
+        @(Model.CountAll == 0
+            ? "No reviews yet. Reviews written by customers after a completed booking will appear here."
+            : "No reviews in this tab.")
+    </div>
+}
+else
+{
+    <div class="sv-reviews">
+        @foreach (var r in Model.Cards)
+        {
+            <article class="sv-review @(r.Status == ReviewStatuses.Flagged ? "is-flagged" : "") @(r.Status == ReviewStatuses.Removed ? "is-removed" : "")"
+                     aria-label="Review #@r.ReviewId">
+                <div class="sv-review__top">
+                    <div class="sv-review__rating">
+                        <span class="sv-stars" role="img" aria-label="Rated @r.Rating out of 5">
+                            @for (var i = 1; i <= 5; i++)
+                            {
+                                <span class="sv-star @(i <= r.Rating ? "is-on" : "")">@Icons.Svg("star", 18, true)</span>
+                            }
+                        </span>
+                        <span class="sv-review__score">@r.RatingText</span>
+                    </div>
+                    <div class="sv-review__tags">
+                        <span class="sv-tag sv-tag--@r.StatusTone">@r.StatusText</span>
+                        <span class="sv-review__id">#@r.ReviewId</span>
+                    </div>
+                </div>
+
+                <p class="sv-review__who">
+                    <strong>@r.CustomerName</strong>
+                    <span class="sv-review__arrow" aria-hidden="true">→</span>
+                    @r.ProviderName · @r.Service
+                </p>
+
+                @if (string.IsNullOrWhiteSpace(r.Comment))
+                {
+                    <p class="sv-review__text is-empty">No written comment, rating only.</p>
+                }
+                else
+                {
+                    <p class="sv-review__text">@r.Comment</p>
+                }
+
+                <div class="sv-review__foot">
+                    <span class="sv-review__date">Submitted @r.SubmittedOn.ToString("MMM d, yyyy", inv)</span>
+                    <div class="sv-table__acts">
+                        @foreach (var a in r.Actions)
+                        {
+                            <button type="button" class="sv-act sv-act--@a.Tone"
+                                    data-rev-action="@a.Action"
+                                    data-review-id="@r.ReviewId"
+                                    data-title="@a.Title"
+                                    data-text="@a.Text"
+                                    data-label="@a.Label"
+                                    data-tone="@a.Tone">@a.Label</button>
+                        }
+                    </div>
+                </div>
+            </article>
+        }
+    </div>
+
+    <div class="sv-table__foot">
+        <span>Showing @Model.Cards.Count of @Model.TotalMatching @(Model.TotalMatching == 1 ? "review" : "reviews")</span>
+        @if (Model.PageCount > 1)
+        {
+            <nav class="sv-pager" aria-label="Pages">
+                @if (Model.Page > 1)
+                {
+                    <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminReviews", new { status = StatusParam(), page = Model.Page - 1 })">Previous</a>
+                }
+                <span>Page @Model.Page of @Model.PageCount</span>
+                @if (Model.Page < Model.PageCount)
+                {
+                    <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminReviews", new { status = StatusParam(), page = Model.Page + 1 })">Next</a>
+                }
+            </nav>
+        }
+    </div>
+}
+
+<!-- One shared confirmation dialog; admin-reviews.js fills it in for the button that was clicked. -->
+<dialog id="sv-rev-confirm" class="sv-dialog" aria-labelledby="sv-rev-title">
+    <form method="post" asp-controller="AdminReviews" asp-action="Moderate" class="sv-dialog__form">
+        <h2 id="sv-rev-title" class="sv-dialog__title"></h2>
+        <p class="sv-dialog__who"></p>
+        <p class="sv-dialog__text"></p>
+
+        <input type="hidden" name="ReviewId" />
+        <input type="hidden" name="Action" />
+        <input type="hidden" name="Status" value="@StatusParam()" />
+        <input type="hidden" name="Page" value="@Model.Page" />
+
+        <div class="sv-dialog__reason">
+            <label for="sv-rev-reason">Reason <span>(optional)</span></label>
+            <textarea id="sv-rev-reason" name="Reason" rows="3" maxlength="@ReviewModerationService.MaxReasonLength" placeholder="Why is this being done?"></textarea>
+            <p>Saved in the administrator activity log.</p>
+        </div>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--sm" id="sv-rev-ok">Confirm</button>
+        </div>
+    </form>
+</dialog>
+
+@section Scripts {
+    <script src="~/js/admin-reviews.js" asp-append-version="true"></script>
+}
