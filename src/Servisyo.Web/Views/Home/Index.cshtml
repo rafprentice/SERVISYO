@@ -1,8 +1,261 @@
-﻿@{
-    ViewData["Title"] = "Home Page";
+@model Servisyo.Web.ViewModels.HomePageViewModel
+@using System.Globalization
+@{
+    ViewData["Title"] = "Book trusted local service providers";
+    ViewData["FullWidth"] = true;
+    var inv = CultureInfo.InvariantCulture;
+    var s = Model.Stats;
+    var signedIn = User.Identity?.IsAuthenticated == true;
+    string Plural(int n, string one, string many) => n == 1 ? one : many;
 }
 
-<div class="text-center">
-    <h1 class="display-4">Welcome</h1>
-    <p>Learn about <a href="https://learn.microsoft.com/aspnet/core">building Web apps with ASP.NET Core</a>.</p>
-</div>
+@if (Model.LoadFailed)
+{
+    <div class="sv-notice" role="alert">
+        <div class="sv-container">Some information could not be loaded right now. Please try again in a moment.</div>
+    </div>
+}
+
+<!-- HERO -->
+<section class="sv-hero" id="top">
+    <div class="sv-container sv-hero__grid">
+        <div>
+            <span class="sv-badge">Plumbing · Cleaning · Repair</span>
+            <h1 class="sv-hero__title">Book trusted local <span class="sv-hl">service providers</span> in minutes</h1>
+            <p class="sv-hero__lead">SERVISYO connects you with approved, rated professionals for home services. Search, book, and review — all in one place.</p>
+            <div class="sv-hero__cta">
+                <a class="sv-btn sv-btn--primary" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Provider</a>
+                @if (!signedIn)
+                {
+                    <a class="sv-btn sv-btn--ghost" asp-controller="Account" asp-action="RegisterProvider">Join as Provider</a>
+                }
+            </div>
+        </div>
+
+        <div class="sv-stats" aria-label="Platform statistics">
+            <div class="sv-stat">
+                <div class="sv-stat__value">@s.ApprovedProviders.ToString("N0", inv)</div>
+                <div class="sv-stat__label">Approved Providers</div>
+            </div>
+            <div class="sv-stat">
+                <div class="sv-stat__value">@s.CompletedBookings.ToString("N0", inv)</div>
+                <div class="sv-stat__label">Bookings Completed</div>
+            </div>
+            <div class="sv-stat">
+                <div class="sv-stat__value">@(s.AverageRating is double r ? r.ToString("0.0", inv) : "—")</div>
+                <div class="sv-stat__label">@(s.AverageRating is null ? "No reviews yet" : "Average Rating")</div>
+            </div>
+            <div class="sv-stat">
+                <div class="sv-stat__value">@s.ServiceCategories</div>
+                <div class="sv-stat__label">Service Categories</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CATEGORIES -->
+<section class="sv-section" id="services">
+    <div class="sv-container">
+        <p class="sv-eyebrow">Our categories</p>
+        <h2 class="sv-h2">@(Model.Categories.Count == 3 ? "Three service categories, one platform" : "Service categories, one platform")</h2>
+
+        @if (Model.Categories.Count == 0)
+        {
+            <p class="sv-empty">No service categories are available yet.</p>
+        }
+        else
+        {
+            <div class="sv-grid sv-grid--3">
+                @foreach (var c in Model.Categories)
+                {
+                    <article class="sv-card">
+                        <div class="sv-icon"><partial name="_CategoryIcon" model="c.Name" /></div>
+                        <h3 class="sv-card__title">@c.Name</h3>
+                        @if (!string.IsNullOrWhiteSpace(c.Description))
+                        {
+                            <p class="sv-card__text">@c.Description</p>
+                        }
+                        <div class="sv-card__foot">
+                            <span>@c.ProviderCount @Plural(c.ProviderCount, "provider", "providers")</span>
+                            <a asp-controller="Home" asp-action="Index" asp-fragment="providers">Browse →</a>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="sv-section sv-section--soft" id="how-it-works">
+    <div class="sv-container">
+        <p class="sv-eyebrow">Process</p>
+        <h2 class="sv-h2">How SERVISYO works</h2>
+        <div class="sv-grid sv-grid--3 sv-steps">
+            <div>
+                <div class="sv-step__num">01</div>
+                <h3 class="sv-card__title">Search &amp; Browse</h3>
+                <p class="sv-card__text">Filter by service type, location, and availability. View provider profiles, ratings, and reviews before deciding.</p>
+            </div>
+            <div>
+                <div class="sv-step__num">02</div>
+                <h3 class="sv-card__title">Book a Provider</h3>
+                <p class="sv-card__text">Select your date, time, and location. Describe your need. Your request goes directly to the provider, who accepts or declines it.</p>
+            </div>
+            <div>
+                <div class="sv-step__num">03</div>
+                <h3 class="sv-card__title">Service &amp; Review</h3>
+                <p class="sv-card__text">The provider performs the work. Once completed, submit a 1–5 star rating and a written review.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- FEATURED PROVIDERS -->
+<section class="sv-section" id="providers">
+    <div class="sv-container">
+        <p class="sv-eyebrow">Providers</p>
+        <h2 class="sv-h2">Featured providers</h2>
+
+        @if (Model.FeaturedProviders.Count == 0)
+        {
+            <div class="sv-empty-box">
+                <p>No approved providers are listed yet.</p>
+                @if (!signedIn)
+                {
+                    <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="Account" asp-action="RegisterProvider">Apply as a provider</a>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="sv-grid sv-grid--3">
+                @foreach (var p in Model.FeaturedProviders)
+                {
+                    <article class="sv-card sv-provider">
+                        <div class="sv-provider__head">
+                            <div class="sv-avatar" aria-hidden="true">@p.Initials</div>
+                            <div>
+                                <h3 class="sv-card__title sv-provider__name">@p.BusinessName</h3>
+                                @if (!string.IsNullOrWhiteSpace(p.City))
+                                {
+                                    <div class="sv-muted">@p.City</div>
+                                }
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(p.Description))
+                        {
+                            <p class="sv-card__text">@p.Description</p>
+                        }
+                        @if (p.Categories.Count > 0)
+                        {
+                            <div class="sv-chips">
+                                @foreach (var name in p.Categories)
+                                {
+                                    <span class="sv-chip">@name</span>
+                                }
+                            </div>
+                        }
+                        <div class="sv-card__foot">
+                            <span>
+                                @if (p.ReviewCount > 0 && p.AvgRating is decimal rating)
+                                {
+                                    <strong class="sv-rating">★ @rating.ToString("0.0", inv)</strong>
+                                    <span class="sv-muted">(@p.ReviewCount @Plural(p.ReviewCount, "review", "reviews"))</span>
+                                }
+                                else
+                                {
+                                    <span class="sv-muted">New · no reviews yet</span>
+                                }
+                            </span>
+                            @if (p.StartingPrice is decimal price)
+                            {
+                                <span class="sv-price">From ₱@price.ToString("#,##0.##", inv)</span>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<!-- ABOUT -->
+<section class="sv-section sv-section--soft" id="about">
+    <div class="sv-container">
+        <div class="sv-about">
+            <div>
+                <p class="sv-eyebrow">About us</p>
+                <h2 class="sv-h2">Built for better home service experiences</h2>
+                <p class="sv-lead">SERVISYO is a web-based local service marketplace designed to simplify how customers in Cebu discover, book, and review home and utility service providers.</p>
+                <p class="sv-card__text">We connect skilled local professionals with the households and businesses that need them. Whether you need a plumber for an emergency fix or a cleaning crew for a regular schedule, SERVISYO puts approved providers within reach.</p>
+            </div>
+            <div class="sv-stats sv-stats--light">
+                <div class="sv-stat">
+                    <div class="sv-stat__value">@s.ApprovedProviders.ToString("N0", inv)</div>
+                    <div class="sv-stat__label">Approved Providers</div>
+                    <div class="sv-stat__note">Approved by an administrator</div>
+                </div>
+                <div class="sv-stat">
+                    <div class="sv-stat__value">@s.CompletedBookings.ToString("N0", inv)</div>
+                    <div class="sv-stat__label">Bookings Completed</div>
+                    <div class="sv-stat__note">Through SERVISYO</div>
+                </div>
+                <div class="sv-stat">
+                    <div class="sv-stat__value">@(s.AverageRating is double r2 ? r2.ToString("0.0", inv) + " ★" : "—")</div>
+                    <div class="sv-stat__label">Average Rating</div>
+                    <div class="sv-stat__note">From visible customer reviews</div>
+                </div>
+                <div class="sv-stat">
+                    <div class="sv-stat__value">@s.ServiceCategories</div>
+                    <div class="sv-stat__label">Service Categories</div>
+                    <div class="sv-stat__note">@(string.Join(", ", Model.Categories.Select(c => c.Name)))</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sv-grid sv-grid--3 sv-features">
+            <div class="sv-card">
+                <div class="sv-icon sv-icon--sm"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg></div>
+                <h3 class="sv-card__title">Approved Providers</h3>
+                <p class="sv-card__text">Every provider applies and is reviewed by a SERVISYO administrator before they can publish services or accept bookings.</p>
+            </div>
+            <div class="sv-card">
+                <div class="sv-icon sv-icon--sm"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
+                <h3 class="sv-card__title">Easy Booking</h3>
+                <p class="sv-card__text">Search, compare, and request a time that fits the provider's schedule. The provider accepts or declines your request directly.</p>
+            </div>
+            <div class="sv-card">
+                <div class="sv-icon sv-icon--sm"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg></div>
+                <h3 class="sv-card__title">Transparent Reviews</h3>
+                <p class="sv-card__text">After a completed job, the customer can leave a star rating and written review, so you can see real feedback before you book.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CALL TO ACTION -->
+<section class="sv-cta">
+    <div class="sv-container sv-cta__grid">
+        <div class="sv-cta__card sv-cta__card--primary">
+            <h2 class="sv-cta__title">I need a service</h2>
+            <p>Browse approved providers, request a booking, and rate your experience after completion.</p>
+            @if (!signedIn)
+            {
+                <a class="sv-btn sv-btn--primary sv-btn--block" asp-controller="Account" asp-action="Register">Create a customer account →</a>
+            }
+            else
+            {
+                <a class="sv-btn sv-btn--primary sv-btn--block" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a provider →</a>
+            }
+        </div>
+        <div class="sv-cta__card">
+            <h2 class="sv-cta__title">I offer a service</h2>
+            <p>Apply as a provider, get approved, manage your services, and grow your client base.</p>
+            @if (!signedIn)
+            {
+                <a class="sv-btn sv-btn--ghost sv-btn--block" asp-controller="Account" asp-action="RegisterProvider">Apply as a provider →</a>
+            }
+        </div>
+    </div>
+</section>

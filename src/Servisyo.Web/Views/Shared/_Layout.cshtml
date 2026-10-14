@@ -1,47 +1,103 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"] - Servisyo.Web</title>
-    <script type="importmap"></script>
+    <title>@ViewData["Title"] - SERVISYO</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/Servisyo.Web.styles.css" asp-append-version="true" />
 </head>
 <body>
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container-fluid">
-                <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">Servisyo.Web</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
-                        </li>
-                    </ul>
+    <header class="sv-header">
+        <div class="sv-container sv-header__inner">
+            <a class="sv-brand" asp-controller="Home" asp-action="Index" aria-label="SERVISYO home">
+                <span class="sv-brand__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                </span>
+                <span>SERVISYO</span>
+            </a>
+
+            <button class="sv-nav-toggle" type="button" aria-expanded="false" aria-controls="sv-menu" aria-label="Toggle navigation">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+
+            <div class="sv-menu" id="sv-menu">
+                <nav class="sv-nav" aria-label="Main">
+                    <a asp-controller="Home" asp-action="Index" asp-fragment="services" data-spy="services">Services</a>
+                    <a asp-controller="Home" asp-action="Index" asp-fragment="how-it-works" data-spy="how-it-works">How It Works</a>
+                    <a asp-controller="Home" asp-action="Index" asp-fragment="about" data-spy="about">About Us</a>
+                    <a asp-controller="Home" asp-action="Index" asp-fragment="providers" data-spy="providers">Providers</a>
+                    <a asp-controller="Home" asp-action="Index" asp-fragment="contact" data-spy="contact">Contact</a>
+                </nav>
+                <div class="sv-actions">
+                    @if (User.Identity?.IsAuthenticated == true)
+                    {
+                        <span class="sv-user">@User.Identity.Name</span>
+                        <form asp-controller="Account" asp-action="Logout" method="post" class="sv-inline-form">
+                            <button type="submit" class="sv-btn sv-btn--outline sv-btn--sm">Sign Out</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <a class="sv-btn sv-btn--outline sv-btn--sm" asp-controller="Account" asp-action="Login">Sign In</a>
+                        <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="Account" asp-action="Register">Register</a>
+                    }
                 </div>
             </div>
-        </nav>
+        </div>
     </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
-    </div>
 
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - Servisyo.Web - <a asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
+    @if ((ViewData["FullWidth"] as bool?) == true)
+    {
+        <main id="main">@RenderBody()</main>
+    }
+    else
+    {
+        <main id="main" class="sv-container sv-page">@RenderBody()</main>
+    }
+
+    <footer class="sv-footer" id="contact">
+        <div class="sv-container">
+            <div class="sv-footer__grid">
+                <div>
+                    <a class="sv-brand sv-brand--light" asp-controller="Home" asp-action="Index">
+                        <span class="sv-brand__icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                        </span>
+                        <span>SERVISYO</span>
+                    </a>
+                    <p class="sv-footer__text">A Cebu-based marketplace for booking plumbing, cleaning and repair providers.</p>
+                </div>
+                <div>
+                    <h2 class="sv-footer__title">Explore</h2>
+                    <ul class="sv-footer__list">
+                        <li><a asp-controller="Home" asp-action="Index" asp-fragment="services">Services</a></li>
+                        <li><a asp-controller="Home" asp-action="Index" asp-fragment="how-it-works">How It Works</a></li>
+                        <li><a asp-controller="Home" asp-action="Index" asp-fragment="providers">Providers</a></li>
+                        <li><a asp-controller="Home" asp-action="Index" asp-fragment="about">About Us</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h2 class="sv-footer__title">Account</h2>
+                    <ul class="sv-footer__list">
+                        <li><a asp-controller="Account" asp-action="Login">Sign In</a></li>
+                        <li><a asp-controller="Account" asp-action="Register">Register as a customer</a></li>
+                        <li><a asp-controller="Account" asp-action="RegisterProvider">Join as a provider</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h2 class="sv-footer__title">Contact</h2>
+                    <p class="sv-footer__text">Cebu, Philippines</p>
+                    <p class="sv-footer__text">A contact form is coming in a later update.</p>
+                </div>
+            </div>
+            <div class="sv-footer__bottom">&copy; @DateTime.Now.Year SERVISYO. All rights reserved.</div>
         </div>
     </footer>
+
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>

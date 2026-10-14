@@ -1,20 +1,37 @@
 using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Servisyo.Web.Models;
+using Servisyo.Web.Services;
+using Servisyo.Web.ViewModels;
 
 namespace Servisyo.Web.Controllers;
 
 public class HomeController : Controller
 {
-    public IActionResult Index()
+    private readonly IHomePageService _homePage;
+    private readonly ILogger<HomeController> _logger;
+
+    public HomeController(IHomePageService homePage, ILogger<HomeController> logger)
     {
-        return View();
+        _homePage = homePage;
+        _logger = logger;
     }
 
-    public IActionResult Privacy()
+    public async Task<IActionResult> Index(CancellationToken ct)
     {
-        return View();
+        try
+        {
+            return View(await _homePage.GetHomePageAsync(ct));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Log the details for the developer; show only a friendly notice to visitors.
+            _logger.LogError(ex, "Could not load the home page data.");
+            return View(new HomePageViewModel { LoadFailed = true });
+        }
     }
+
+    public IActionResult Privacy() => View();
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public IActionResult Error()
