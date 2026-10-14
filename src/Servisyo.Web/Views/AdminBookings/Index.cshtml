@@ -1,0 +1,104 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model BookingsPageViewModel
+@{
+    ViewData["Title"] = "All Bookings";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "bookings";
+
+    var inv = CultureInfo.InvariantCulture;
+    var soon = "Available in an upcoming update";
+
+    string? Q() => string.IsNullOrEmpty(Model.Q) ? null : Model.Q;
+    string? StatusParam() => Model.Status == "All" ? null : Model.Status;
+}
+
+<p class="sv-eyebrow">Monitor</p>
+<h1 class="sv-dash__title">All Bookings</h1>
+<p class="sv-dash__sub">Platform-wide view of all service bookings. Admin monitoring only.</p>
+
+<div class="sv-toolbar">
+    <form method="get" asp-controller="AdminBookings" asp-action="Index" class="sv-search" role="search">
+        <span class="sv-search__icon">@Icons.Svg("search", 16)</span>
+        <input type="search" name="q" value="@Model.Q" maxlength="100" placeholder="Search bookings..." aria-label="Search bookings" />
+        @if (StatusParam() is not null)
+        {
+            <input type="hidden" name="status" value="@Model.Status" />
+        }
+    </form>
+
+    <nav class="sv-filters" aria-label="Filter by booking status">
+        @foreach (var t in Model.Tabs)
+        {
+            <a class="sv-filter @(t.Key == Model.Status ? "is-active" : "")"
+               href="@Url.Action("Index", "AdminBookings", new { status = t.Key == "All" ? null : t.Key, q = Q() })"
+               aria-current="@(t.Key == Model.Status ? "page" : null)">
+                @t.Label <span class="sv-filter__n">(@t.Count)</span>
+            </a>
+        }
+    </nav>
+</div>
+
+<div class="sv-table-wrap">
+    <table class="sv-table sv-table--bookings">
+        <thead>
+            <tr>
+                <th scope="col">#</th>
+                <th scope="col">Service</th>
+                <th scope="col">Customer</th>
+                <th scope="col">Provider</th>
+                <th scope="col">Date</th>
+                <th scope="col">Payment</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="sv-table__right">Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr>
+                    <td colspan="8" class="sv-table__empty">
+                        @(Model.CountAll == 0
+                            ? "No bookings have been made yet."
+                            : "No bookings match your search or filter.")
+                    </td>
+                </tr>
+            }
+            @foreach (var b in Model.Rows)
+            {
+                <tr>
+                    <td class="sv-table__muted">@b.BookingId</td>
+                    <td>@b.Service</td>
+                    <td class="sv-table__muted">@b.CustomerName</td>
+                    <td class="sv-table__muted sv-table__small">@b.ProviderName</td>
+                    <td class="sv-table__muted sv-table__small sv-table__nowrap">@b.Date.ToString("MMM d, yyyy", inv) @b.Time.ToString("h:mm tt", inv)</td>
+                    <td><span class="sv-tag sv-tag--@b.Payment.Tone">@b.Payment.Text</span></td>
+                    <td><span class="sv-tag sv-tag--@b.Status.Tone">@b.Status.Badge</span></td>
+                    <td class="sv-table__right">
+                        <span class="sv-viewlink is-disabled" aria-disabled="true" title="@soon">View @Icons.Svg("arrow-right", 14)</span>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="sv-table__foot">
+    <span>Showing @Model.Rows.Count of @Model.TotalMatching @(Model.TotalMatching == 1 ? "booking" : "bookings")</span>
+    @if (Model.PageCount > 1)
+    {
+        <nav class="sv-pager" aria-label="Pages">
+            @if (Model.Page > 1)
+            {
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminBookings", new { status = StatusParam(), q = Q(), page = Model.Page - 1 })">Previous</a>
+            }
+            <span>Page @Model.Page of @Model.PageCount</span>
+            @if (Model.Page < Model.PageCount)
+            {
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminBookings", new { status = StatusParam(), q = Q(), page = Model.Page + 1 })">Next</a>
+            }
+        </nav>
+    }
+</div>

@@ -1,0 +1,135 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model ProvidersPageViewModel
+@{
+    ViewData["Title"] = "Service Providers";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "providers";
+
+    var soon = "Available in an upcoming update";
+
+    // The four tabs from the design are always shown. "Rejected" and "Deactivated" only appear when
+    // there is at least one, so no provider is ever hidden from the filters.
+    var tabs = new List<(string Key, string Label, int Count)>
+    {
+        ("All", "All", Model.CountAll),
+        ("Pending", "Pending", Model.CountPending),
+        ("Approved", "Approved", Model.CountApproved),
+        ("Suspended", "Suspended", Model.CountSuspended)
+    };
+    if (Model.CountRejected > 0 || Model.Status == "Rejected") tabs.Add(("Rejected", "Rejected", Model.CountRejected));
+    if (Model.CountDeactivated > 0 || Model.Status == "Deactivated") tabs.Add(("Deactivated", "Deactivated", Model.CountDeactivated));
+
+    string? StatusParam() => Model.Status == "All" ? null : Model.Status;
+}
+
+<p class="sv-eyebrow">Management</p>
+<h1 class="sv-dash__title">Service Providers</h1>
+<p class="sv-dash__sub">Review applications and manage approved providers.</p>
+
+<nav class="sv-tabs sv-tabs--inline" aria-label="Filter by status">
+    @foreach (var t in tabs)
+    {
+        <a class="sv-tab @(t.Key == Model.Status ? "is-active" : "")"
+           href="@Url.Action("Index", "AdminProviders", new { status = t.Key == "All" ? null : t.Key })"
+           aria-current="@(t.Key == Model.Status ? "page" : null)">
+            @t.Label <span class="sv-tab__n">(@t.Count)</span>
+        </a>
+    }
+</nav>
+
+@if (Model.Cards.Count == 0)
+{
+    <div class="sv-panel sv-cards__empty">
+        <p class="sv-panel__empty">
+            @(Model.CountAll == 0
+                ? "No service providers have registered yet."
+                : "No providers match this filter.")
+        </p>
+    </div>
+}
+else
+{
+    <div class="sv-cards">
+        @foreach (var c in Model.Cards)
+        {
+            <article class="sv-pcard">
+                <div class="sv-pcard__head">
+                    <span class="sv-avatar sv-avatar--ink" aria-hidden="true">@c.Initials</span>
+                    <div>
+                        <h2 class="sv-pcard__name">@c.Name</h2>
+                        <div class="sv-pcard__biz">@c.BusinessName</div>
+                        @if (c.Details is not null)
+                        {
+                            <div class="sv-pcard__where">@c.Details</div>
+                        }
+                    </div>
+                </div>
+
+                @if (c.HasRating)
+                {
+                    <div class="sv-pcard__rating">
+                        <span class="sv-stars" role="img" aria-label="@c.RatingText out of 5 stars">
+                            @for (var n = 1; n <= 5; n++)
+                            {
+                                <span class="@(n <= c.StarsFilled ? "is-on" : "")">@Icons.Svg("star", 15, filled: true)</span>
+                            }
+                        </span>
+                        <span>@c.RatingText (@c.ReviewsText)</span>
+                    </div>
+                }
+                else if (c.ApprovalStatus == "Approved")
+                {
+                    <div class="sv-pcard__rating">No reviews yet</div>
+                }
+
+                <div class="sv-pcard__tags">
+                    @if (c.ServiceTags.Count > 0)
+                    {
+                        foreach (var tag in c.ServiceTags)
+                        {
+                            <span class="sv-chip">@tag</span>
+                        }
+                        if (c.ExtraServices > 0)
+                        {
+                            <span class="sv-chip sv-chip--more">+@c.ExtraServices</span>
+                        }
+                    }
+                    else if (c.ApprovalStatus == "Approved")
+                    {
+                        <span class="sv-pcard__none">No services listed yet</span>
+                    }
+                </div>
+
+                <div class="sv-pcard__foot">
+                    <div class="sv-pcard__badges">
+                        @foreach (var b in c.Badges)
+                        {
+                            <span class="sv-tag sv-tag--@b.Tone">@b.Text</span>
+                        }
+                    </div>
+                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">View Details</button>
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@if (Model.PageCount > 1)
+{
+    <nav class="sv-table__foot" aria-label="Pages">
+        <span>Showing @Model.Cards.Count of @Model.TotalMatching providers</span>
+        <span class="sv-pager">
+            @if (Model.Page > 1)
+            {
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminProviders", new { status = StatusParam(), page = Model.Page - 1 })">Previous</a>
+            }
+            <span>Page @Model.Page of @Model.PageCount</span>
+            @if (Model.Page < Model.PageCount)
+            {
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminProviders", new { status = StatusParam(), page = Model.Page + 1 })">Next</a>
+            }
+        </span>
+    </nav>
+}

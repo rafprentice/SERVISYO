@@ -21,6 +21,8 @@ builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>(
 builder.Services.AddScoped<IProviderDashboardService, ProviderDashboardService>();
 builder.Services.AddScoped<IAdminDashboardService, AdminDashboardService>();
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
+builder.Services.AddScoped<IProviderManagementService, ProviderManagementService>();
+builder.Services.AddScoped<IBookingMonitorService, BookingMonitorService>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {

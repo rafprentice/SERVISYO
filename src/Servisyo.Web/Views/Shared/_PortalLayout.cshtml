@@ -14,8 +14,8 @@
         {
             ("dashboard",  "Dashboard",  "home",     Url.Action("Admin", "Dashboard"), 0),
             ("users",      "Users",      "users",    Url.Action("Index", "AdminUsers"), 0),
-            ("providers",  "Providers",  "wrench",   null, 0),
-            ("bookings",   "Bookings",   "calendar", null, 0),
+            ("providers",  "Providers",  "wrench",   Url.Action("Index", "AdminProviders"), 0),
+            ("bookings",   "Bookings",   "calendar", Url.Action("Index", "AdminBookings"), 0),
             ("categories", "Categories", "list",     null, 0),
             ("reviews",    "Reviews",    "star",     null, 0)
         }
@@ -125,7 +125,9 @@
             }
         </aside>
 
-        <main class="sv-portal__main" id="main">@RenderBody()</main>
+        <main class="sv-portal__main" id="main">
+            <div class="sv-portal__inner">@RenderBody()</div>
+        </main>
     </div>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

@@ -26,7 +26,8 @@
     display: flex; flex-direction: column; background: #fff; border-right: 1px solid var(--color-border);
 }
 .sv-portal__main { margin-left: var(--portal-side); padding: 28px 28px 56px; }
-.sv-portal__main > * { max-width: 1040px; margin-left: auto; margin-right: auto; }
+/* One centred column holds everything on the page (title, tabs, cards, tables), so they all share the same left edge. */
+.sv-portal__inner { max-width: 1040px; margin: 0 auto; }
 
 .sv-side__user { display: flex; align-items: center; gap: 10px; padding: 18px 16px; border-bottom: 1px solid var(--color-border); }
 .sv-side__name { font-size: .875rem; font-weight: 600; line-height: 1.2; }
@@ -48,8 +49,8 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 
 /* ---------- Dashboard header ---------- */
 .sv-portal__main .sv-eyebrow { margin-bottom: 4px; font-size: .6875rem; }
-.sv-dash__title { margin: 0 0 4px; font-size: 1.625rem; font-weight: 700; }
-.sv-dash__sub { margin: 0 0 22px; font-size: .875rem; color: var(--color-text-muted); }
+.sv-dash__title { margin-top: 0; margin-bottom: 4px; font-size: 1.625rem; font-weight: 700; }
+.sv-dash__sub { margin-top: 0; margin-bottom: 22px; font-size: .875rem; color: var(--color-text-muted); }
 
 .sv-panel { background: #fff; border: 1px solid var(--color-border); border-radius: 8px; }
 .sv-panel__head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--color-border); }
@@ -307,4 +308,41 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 @media (max-width: 640px) {
     .sv-search { max-width: none; }
     .sv-table-wrap .sv-table { min-width: 640px; }
+}
+
+/* ================= Admin > Providers ================= */
+.sv-tabs--inline { display: flex; width: fit-content; max-width: 100%; margin-bottom: 4px; }
+
+.sv-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+.sv-cards__empty { margin-top: 18px; }
+.sv-pcard { display: flex; flex-direction: column; gap: 10px; padding: 16px; background: #fff; border: 1px solid var(--color-border); border-radius: 8px; }
+.sv-pcard__head { display: flex; align-items: center; gap: 10px; }
+.sv-pcard__name { margin: 0; font-size: .9375rem; font-weight: 600; line-height: 1.2; }
+.sv-pcard__biz { font-size: .75rem; color: var(--color-text-muted); }
+.sv-pcard__where { font-size: .6875rem; color: #94A3B8; }
+.sv-pcard__rating { display: flex; align-items: center; gap: 8px; min-height: 18px; font-size: .75rem; color: var(--color-text-muted); }
+.sv-pcard__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 24px; }
+.sv-pcard__none { font-size: .6875rem; color: #94A3B8; }
+.sv-chip { padding: 3px 9px; border: 1px solid #E2E8F0; border-radius: 4px; background: #F1F5F9; font-size: .6875rem; color: #475569; }
+.sv-chip--more { padding-left: 2px; border-color: transparent; background: transparent; color: #94A3B8; }
+.sv-pcard__foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 4px; }
+.sv-pcard__badges { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (max-width: 1000px) { .sv-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px)  { .sv-cards { grid-template-columns: 1fr; } }
+
+/* ================= Admin > Bookings ================= */
+.sv-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.sv-filter { padding: 5px 14px; border: 1px solid var(--color-border); border-radius: 999px; background: #fff; font-size: .75rem; color: var(--color-text-muted); text-decoration: none; white-space: nowrap; }
+.sv-filter:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.sv-filter.is-active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+.sv-filter__n { margin-left: 2px; opacity: .75; }
+
+.sv-tag--refunded { background: #F3E8FF; color: #6B21A8; border-color: #E9D5FF; }
+.sv-viewlink { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--color-primary); }
+.sv-viewlink.is-disabled { opacity: .5; cursor: not-allowed; }
+.sv-table__nowrap { white-space: nowrap; }
+
+@media (max-width: 900px) {
+    .sv-table-wrap .sv-table--bookings { min-width: 780px; }
 }
