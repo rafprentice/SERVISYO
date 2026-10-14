@@ -815,3 +815,62 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
     .sv-ms__chat { height: calc(100vh - var(--portal-top) - 120px); min-height: 420px; }
     .sv-ms__row { max-width: 92%; }
 }
+
+/* ================= Customer > My Profile =================
+   The avatar wrapper and its (disabled) photo button reuse .sv-pf__avatarwrap / .sv-pf__edit of the provider profile. */
+.sv-cp { max-width: 900px; margin: 0 auto; }
+.sv-cp [hidden] { display: none !important; }
+.sv-cp__grid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; align-items: start; }
+
+.sv-cp__side { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 18px; text-align: center; }
+.sv-cp__avatar { width: 80px; height: 80px; font-size: 1.5rem; }
+.sv-cp__side .sv-pf__avatarwrap { margin-bottom: 6px; }
+.sv-cp__side .sv-pf__edit { right: 2px; bottom: 2px; width: 26px; height: 26px; }
+.sv-cp__name { font-size: 1rem; font-weight: 700; overflow-wrap: anywhere; }
+.sv-cp__email { margin-bottom: 6px; font-size: .75rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.sv-cp__meta { display: grid; gap: 8px; align-self: stretch; margin: 14px 0 0; padding-top: 14px; border-top: 1px solid var(--color-border); font-size: .75rem; }
+.sv-cp__meta > div { display: flex; justify-content: space-between; gap: 8px; }
+.sv-cp__meta dt { color: var(--color-text-muted); }
+.sv-cp__meta dd { margin: 0; font-weight: 500; }
+
+.sv-cp__main { display: grid; gap: 16px; min-width: 0; }
+.sv-cp__card { padding: 18px 20px; }
+.sv-cp__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.sv-cp__title { margin: 0; font-size: .9375rem; font-weight: 600; }
+.sv-cp__title--solo { margin-bottom: 6px; }
+.sv-cp__sub { margin: 2px 0 0; font-size: .6875rem; color: var(--color-text-muted); }
+
+.sv-cp__form { display: grid; gap: 14px; }
+.sv-cp__form .sv-formerr { margin: 0; }
+.sv-cp__form .sv-fld label { font-size: .625rem; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
+.sv-cp__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.sv-cp__form.is-readonly .sv-fld input { background: #F8FAFC; color: var(--color-text-muted); cursor: default; }
+.sv-cp__form.is-readonly .sv-fld input:focus { outline: none; }
+.sv-cp__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sv-cp__form.is-busy .sv-btn { opacity: .6; pointer-events: none; }
+.sv-cp__inline { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--color-border); }
+
+.sv-cp__item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: #F8FAFC; }
+.sv-cp__itemicon { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--color-tint); color: var(--color-primary); }
+.sv-cp__itemicon svg { display: block; }
+.sv-cp__itembody { flex: 1; min-width: 0; }
+.sv-cp__itemname { display: flex; align-items: center; gap: 6px; font-size: .8125rem; font-weight: 600; }
+.sv-cp__badge { padding: 1px 7px; border-radius: 4px; background: var(--color-primary); color: #fff; font-size: .625rem; font-weight: 600; }
+.sv-cp__itemtext { margin-top: 2px; font-size: .75rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.sv-cp__trashform { margin: 0; }
+.sv-cp__trash { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #94A3B8; cursor: pointer; }
+.sv-cp__trash:hover { background: #FEE2E2; color: #B91C1C; }
+.sv-cp__empty { margin: 0; font-size: .8125rem; color: var(--color-text-muted); }
+
+.sv-cp__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
+.sv-cp__row--line { margin-top: 6px; padding-bottom: 0; border-top: 1px solid var(--color-border); }
+.sv-cp__rowtitle { font-size: .8125rem; font-weight: 600; }
+.sv-cp__rowsub { font-size: .6875rem; color: var(--color-text-muted); }
+
+@media (max-width: 760px) {
+    .sv-cp__grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+    .sv-cp__fields { grid-template-columns: minmax(0, 1fr); }
+    .sv-cp__card { padding: 16px; }
+}

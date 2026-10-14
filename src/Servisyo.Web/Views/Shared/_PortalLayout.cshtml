@@ -35,7 +35,7 @@
             ("find",      "Find Services", "search",   Url.Action("Index", "FindServices"), 0),
             ("bookings",  "My Bookings",   "calendar", Url.Action("Index", "CustomerBookings"), 0),
             ("messages",  "Messages",      "message",  Url.Action("Index", "Messages"), shell.UnreadMessages),
-            ("profile",   "My Profile",    "user",     null, 0)
+            ("profile",   "My Profile",    "user",     Url.Action("Index", "CustomerProfile"), 0)
         };
 }
 <!DOCTYPE html>
