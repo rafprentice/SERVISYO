@@ -1,7 +1,13 @@
+using Microsoft.EntityFrameworkCore;
+using Servisyo.Web.Data;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddControllersWithViews();
+
+builder.Services.AddDbContext<ServisyoDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 
@@ -27,3 +33,4 @@ app.MapControllerRoute(
 
 
 app.Run();
+
