@@ -488,3 +488,5 @@ publish/
 servisyo-publish.zip
 appsettings.Production.json
 appsettings.*.local.json
+
+graphify-out/
