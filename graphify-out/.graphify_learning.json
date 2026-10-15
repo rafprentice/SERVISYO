@@ -1,0 +1,229 @@
+{
+  "generated_at": "2026-10-15T03:52:19.941069+00:00",
+  "nodes": {
+    "claude": {
+      "code_fingerprint": "b9393a8c9e0e72b34daf4164ddaf8ce437ca68bee1dff19de4d59a8214752d6b",
+      "label": "CLAUDE.md",
+      "last": "2026-10-15T02:47:47.884698+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.884698+00:00",
+          "outcome": "useful",
+          "q": "where i can see the file .md file?"
+        },
+        {
+          "date": "2026-10-15T02:47:47.543668+00:00",
+          "outcome": "useful",
+          "q": "can you make me .md file for claude to maximize tokens, and you are a Senior Dev which is a full stack and current working on this project servisyo and link the .md file to graphify to that i can build my codebase so you can maximize the 2nd brain"
+        },
+        {
+          "date": "2026-10-15T02:47:46.886903+00:00",
+          "outcome": "useful",
+          "q": "graphify claude install"
+        }
+      ],
+      "score": 2.996894879,
+      "source_file": "CLAUDE.md",
+      "status": "preferred",
+      "uses": 3
+    },
+    "claude_graphify": {
+      "code_fingerprint": "b9393a8c9e0e72b34daf4164ddaf8ce437ca68bee1dff19de4d59a8214752d6b",
+      "label": "graphify",
+      "last": "2026-10-15T02:47:47.543668+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.543668+00:00",
+          "outcome": "useful",
+          "q": "can you make me .md file for claude to maximize tokens, and you are a Senior Dev which is a full stack and current working on this project servisyo and link the .md file to graphify to that i can build my codebase so you can maximize the 2nd brain"
+        },
+        {
+          "date": "2026-10-15T02:47:46.886903+00:00",
+          "outcome": "useful",
+          "q": "graphify claude install"
+        }
+      ],
+      "score": 1.9979298,
+      "source_file": "CLAUDE.md",
+      "status": "preferred",
+      "uses": 2
+    },
+    "github_agents_claude_agent_claude": {
+      "code_fingerprint": "7c5248fb34a5a9020f70a725466ae1a9e508b911c175b5453942827484f9b38d",
+      "label": "Claude",
+      "last": "2026-10-15T02:47:46.886903+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:46.886903+00:00",
+          "outcome": "useful",
+          "q": "graphify claude install"
+        }
+      ],
+      "score": 0.998964812,
+      "source_file": ".github/agents/Claude.agent.md",
+      "status": "tentative",
+      "uses": 1
+    },
+    "servisyo": {
+      "code_fingerprint": "f6a5517b606ca67057f679d109b4eaca9ca02cac93c150c01050dd10dae50b77",
+      "label": "Servisyo.slnx",
+      "last": "2026-10-15T02:47:47.884698+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.884698+00:00",
+          "outcome": "useful",
+          "q": "where i can see the file .md file?"
+        }
+      ],
+      "score": 0.998965079,
+      "source_file": "Servisyo.slnx",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_controllers_accountcontroller": {
+      "code_fingerprint": "83a2cd1605809bbe92b1a3c7a0ee7bb4d9cbc1d82251840d016b62ca5def5cde",
+      "label": "AccountController.cs",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/Controllers/AccountController.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_controllers_adminapplicationscontroller_servisyo_web_controllers_adminapplicationscontroller": {
+      "code_fingerprint": "0bfe6f2bf7375adec930454e8e9e4c57c3db3ef8e6e26e617278344ea184d7b0",
+      "label": "AdminApplicationsController",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/Controllers/AdminApplicationsController.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_controllers_admincategoriescontroller_servisyo_web_controllers_admincategoriescontroller_update": {
+      "code_fingerprint": "6b5774003a46d0c5ad78c10f96fed4d553bd604c373c8fecdaed1f8d8a69d2b8",
+      "label": ".Update()",
+      "last": "2026-10-15T02:47:47.543668+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.543668+00:00",
+          "outcome": "useful",
+          "q": "can you make me .md file for claude to maximize tokens, and you are a Senior Dev which is a full stack and current working on this project servisyo and link the .md file to graphify to that i can build my codebase so you can maximize the 2nd brain"
+        }
+      ],
+      "score": 0.998964988,
+      "source_file": "src/Servisyo.Web/Controllers/AdminCategoriesController.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_controllers_dashboardcontroller": {
+      "code_fingerprint": "889d59a24342146e40b7af7e5a8350db1000f84177d5a074c3f873c69fc47ddb",
+      "label": "DashboardController.cs",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/Controllers/DashboardController.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_data_servisyodbcontext_servisyo_web_data_servisyodbcontext_users": {
+      "code_fingerprint": "68800d2dc4dc9e704bf9ba3c4962667cb10e941e188ff30ba59e14e00a5b442d",
+      "label": "Users",
+      "last": "2026-10-15T02:47:47.884698+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.884698+00:00",
+          "outcome": "useful",
+          "q": "where i can see the file .md file?"
+        }
+      ],
+      "score": 0.998965079,
+      "source_file": "src/Servisyo.Web/Data/ServisyoDbContext.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_services_providerapprovalservice": {
+      "code_fingerprint": "ad05b26d886f1ec920a11799407443ea1644eb8aa14221585abcb09a05974455",
+      "label": "ProviderApprovalService.cs",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/Services/ProviderApprovalService.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_viewmodels_providerdashboardviewmodels_servisyo_web_viewmodels_providerdashboardaccess_pending": {
+      "code_fingerprint": "e7f81475dcbfa03d4085ea59e3ff0a8afbea2de4ffdeded110415a43c194350b",
+      "label": "Pending",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/ViewModels/ProviderDashboardViewModels.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_viewmodels_providerdashboardviewmodels_servisyo_web_viewmodels_providerdashboardaccess_rejected": {
+      "code_fingerprint": "e7f81475dcbfa03d4085ea59e3ff0a8afbea2de4ffdeded110415a43c194350b",
+      "label": "Rejected",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/ViewModels/ProviderDashboardViewModels.cs",
+      "status": "tentative",
+      "uses": 1
+    },
+    "src_servisyo_web_views_dashboard_applicationnotapproved": {
+      "code_fingerprint": "850bffdb4c8765a8d39b9b81ac19ea00cedc0252ef155600328daebdb16e80e0",
+      "label": "ApplicationNotApproved.cshtml",
+      "last": "2026-10-15T02:47:47.217681+00:00",
+      "provenance": [
+        {
+          "date": "2026-10-15T02:47:47.217681+00:00",
+          "outcome": "useful",
+          "q": "how does application approval work in Servisyo?"
+        }
+      ],
+      "score": 0.998964901,
+      "source_file": "src/Servisyo.Web/Views/Dashboard/ApplicationNotApproved.cshtml",
+      "status": "tentative",
+      "uses": 1
+    }
+  },
+  "version": 1
+}

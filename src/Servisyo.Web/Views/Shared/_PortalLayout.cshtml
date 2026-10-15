@@ -6,7 +6,6 @@
     var isProvider = shell.Role == "Provider";
     var isAdmin = shell.Role == "Admin";
     var roleLabel = isAdmin ? "Admin" : isProvider ? "Service Provider" : "Customer";
-    var sidebarLogout = isProvider || isAdmin;   // customers keep Sign Out in the top bar
 
     // Url = null means "not built yet": shown greyed out. Give it a URL when that stage is built.
     var items = isAdmin
@@ -82,12 +81,6 @@
                 </div>
                 @Html.AntiForgeryToken()
             </div>
-            @if (!sidebarLogout)
-            {
-                <form asp-controller="Account" asp-action="Logout" method="post" class="sv-inline-form">
-                    <button type="submit" class="sv-btn sv-btn--outline sv-btn--xs">Sign Out</button>
-                </form>
-            }
         </div>
     </header>
 
@@ -129,19 +122,9 @@
                 }
             </nav>
 
-            @if (sidebarLogout)
-            {
-                <form asp-controller="Account" asp-action="Logout" method="post" class="sv-side__foot">
-                    <button type="submit" class="sv-side__logout">@Icons.Svg("log-out", 16)<span>Logout</span></button>
-                </form>
-            }
-            else
-            {
-                <a class="sv-side__back" asp-controller="Home" asp-action="Index">
-                    @Icons.Svg("log-out", 14)
-                    <span>Back to Home</span>
-                </a>
-            }
+            <form asp-controller="Account" asp-action="Logout" method="post" class="sv-side__foot">
+                <button type="submit" class="sv-side__logout">@Icons.Svg("log-out", 16)<span>Logout</span></button>
+            </form>
         </aside>
 
         <main class="sv-portal__main @(ViewData["MainClass"])" id="main">

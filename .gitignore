@@ -483,3 +483,8 @@ $RECYCLE.BIN/
 
 appsettings.*.local.json
 appsettings.*.local.json
+
+publish/
+servisyo-publish.zip
+appsettings.Production.json
+appsettings.*.local.json

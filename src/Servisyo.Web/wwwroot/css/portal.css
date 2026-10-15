@@ -1006,3 +1006,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
     .sv-np__panel { position: fixed; top: 56px; right: 12px; left: 12px; width: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .sv-np__panel:not([hidden]) { animation: none; } }
+
+/* Sign Out at the bottom of the sidebar (all roles) */
+.sv-side__logout { transition: color .15s, background-color .15s; }
+.sv-side__logout:hover, .sv-side__logout:focus-visible { background: #FEF2F2; color: #DC2626; outline: 0; }

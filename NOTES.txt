@@ -1,0 +1,3 @@
+Browser tab icon (favicon): purple rounded square with the white SERVISYO house, same as the logo in the top bar.
+Files: wwwroot/favicon.svg, favicon.ico (16/32/48), apple-touch-icon.png (180); <link> tags added to _Layout, _AuthLayout and _PortalLayout.
+Browsers cache tab icons hard: after installing, press Ctrl+F5 (or close the tab and open a new one).
