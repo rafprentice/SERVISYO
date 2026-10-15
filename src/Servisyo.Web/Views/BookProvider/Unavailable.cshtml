@@ -1,0 +1,18 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model PortalShellViewModel
+@{
+    ViewData["Title"] = "Book a Service";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model;
+    ViewData["ActiveNav"] = "find";
+}
+
+<div class="sv-bp">
+    <section class="sv-panel sv-empty-hero">
+        <span class="sv-empty-hero__icon" aria-hidden="true">@Icons.Svg("alert", 22)</span>
+        <h1 class="sv-empty-hero__title">This provider can't be booked right now</h1>
+        <p class="sv-empty-hero__text">They may not be approved, may have paused their account, or have no services available at the moment.</p>
+        <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="FindServices" asp-action="Index">Back to Find Services</a>
+    </section>
+</div>

@@ -157,8 +157,7 @@
                             <span>@card.PriceLabel</span>
                             <strong>@(card.PriceText ?? "—")</strong>
                         </div>
-                        <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" disabled
-                                title="Booking opens in an upcoming update">Book this Provider</button>
+                        <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="BookProvider" asp-action="Index" asp-route-providerId="@card.ProviderId">Book this Provider</a>
                     </div>
                 </li>
             }

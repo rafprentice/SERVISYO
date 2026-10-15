@@ -22,6 +22,7 @@ builder.Services.AddScoped<IFindServicesService, FindServicesService>();
 builder.Services.AddScoped<ICustomerBookingsService, CustomerBookingsService>();
 builder.Services.AddScoped<IMessagingService, MessagingService>();
 builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
+builder.Services.AddScoped<IBookProviderService, BookProviderService>();
 builder.Services.AddScoped<IProviderDashboardService, ProviderDashboardService>();
 builder.Services.AddScoped<IAdminDashboardService, AdminDashboardService>();
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
