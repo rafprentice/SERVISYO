@@ -192,8 +192,8 @@
     "semantic_hash": "9b81efc21d1a71b8939e00fceb74eadb"
   },
   "src/Servisyo.Web/Program.cs": {
-    "mtime": 1792035957.5431063,
-    "seen": 1792036339.4632878,
+    "mtime": 1792053235.8819845,
+    "seen": 1792055974.395512,
     "ast_hash": "e5a62cd8b988dc323e9fdfbbc6915591",
     "semantic_hash": ""
   },
@@ -678,9 +678,9 @@
     "semantic_hash": "78731d003a8717f692ace57a3f316e0c"
   },
   "src/Servisyo.Web/Views/Shared/_PortalLayout.cshtml": {
-    "mtime": 1792036162.0,
-    "seen": 1792036339.463496,
-    "ast_hash": "49e61c03c9232fc9c255ac3870079b25",
+    "mtime": 1792050496.0,
+    "seen": 1792055974.3956957,
+    "ast_hash": "703a70a9831477d76dcd9a3434af0405",
     "semantic_hash": ""
   },
   "src/Servisyo.Web/Views/Shared/_ValidationScriptsPartial.cshtml": {
@@ -1317,6 +1317,12 @@
     "mtime": 1792036148.0,
     "seen": 1792036339.463676,
     "ast_hash": "089300addab48e6b997cf16060025c34",
+    "semantic_hash": ""
+  },
+  "deploy.sql": {
+    "mtime": 1792052618.1903663,
+    "seen": 1792055974.3954093,
+    "ast_hash": "c82bc3e219315e0d121cc8be896f8d30",
     "semantic_hash": ""
   }
 }

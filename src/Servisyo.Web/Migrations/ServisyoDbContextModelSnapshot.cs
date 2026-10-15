@@ -303,6 +303,56 @@ namespace Servisyo.Web.Migrations
                     b.ToTable("CUSTOMERS", (string)null);
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.EmailOtp", b =>
+                {
+                    b.Property<int>("EmailOtpId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("EMAIL_OTP_ID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("EmailOtpId"));
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int")
+                        .HasColumnName("ATTEMPTS");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)")
+                        .HasColumnName("CODE_HASH");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("CONSUMED_AT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("CREATED_AT")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("EXPIRES_AT");
+
+                    b.Property<string>("Purpose")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("PURPOSE");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int")
+                        .HasColumnName("USER_ID");
+
+                    b.HasKey("EmailOtpId");
+
+                    b.HasIndex("UserId", "Purpose");
+
+                    b.ToTable("EMAIL_OTPS", (string)null);
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.Message", b =>
                 {
                     b.Property<int>("MessageId")
@@ -764,6 +814,10 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("nvarchar(155)")
                         .HasColumnName("EMAIL");
 
+                    b.Property<bool>("EmailVerificationPending")
+                        .HasColumnType("bit")
+                        .HasColumnName("EMAIL_VERIFICATION_PENDING");
+
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasMaxLength(155)
@@ -891,6 +945,17 @@ namespace Servisyo.Web.Migrations
                     b.HasOne("Servisyo.Web.Models.User", "User")
                         .WithOne("Customer")
                         .HasForeignKey("Servisyo.Web.Models.Customer", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.EmailOtp", b =>
+                {
+                    b.HasOne("Servisyo.Web.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 

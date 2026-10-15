@@ -1,0 +1,21 @@
+<style>
+    /* Small extras for the code / notice screens. Uses the colours from site.css. */
+    .sv-notice {
+        margin-bottom: 18px; padding: 10px 14px; border: 1px solid #ABEFC6; background: #ECFDF3;
+        color: #067647; border-radius: 6px; font-size: .8125rem; text-align: left;
+    }
+    .sv-notice--info { border-color: #B2CCFF; background: #EFF4FF; color: #194185; }
+    .sv-code input {
+        text-align: center; letter-spacing: .6em; padding-left: .6em;
+        font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums;
+    }
+    .sv-readonly input { color: var(--color-text-muted); background: #F8F9FA; }
+    .sv-resend { margin: 16px 0 0; text-align: center; font-size: .8125rem; color: var(--color-text-muted); }
+    .sv-resend form { display: inline; }
+    .sv-linkbtn {
+        display: inline; padding: 0; border: 0; background: none; cursor: pointer;
+        font: inherit; font-weight: 600; color: var(--color-primary); text-decoration: none;
+    }
+    .sv-linkbtn:hover:not(:disabled) { text-decoration: underline; }
+    .sv-linkbtn:disabled { color: var(--color-text-muted); cursor: default; font-weight: 500; }
+</style>

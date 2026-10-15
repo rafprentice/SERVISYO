@@ -17,6 +17,7 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Customer? Customer { get; set; }
+    public bool EmailVerificationPending { get; set; }
     public Provider? Provider { get; set; }
 }
 

@@ -30,10 +30,10 @@
     "semantic_hash": "727c15459df5b6a37c6a70c983c38c26"
   },
   "src/Servisyo.Web/Controllers/AdminProvidersController.cs": {
-    "mtime": 1791972572.0,
-    "seen": 1792030148.3283792,
-    "ast_hash": "1bb81460d8e7eefc3e3f96cd3e12d614",
-    "semantic_hash": "1bb81460d8e7eefc3e3f96cd3e12d614"
+    "mtime": 1792034780.0,
+    "seen": 1792036339.4632132,
+    "ast_hash": "5e4e6303aa6cd04e8ad57903f39e86ba",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Controllers/AdminReviewsController.cs": {
     "mtime": 1791974942.0,
@@ -192,9 +192,9 @@
     "semantic_hash": "9b81efc21d1a71b8939e00fceb74eadb"
   },
   "src/Servisyo.Web/Program.cs": {
-    "mtime": 1792033442.1091762,
-    "seen": 1792034157.95444,
-    "ast_hash": "0adef1335693d0adf6f867ace51de7d8",
+    "mtime": 1792035957.5431063,
+    "seen": 1792036339.4632878,
+    "ast_hash": "e5a62cd8b988dc323e9fdfbbc6915591",
     "semantic_hash": ""
   },
   "src/Servisyo.Web/Properties/launchSettings.json": {
@@ -222,10 +222,10 @@
     "semantic_hash": "fa5b18b790da48da15b15bb3d4d66a5b"
   },
   "src/Servisyo.Web/Services/AuthService.cs": {
-    "mtime": 1791962472.0,
-    "seen": 1792030148.3284266,
-    "ast_hash": "4e5b9b630bfa1d738a7fd2d3fde63772",
-    "semantic_hash": "4e5b9b630bfa1d738a7fd2d3fde63772"
+    "mtime": 1792035598.0,
+    "seen": 1792036339.4632995,
+    "ast_hash": "cfe6a22941fbfbbba44b674fda705752",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Services/BookingMonitorService.cs": {
     "mtime": 1791973188.0,
@@ -300,10 +300,10 @@
     "semantic_hash": "b6ca706a98a5fdf98a2e2fe3d58d1f27"
   },
   "src/Servisyo.Web/Services/ProviderManagementService.cs": {
-    "mtime": 1791972598.0,
-    "seen": 1792030148.3284457,
-    "ast_hash": "e6a143c6fcc0b115a3595aa433d5bf81",
-    "semantic_hash": "e6a143c6fcc0b115a3595aa433d5bf81"
+    "mtime": 1792034758.0,
+    "seen": 1792036339.4633372,
+    "ast_hash": "1f237b8bdbf9713cc695dff0ffa7a67a",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Services/ProviderOfferingsService.cs": {
     "mtime": 1791980300.0,
@@ -522,10 +522,10 @@
     "semantic_hash": "de3523cdb4d9de54345660642a638ddf"
   },
   "src/Servisyo.Web/Views/AdminProviders/Index.cshtml": {
-    "mtime": 1791976616.0,
-    "seen": 1792030148.3285003,
-    "ast_hash": "f86f2b66edf78c89973c174a871bc7b9",
-    "semantic_hash": "f86f2b66edf78c89973c174a871bc7b9"
+    "mtime": 1792034786.0,
+    "seen": 1792036339.4634292,
+    "ast_hash": "ea3fb9228f4686b0b310d326a02595e3",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Views/AdminReviews/Index.cshtml": {
     "mtime": 1791974966.0,
@@ -654,10 +654,10 @@
     "semantic_hash": "03b1958854a7b3634eebd77e672a13da"
   },
   "src/Servisyo.Web/Views/Shared/_AuthLayout.cshtml": {
-    "mtime": 1791964388.0,
-    "seen": 1792030148.328532,
-    "ast_hash": "cc3886e0cb439b52205cf628cbb41e9b",
-    "semantic_hash": "cc3886e0cb439b52205cf628cbb41e9b"
+    "mtime": 1792036162.0,
+    "seen": 1792036339.4634871,
+    "ast_hash": "b4d4e9eb0f7410b4b6e3903fca2b717c",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Views/Shared/_CategoryIcon.cshtml": {
     "mtime": 1791963096.0,
@@ -666,10 +666,10 @@
     "semantic_hash": "3ef9d7ed4c3e9139fb5ac10d1c180ba6"
   },
   "src/Servisyo.Web/Views/Shared/_Layout.cshtml": {
-    "mtime": 1791969066.0,
-    "seen": 1792030148.3285348,
-    "ast_hash": "7bab6e558c3cb821447d076e8f141637",
-    "semantic_hash": "7bab6e558c3cb821447d076e8f141637"
+    "mtime": 1792036162.0,
+    "seen": 1792036339.4634917,
+    "ast_hash": "fb1b68bf99abecdb66050824e32f3182",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Views/Shared/_PasswordToggle.cshtml": {
     "mtime": 1791964388.0,
@@ -678,10 +678,10 @@
     "semantic_hash": "78731d003a8717f692ace57a3f316e0c"
   },
   "src/Servisyo.Web/Views/Shared/_PortalLayout.cshtml": {
-    "mtime": 1792033110.0,
-    "seen": 1792034157.9546025,
-    "ast_hash": "885e1f9a7330655c69988f0fac321155",
-    "semantic_hash": "885e1f9a7330655c69988f0fac321155"
+    "mtime": 1792036162.0,
+    "seen": 1792036339.463496,
+    "ast_hash": "49e61c03c9232fc9c255ac3870079b25",
+    "semantic_hash": ""
   },
   "src/Servisyo.Web/Views/Shared/_ValidationScriptsPartial.cshtml": {
     "mtime": 1791956996.882504,
@@ -1227,6 +1227,96 @@
     "mtime": 1792032468.2000499,
     "seen": 1792034157.9547303,
     "ast_hash": "6de52cf524335b2e09310af305348668",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/Controllers/NotificationsController.cs": {
+    "mtime": 1792035528.0,
+    "seen": 1792036339.463242,
+    "ast_hash": "5d4d4789171ab1d1c4ae1088f4d6cd50",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/Services/NotificationService.cs": {
+    "mtime": 1792035506.0,
+    "seen": 1792036339.4633255,
+    "ast_hash": "4ecde951c63a0e51bfe1417e002d6e37",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/ViewModels/NotificationViewModels.cs": {
+    "mtime": 1792035506.0,
+    "seen": 1792036339.463375,
+    "ast_hash": "53de7491ea1fea2522adb4407ba8df08",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/ViewModels/ProviderDetailsViewModels.cs": {
+    "mtime": 1792034758.0,
+    "seen": 1792036339.463389,
+    "ast_hash": "a12190231a52a2e25e3ea6e8c45522a6",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/Views/AdminProviders/Details.cshtml": {
+    "mtime": 1792034786.0,
+    "seen": 1792036339.463427,
+    "ast_hash": "7b799c86bcde0d5b13085884cc1bca03",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/Views/AdminProviders/_ProviderDetails.cshtml": {
+    "mtime": 1792034792.0,
+    "seen": 1792036339.463431,
+    "ast_hash": "0249fe1d8cd2750ce7389368b06507a1",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/Views/Notifications/Index.cshtml": {
+    "mtime": 1792035528.0,
+    "seen": 1792036339.4634695,
+    "ast_hash": "5e8ee9bf5cf3b480b17e81915172c6b0",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/wwwroot/js/notifications.js": {
+    "mtime": 1792035554.0,
+    "seen": 1792036339.4635313,
+    "ast_hash": "a471c6a56c1ce00be142ed1796f9b75d",
+    "semantic_hash": ""
+  },
+  "tests/Servisyo.Tests/NotificationTests.cs": {
+    "mtime": 1792035598.0,
+    "seen": 1792036339.4635773,
+    "ast_hash": "ae9c69d141fa49cf0dd6b87d968bc250",
+    "semantic_hash": ""
+  },
+  "tests/Servisyo.Tests/ProviderDetailsTests.cs": {
+    "mtime": 1792034820.0,
+    "seen": 1792036339.463588,
+    "ast_hash": "f2010c8d02235191c8fd4e459499512d",
+    "semantic_hash": ""
+  },
+  "NOTES.txt": {
+    "mtime": 1792036162.0,
+    "seen": 1792036339.4636106,
+    "ast_hash": "6ff372cee0e35b853a3bd58bf257b657",
+    "semantic_hash": ""
+  },
+  "docs/notification-bell-notes.md": {
+    "mtime": 1792035598.0,
+    "seen": 1792036339.4636357,
+    "ast_hash": "502c41bd31d5be166bc5c78624d514d0",
+    "semantic_hash": ""
+  },
+  "docs/provider-details-notes.md": {
+    "mtime": 1792034820.0,
+    "seen": 1792036339.463642,
+    "ast_hash": "b4694c4d1e4b48f7b01cfa376ad2efc5",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/wwwroot/apple-touch-icon.png": {
+    "mtime": 1792036156.0,
+    "seen": 1792036339.4636738,
+    "ast_hash": "58e8f0e9c9ddf256ce93ae87d9c12d10",
+    "semantic_hash": ""
+  },
+  "src/Servisyo.Web/wwwroot/favicon.svg": {
+    "mtime": 1792036148.0,
+    "seen": 1792036339.463676,
+    "ast_hash": "089300addab48e6b997cf16060025c34",
     "semantic_hash": ""
   }
 }
