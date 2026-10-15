@@ -7,8 +7,6 @@
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "providers";
 
-    var soon = "Available in an upcoming update";
-
     // The four tabs from the design are always shown. "Rejected" and "Deactivated" only appear when
     // there is at least one, so no provider is ever hidden from the filters.
     var tabs = new List<(string Key, string Label, int Count)>
@@ -118,7 +116,8 @@ else
                     }
                     else
                     {
-                        <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">View Details</button>
+                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                           href="@Url.Action("Details", "AdminProviders", new { providerId = c.ProviderId, status = StatusParam(), page = Model.Page })">View Details</a>
                     }
                 </div>
             </article>

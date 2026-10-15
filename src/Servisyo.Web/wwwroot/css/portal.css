@@ -939,3 +939,70 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-booking__actions .sv-inline-form { display: inline; margin: 0; }
 .sv-booking__actions a.sv-btn { text-decoration: none; }
 @media (max-width: 520px) { .sv-step__label { letter-spacing: -.01em; } }
+
+/* ================= Admin provider details pop-up ================= */
+.sv-btn--warn-outline { background: #fff; color: #B45309; border-color: #FCD34D; }
+.sv-btn--warn-outline:hover { background: #FFFBEB; border-color: #F59E0B; color: #92400E; }
+.sv-pd.sv-rv { text-align: left; }
+.sv-pd__banner { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 16px 22px 4px; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: 8px; background: #F8FAFC; }
+.sv-pd__who { flex: 1 1 180px; min-width: 0; }
+.sv-pd__name { font: 600 1rem var(--font-display); }
+.sv-pd__biz { font-size: .8125rem; color: var(--color-text); }
+.sv-pd__where { font-size: .75rem; color: var(--color-text-muted); }
+.sv-pd__badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.sv-pd__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; margin: 0; padding: 14px 22px 4px; }
+.sv-pd__cell dt { font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--color-text-muted); }
+.sv-pd__cell dd { margin: 2px 0 0; font-size: .8125rem; font-weight: 500; overflow-wrap: anywhere; }
+.sv-pd__section { padding: 10px 22px 0; }
+.sv-pd__h { margin: 0 0 6px; font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--color-text-muted); }
+.sv-pd__box { margin: 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 6px; background: #F8FAFC; font-size: .8125rem; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+.sv-pd__none { margin: 0; font-size: .8125rem; }
+.sv-pd__services { margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-border); border-radius: 6px; }
+.sv-pd__services li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: .8125rem; border-bottom: 1px solid #EEF1F7; }
+.sv-pd__services li:last-child { border-bottom: 0; }
+.sv-pd__scat { margin-left: 6px; font-size: .6875rem; color: var(--color-text-muted); }
+.sv-pd__sprice { flex: none; font-weight: 600; }
+.sv-pd__sprice span { font-weight: 400; color: var(--color-text-muted); }
+.sv-pd__form { padding-top: 16px; }
+@media (max-width: 520px) { .sv-pd__grid { grid-template-columns: 1fr; } }
+
+/* ================= Notification bell ================= */
+.sv-bell--btn { border: 0; border-radius: 50%; background: transparent; cursor: pointer; font: inherit; }
+.sv-bell--btn:hover, .sv-bell--btn[aria-expanded="true"] { background: var(--color-surface-soft, #F1F5F9); color: var(--color-text); }
+.sv-bell--btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.sv-bell .sv-count--float { top: -2px; right: -2px; border: 2px solid #fff; box-sizing: content-box; min-width: 14px; height: 14px; }
+.sv-np { position: relative; }
+.sv-np__panel { position: absolute; z-index: 60; top: calc(100% + 8px); right: 0; width: min(384px, calc(100vw - 24px)); overflow: hidden;
+    border: 1px solid var(--color-border); border-radius: 12px; background: #fff; box-shadow: 0 18px 44px rgba(18, 20, 38, .2); }
+.sv-np__panel[hidden] { display: none; }
+.sv-np__panel:not([hidden]) { animation: sv-np-in .14s ease-out; }
+@keyframes sv-np-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.sv-np__head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); font-size: .875rem; }
+.sv-np__pill { padding: 1px 8px; border-radius: 999px; background: #EEF2FF; color: #4338CA; font-size: .6875rem; font-weight: 600; }
+.sv-np__pill[hidden], .sv-np__readall[hidden] { display: none; }
+.sv-np__readall { margin-left: auto; padding: 0; border: 0; background: none; color: var(--color-primary); font: 500 .75rem var(--font-body); cursor: pointer; }
+.sv-np__readall:hover { text-decoration: underline; }
+.sv-np__list { max-height: min(420px, 60vh); margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.sv-np__empty { padding: 28px 16px; text-align: center; font-size: .8125rem; color: var(--color-text-muted); }
+.sv-np__item { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #EEF1F7; color: var(--color-text); text-decoration: none; }
+.sv-np__item:hover, .sv-np__item:focus-visible { background: #F8FAFC; outline: 0; }
+.sv-np__item.is-unread { background: #F5F7FF; }
+.sv-np__icon { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #F1F5F9; color: #64748B; }
+.sv-np__icon--calendar, .sv-np__icon--booking-new, .sv-np__icon--booking-update { background: #DBEAFE; color: #1D4ED8; }
+.sv-np__icon--booking-cancelled { background: #FEE2E2; color: #B91C1C; }
+.sv-np__icon--user, .sv-np__icon--application-new, .sv-np__icon--application { background: #DCFCE7; color: #15803D; }
+.sv-np__body { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.sv-np__title { font-size: .8125rem; font-weight: 600; }
+.sv-np__msg { font-size: .75rem; line-height: 1.4; color: #475569; overflow-wrap: anywhere; }
+.sv-np__time { font-size: .6875rem; color: #94A3B8; }
+.sv-np__dot { flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--color-primary); }
+.sv-np__foot { display: block; padding: 10px 16px; border-top: 1px solid var(--color-border); background: #F8FAFC; text-align: center; font-size: .75rem; font-weight: 600; color: var(--color-primary); text-decoration: none; }
+.sv-np__foot:hover { background: #EEF2FF; }
+.sv-np-page__bar { margin: 0 0 12px; }
+.sv-np-page__list { margin: 0 0 16px; padding: 0; overflow: hidden; list-style: none; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; }
+.sv-np-page__list li:last-child .sv-np__item { border-bottom: 0; }
+@media (max-width: 520px) {
+    .sv-np { position: static; }
+    .sv-np__panel { position: fixed; top: 56px; right: 12px; left: 12px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .sv-np__panel:not([hidden]) { animation: none; } }

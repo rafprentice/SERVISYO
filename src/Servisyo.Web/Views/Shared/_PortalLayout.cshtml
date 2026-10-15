@@ -44,6 +44,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - SERVISYO</title>
+    <link rel="icon" type="image/svg+xml" href="~/favicon.svg" asp-append-version="true" />
+    <link rel="icon" sizes="any" href="~/favicon.ico" asp-append-version="true" />
+    <link rel="apple-touch-icon" href="~/apple-touch-icon.png" asp-append-version="true" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -61,13 +64,24 @@
         </div>
         <div class="sv-top__right">
             <a class="sv-btn sv-btn--outline sv-btn--xs" asp-controller="Home" asp-action="Index">Home</a>
-            <span class="sv-bell" role="img" aria-label="@(shell.UnreadNotifications) unread notifications">
-                @Icons.Svg("bell", 18)
-                @if (shell.UnreadNotifications > 0)
-                {
-                    <span class="sv-count sv-count--float">@shell.UnreadNotifications</span>
-                }
-            </span>
+            @* The bell: opens a small panel with the newest notifications. notifications.js fills it in. *@
+            <div class="sv-np" data-sv-np data-panel-url="@Url.Action("Panel", "Notifications")" data-readall-url="@Url.Action("ReadAll", "Notifications")">
+                <button type="button" class="sv-bell sv-bell--btn" data-sv-np-toggle aria-haspopup="true" aria-expanded="false" aria-controls="sv-np-panel"
+                        aria-label="Notifications, @shell.UnreadNotifications unread">
+                    @Icons.Svg("bell", 18)
+                    <span class="sv-count sv-count--float" data-sv-np-badge hidden="@(shell.UnreadNotifications > 0 ? null : "hidden")">@(shell.UnreadNotifications > 99 ? "99+" : shell.UnreadNotifications.ToString())</span>
+                </button>
+                <div class="sv-np__panel" id="sv-np-panel" role="dialog" aria-label="Notifications" hidden>
+                    <div class="sv-np__head">
+                        <strong>Notifications</strong>
+                        <span class="sv-np__pill" data-sv-np-pill hidden></span>
+                        <button type="button" class="sv-np__readall" data-sv-np-readall>Mark all as read</button>
+                    </div>
+                    <ul class="sv-np__list" data-sv-np-list aria-live="polite"></ul>
+                    <a class="sv-np__foot" href="@Url.Action("Index", "Notifications")">View all notifications &rarr;</a>
+                </div>
+                @Html.AntiForgeryToken()
+            </div>
             @if (!sidebarLogout)
             {
                 <form asp-controller="Account" asp-action="Logout" method="post" class="sv-inline-form">
@@ -134,6 +148,7 @@
             <div class="sv-portal__inner">@RenderBody()</div>
         </main>
     </div>
+    <script src="~/js/notifications.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

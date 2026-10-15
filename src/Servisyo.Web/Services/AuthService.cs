@@ -30,11 +30,13 @@ public class AuthService : IAuthService
 
     private readonly ServisyoDbContext _db;
     private readonly IPasswordHasher<User> _hasher;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(ServisyoDbContext db, IPasswordHasher<User> hasher)
+    public AuthService(ServisyoDbContext db, IPasswordHasher<User> hasher, ILogger<AuthService>? logger = null)
     {
         _db = db;
         _hasher = hasher;
+        _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<AuthService>.Instance;
     }
 
     public async Task<AuthResult> RegisterCustomerAsync(RegisterCustomerViewModel vm)
@@ -71,7 +73,34 @@ public class AuthService : IAuthService
         };
 
         _db.Users.Add(user);
-        return await SaveAsync(user);
+        var result = await SaveAsync(user);
+        if (result.Succeeded) await NotifyAdminsAsync(user, user.Provider!.BusinessName);
+        return result;
+    }
+
+    /// Tells every ACTIVE administrator (their bell) that a provider applied. The registration itself is already saved,
+    /// so a problem here is only logged: it must never make a successful sign-up look like a failure.
+    private async Task NotifyAdminsAsync(User applicant, string businessName)
+    {
+        try
+        {
+            var adminIds = await _db.Users.AsNoTracking()
+                .Where(u => u.Role == Roles.Administrator && u.AccountStatus == AccountStatuses.Active)
+                .Select(u => u.UserId)
+                .ToListAsync();
+            if (adminIds.Count == 0) return;
+
+            var text = $"New provider application from {businessName} ({applicant.FirstName} {applicant.LastName}).";
+            if (text.Length > 255) text = text[..252] + "...";
+
+            foreach (var id in adminIds)
+                _db.Notifications.Add(new Notification { UserId = id, Message = text });
+            await _db.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not notify the administrators about the new provider application of user {UserId}.", applicant.UserId);
+        }
     }
 
     public async Task<AuthResult> ValidateLoginAsync(string email, string password)

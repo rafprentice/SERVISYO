@@ -1,0 +1,67 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model NotificationsPageViewModel
+@{
+    ViewData["Title"] = "Notifications";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "";
+}
+
+<p class="sv-eyebrow">Activity</p>
+<h1 class="sv-dash__title">Notifications</h1>
+<p class="sv-dash__sub">
+    @(Model.Total == 0 ? "You have no notifications yet." : Model.Unread == 0 ? "You're all caught up." : $"You have {Model.Unread} unread notification{(Model.Unread == 1 ? "" : "s")}.")
+</p>
+
+@if (Model.Unread > 0)
+{
+    <form asp-controller="Notifications" asp-action="ReadAll" method="post" class="sv-np-page__bar">
+        <button type="submit" class="sv-btn sv-btn--outline sv-btn--xs">@Icons.Svg("check", 13) Mark all as read</button>
+    </form>
+}
+
+@if (Model.Items.Count == 0)
+{
+    <div class="sv-panel"><p class="sv-panel__empty">Booking updates and account news will show up here.</p></div>
+}
+else
+{
+    <ul class="sv-np-page__list">
+        @foreach (var n in Model.Items)
+        {
+            <li>
+                <a class="sv-np__item @(n.IsRead ? "" : "is-unread")" asp-controller="Notifications" asp-action="Go" asp-route-id="@n.Id">
+                    <span class="sv-np__icon sv-np__icon--@n.Kind" aria-hidden="true">@Icons.Svg(n.Icon, 16)</span>
+                    <span class="sv-np__body">
+                        <span class="sv-np__title">@n.Title</span>
+                        <span class="sv-np__msg">@n.Message</span>
+                        <span class="sv-np__time">@n.TimeText</span>
+                    </span>
+                    @if (!n.IsRead)
+                    {
+                        <span class="sv-np__dot" role="img" aria-label="Unread"></span>
+                    }
+                </a>
+            </li>
+        }
+    </ul>
+
+    @if (Model.PageCount > 1)
+    {
+        <nav class="sv-table__foot" aria-label="Pages">
+            <span>@Model.Total notifications</span>
+            <span class="sv-pager">
+                @if (Model.Page > 1)
+                {
+                    <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "Notifications", new { page = Model.Page - 1 })">Previous</a>
+                }
+                <span>Page @Model.Page of @Model.PageCount</span>
+                @if (Model.Page < Model.PageCount)
+                {
+                    <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "Notifications", new { page = Model.Page + 1 })">Next</a>
+                }
+            </span>
+        </nav>
+    }
+}
