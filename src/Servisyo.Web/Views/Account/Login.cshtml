@@ -9,14 +9,21 @@
     <a asp-action="Register">Create an account →</a>
 }
 
+<partial name="_OtpStyles" />
+
 <div class="sv-auth">
     <div class="sv-auth__badge" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg>
     </div>
     <h1 class="sv-auth__title">Sign In to SERVISYO</h1>
-    <p class="sv-auth__sub">Access your Customer, Provider, or Admin portal</p>
+    <p class="sv-auth__sub">&ldquo;Save time, make your day better.&rdquo;</p>
 
     <div class="sv-auth__card">
+        @if (TempData["LoginNotice"] is string loginNotice)
+        {
+            <div class="sv-notice" role="status">@loginNotice</div>
+        }
+
         <form asp-action="Login" asp-route-returnUrl="@ViewData["ReturnUrl"]" method="post" novalidate>
             <div asp-validation-summary="ModelOnly" class="sv-alert" role="alert"></div>
 

@@ -6,7 +6,6 @@
     var isProvider = shell.Role == "Provider";
     var isAdmin = shell.Role == "Admin";
     var roleLabel = isAdmin ? "Admin" : isProvider ? "Service Provider" : "Customer";
-    var sidebarLogout = isProvider || isAdmin;   // customers keep Sign Out in the top bar
 
     // Url = null means "not built yet": shown greyed out. Give it a URL when that stage is built.
     var items = isAdmin
@@ -16,26 +15,26 @@
             ("users",      "Users",      "users",    Url.Action("Index", "AdminUsers"), 0),
             ("providers",  "Providers",  "wrench",   Url.Action("Index", "AdminProviders"), 0),
             ("bookings",   "Bookings",   "calendar", Url.Action("Index", "AdminBookings"), 0),
-            ("categories", "Categories", "list",     null, 0),
-            ("reviews",    "Reviews",    "star",     null, 0)
+            ("categories", "Categories", "list",     Url.Action("Index", "AdminCategories"), 0),
+            ("reviews",    "Reviews",    "star",     Url.Action("Index", "AdminReviews"), 0)
         }
         : isProvider
         ? new List<(string Key, string Label, string Icon, string? Url, int Badge)>
         {
             ("dashboard",    "Dashboard",    "home",     Url.Action("Provider", "Dashboard"), 0),
-            ("availability", "Availability", "clock",    null, 0),
-            ("services",     "My Services",  "wrench",   null, 0),
-            ("bookings",     "Bookings",     "calendar", null, 0),
-            ("messages",     "Messages",     "message",  null, shell.UnreadMessages),
-            ("profile",      "My Profile",   "user",     null, 0)
+            ("bookings",     "Bookings",     "calendar", Url.Action("Index", "ProviderBookings"), 0),
+            ("services",     "My Services",  "wrench",   Url.Action("Index", "ProviderServices"), 0),
+            ("availability", "Availability", "clock",    Url.Action("Index", "ProviderAvailability"), 0),
+            ("messages",     "Messages",     "message",  Url.Action("Index", "Messages"), shell.UnreadMessages),
+            ("profile",      "My Profile",   "user",     Url.Action("Index", "ProviderProfile"), 0)
         }
         : new List<(string Key, string Label, string Icon, string? Url, int Badge)>
         {
             ("dashboard", "Dashboard",     "home",     Url.Action("Customer", "Dashboard"), 0),
-            ("find",      "Find Services", "search",   Url.Action("Index", "Home", null, null, null, "providers"), 0),
-            ("bookings",  "My Bookings",   "calendar", null, 0),
-            ("messages",  "Messages",      "message",  null, shell.UnreadMessages),
-            ("profile",   "My Profile",    "user",     null, 0)
+            ("find",      "Find Services", "search",   Url.Action("Index", "FindServices"), 0),
+            ("bookings",  "My Bookings",   "calendar", Url.Action("Index", "CustomerBookings"), 0),
+            ("messages",  "Messages",      "message",  Url.Action("Index", "Messages"), shell.UnreadMessages),
+            ("profile",   "My Profile",    "user",     Url.Action("Index", "CustomerProfile"), 0)
         };
 }
 <!DOCTYPE html>
@@ -44,12 +43,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - SERVISYO</title>
+    <link rel="icon" type="image/svg+xml" href="~/favicon.svg" asp-append-version="true" />
+    <link rel="icon" sizes="any" href="~/favicon.ico" asp-append-version="true" />
+    <link rel="apple-touch-icon" href="~/apple-touch-icon.png" asp-append-version="true" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
     <link rel="stylesheet" href="~/css/portal.css" asp-append-version="true" />
-    <link rel="icon" type="image/png" href="~/favicon.png" asp-append-version="true" />
 </head>
 <body class="sv-portal-body">
     <header class="sv-top">
@@ -62,19 +63,24 @@
         </div>
         <div class="sv-top__right">
             <a class="sv-btn sv-btn--outline sv-btn--xs" asp-controller="Home" asp-action="Index">Home</a>
-            <span class="sv-bell" role="img" aria-label="@(shell.UnreadNotifications) unread notifications">
-                @Icons.Svg("bell", 18)
-                @if (shell.UnreadNotifications > 0)
-                {
-                    <span class="sv-count sv-count--float">@shell.UnreadNotifications</span>
-                }
-            </span>
-            @if (!sidebarLogout)
-            {
-                <form asp-controller="Account" asp-action="Logout" method="post" class="sv-inline-form">
-                    <button type="submit" class="sv-btn sv-btn--outline sv-btn--xs">Sign Out</button>
-                </form>
-            }
+            @* The bell: opens a small panel with the newest notifications. notifications.js fills it in. *@
+            <div class="sv-np" data-sv-np data-panel-url="@Url.Action("Panel", "Notifications")" data-readall-url="@Url.Action("ReadAll", "Notifications")">
+                <button type="button" class="sv-bell sv-bell--btn" data-sv-np-toggle aria-haspopup="true" aria-expanded="false" aria-controls="sv-np-panel"
+                        aria-label="Notifications, @shell.UnreadNotifications unread">
+                    @Icons.Svg("bell", 18)
+                    <span class="sv-count sv-count--float" data-sv-np-badge hidden="@(shell.UnreadNotifications > 0 ? null : "hidden")">@(shell.UnreadNotifications > 99 ? "99+" : shell.UnreadNotifications.ToString())</span>
+                </button>
+                <div class="sv-np__panel" id="sv-np-panel" role="dialog" aria-label="Notifications" hidden>
+                    <div class="sv-np__head">
+                        <strong>Notifications</strong>
+                        <span class="sv-np__pill" data-sv-np-pill hidden></span>
+                        <button type="button" class="sv-np__readall" data-sv-np-readall>Mark all as read</button>
+                    </div>
+                    <ul class="sv-np__list" data-sv-np-list aria-live="polite"></ul>
+                    <a class="sv-np__foot" href="@Url.Action("Index", "Notifications")">View all notifications &rarr;</a>
+                </div>
+                @Html.AntiForgeryToken()
+            </div>
         </div>
     </header>
 
@@ -97,7 +103,12 @@
                            aria-current="@(item.Key == active ? "page" : null)">
                             @Icons.Svg(item.Icon, 16)
                             <span>@item.Label</span>
-                            @if (item.Badge > 0) { <span class="sv-count">@item.Badge</span> }
+                            @if (item.Key == "messages")
+                            {
+                                @* always on the page (hidden at 0) so the chat script can update it without a reload *@
+                                <span class="sv-count" data-sv-msg-badge hidden="@(item.Badge > 0 ? null : "hidden")">@item.Badge</span>
+                            }
+                            else if (item.Badge > 0) { <span class="sv-count">@item.Badge</span> }
                         </a>
                     }
                     else
@@ -111,25 +122,16 @@
                 }
             </nav>
 
-            @if (sidebarLogout)
-            {
-                <form asp-controller="Account" asp-action="Logout" method="post" class="sv-side__foot">
-                    <button type="submit" class="sv-side__logout">@Icons.Svg("log-out", 16)<span>Logout</span></button>
-                </form>
-            }
-            else
-            {
-                <a class="sv-side__back" asp-controller="Home" asp-action="Index">
-                    @Icons.Svg("log-out", 14)
-                    <span>Back to Home</span>
-                </a>
-            }
+            <form asp-controller="Account" asp-action="Logout" method="post" class="sv-side__foot">
+                <button type="submit" class="sv-side__logout">@Icons.Svg("log-out", 16)<span>Logout</span></button>
+            </form>
         </aside>
 
-        <main class="sv-portal__main" id="main">
+        <main class="sv-portal__main @(ViewData["MainClass"])" id="main">
             <div class="sv-portal__inner">@RenderBody()</div>
         </main>
     </div>
+    <script src="~/js/notifications.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>
