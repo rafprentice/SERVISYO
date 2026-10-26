@@ -23,6 +23,10 @@ $lines = @(
     "builder.Services.AddScoped<ICustomerBookingsService, CustomerBookingsService>();",
     "builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();",
     "builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();",
+    "builder.Services.AddScoped<ICustomerReviewService, CustomerReviewService>();",
+    "builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();",
+    "builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();",
+    "builder.Services.AddSignalR();",
     "builder.Services.AddScoped<IEmailService, EmailService>();",
     "builder.Services.AddScoped<IFindServicesService, FindServicesService>();",
     "builder.Services.AddScoped<IHomePageService, HomePageService>();",
@@ -47,6 +51,17 @@ Edit-File "src\Servisyo.Web\Program.cs" {
     $missing = $lines | Where-Object { $_ -ne $anchor -and -not $c.Contains($_) }
     if ($missing.Count -eq 0) { return $c }
     $c.Replace($anchor, $anchor + "`r`n" + ($missing -join "`r`n"))
+}
+
+# ---- 1b. Program.cs: the live-updates hub address ----
+Edit-File "src\Servisyo.Web\Program.cs" {
+    param($c)
+    $hub = "app.MapHub<Servisyo.Web.Hubs.BookingHub>(Servisyo.Web.Hubs.BookingHub.Path);"
+    if ($c.Contains($hub)) { return $c }
+    $anchor = "app.Run();"
+    $i = $c.LastIndexOf($anchor)
+    if ($i -lt 0) { Write-Host "COULD NOT FIND 'app.Run();' in Program.cs - tell Claude"; return $c }
+    $c.Insert($i, $hub + "`r`n")
 }
 
 # ---- 2. Entities.cs: User.EmailVerificationPending ----

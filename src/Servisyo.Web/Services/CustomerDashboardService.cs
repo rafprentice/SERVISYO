@@ -41,6 +41,7 @@ public class CustomerDashboardService : ICustomerDashboardService
         public DateTime CreatedAt { get; set; }
         public string ProviderName { get; set; } = string.Empty;
         public int ProviderUserId { get; set; }
+        public int ProviderId { get; set; }
     }
 
     private static readonly Expression<Func<Booking, BookingRow>> ToRow = b => new BookingRow
@@ -53,7 +54,8 @@ public class CustomerDashboardService : ICustomerDashboardService
         TotalFee = b.TotalFee,
         CreatedAt = b.CreatedAt,
         ProviderName = b.Provider.BusinessName,
-        ProviderUserId = b.Provider.UserId
+        ProviderUserId = b.Provider.UserId,
+        ProviderId = b.ProviderId
     };
 
     public async Task<CustomerDashboardViewModel?> GetAsync(int userId, CancellationToken ct = default)
@@ -101,6 +103,15 @@ public class CustomerDashboardService : ICustomerDashboardService
         var titles = await _db.GetBookingTitlesAsync(ids, ct);
         string TitleOf(int id) => titles.TryGetValue(id, out var t) ? t : "Service booking";
 
+        // the services in each recent booking, so "Book Again" can tick them on the booking page
+        var recentIds = recentRows.Select(r => r.BookingId).ToList();
+        var serviceRows = await _db.BookingServices.AsNoTracking()
+            .Where(bs => recentIds.Contains(bs.BookingId))
+            .OrderBy(bs => bs.BookingServiceId)
+            .Select(bs => new { bs.BookingId, bs.ServiceId })
+            .ToListAsync(ct);
+        var servicesOf = serviceRows.GroupBy(x => x.BookingId).ToDictionary(g => g.Key, g => g.Select(x => x.ServiceId).ToList());
+
         var vm = new CustomerDashboardViewModel
         {
             Shell = new PortalShellViewModel
@@ -119,7 +130,9 @@ public class CustomerDashboardService : ICustomerDashboardService
                 Title = TitleOf(r.BookingId),
                 ProviderName = r.ProviderName,
                 Date = r.BookingDate,
-                Status = r.Status
+                Status = r.Status,
+                ProviderId = r.ProviderId,
+                ServiceIds = servicesOf.TryGetValue(r.BookingId, out var sids) ? sids : new List<int>()
             }).ToList()
         };
 

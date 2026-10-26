@@ -6,6 +6,7 @@
     Layout = "_PortalLayout";
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "bookings";
+    ViewData["Live"] = true;
 
     // "all" is the default tab, so it has no ?status= in its address
     string? StatusParam(string key) => key == CustomerBookingTab.AllKey ? null : key;
@@ -87,7 +88,7 @@
                         <p class="sv-bk__notes">@c.Notes</p>
                     }
 
-                    @if (c.CanCancel || c.CanReview || c.IsReviewed)
+                    @if (c.CanCancel || c.CanReview || c.IsReviewed || c.CanPay)
                     {
                         <div class="sv-bk__acts">
                             @if (c.CanCancel)
@@ -101,10 +102,20 @@
                                     <button type="submit" class="sv-btn sv-btn--danger-outline sv-btn--sm" aria-label="Cancel booking #@c.BookingId">Cancel Request</button>
                                 </form>
                             }
+                            @if (c.CanPay)
+                            {
+                                var feeText = "₱" + c.Fee.ToString("#,##0.##", System.Globalization.CultureInfo.InvariantCulture);
+                                var payText = $"Approve the {feeText} quotation from {c.ProviderName} and pay now?\n\nDemo payment: no real money is charged.";
+                                <form method="post" asp-controller="CustomerPayments" asp-action="Pay" asp-route-id="@c.BookingId"
+                                      class="sv-inline-form" data-sv-once data-sv-confirm="@payText">
+                                    <input type="hidden" name="returnTo" value="bookings" />
+                                    <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" aria-label="Approve and pay booking #@c.BookingId">Approve &amp; Pay @feeText</button>
+                                </form>
+                            }
                             @if (c.CanReview)
                             {
-                                <button type="button" class="sv-btn sv-btn--soft sv-btn--sm" disabled
-                                        title="Reviews open in an upcoming update" aria-label="Leave a review for booking #@c.BookingId">Leave a Review</button>
+                                <a class="sv-btn sv-btn--soft sv-btn--sm" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@c.BookingId"
+                                   aria-label="Leave a review for booking #@c.BookingId">@Icons.Svg("star", 14, filled: true) Leave a Review</a>
                             }
                             @if (c.IsReviewed)
                             {

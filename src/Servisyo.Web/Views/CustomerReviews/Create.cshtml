@@ -1,0 +1,82 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model LeaveReviewPageViewModel
+@{
+    ViewData["Title"] = "Leave a Review";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "bookings";
+
+    var inv = CultureInfo.InvariantCulture;
+    var when = Model.Date.ToString("MMM d, yyyy", inv) + " • " + Model.Time.ToString("h:mm tt", inv);
+    var chosen = Model.Form.Rating;
+    var comment = Model.Form.Comment ?? string.Empty;
+    var words = new[] { "", "Poor", "Fair", "Good", "Very good", "Excellent" };
+}
+
+<div class="sv-rv">
+    <a class="sv-link-muted sv-link-muted--live" asp-controller="CustomerBookings" asp-action="Index">‹ Back to My Bookings</a>
+    <p class="sv-eyebrow">Booking #@Model.Reference</p>
+    <h1 class="sv-dash__title">How was your service?</h1>
+    <p class="sv-dash__sub">Your review helps other customers in Cebu choose the right provider.</p>
+
+    <section class="sv-panel sv-rv__card">
+        <div class="sv-rv__booking">
+            <span class="sv-avatar" aria-hidden="true">@NameFormat.Initials(Model.ProviderName)</span>
+            <div>
+                <div class="sv-rv__title">@Model.Title</div>
+                <div class="sv-rv__meta">@Model.ProviderName · @when</div>
+            </div>
+        </div>
+
+        <form method="post" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@Model.BookingId" novalidate>
+            <div asp-validation-summary="ModelOnly" class="sv-flash sv-flash--error" role="alert"></div>
+
+            <fieldset class="sv-rv__rating">
+                <legend>Your rating</legend>
+                @* Stars are listed 5 → 1 and shown right-to-left, so hovering a star also lights the ones before it. *@
+                <div class="sv-stars">
+                    @for (var n = 5; n >= 1; n--)
+                    {
+                        var id = "rating-" + n;
+                        var label = n == 1 ? "1 star" : n + " stars";
+                        <input type="radio" id="@id" name="Form.Rating" value="@n" checked="@(chosen == n)" required />
+                        <label for="@id" title="@words[n]"><span aria-hidden="true">★</span><span class="sv-sr-only">@label (@words[n])</span></label>
+                    }
+                </div>
+                <span class="sv-rv__word" data-rv-word aria-live="polite">@(chosen >= 1 && chosen <= 5 ? words[chosen] : "Tap a star")</span>
+                <span asp-validation-for="Form.Rating" class="sv-fld__err"></span>
+            </fieldset>
+
+            <div class="sv-fld">
+                <label for="rv-comment">Comment <span class="sv-fld__opt">(optional)</span></label>
+                <textarea id="rv-comment" name="Form.Comment" rows="4" maxlength="255" data-rv-comment
+                          placeholder="What went well? Was the provider on time and careful?">@comment</textarea>
+                <p class="sv-rv__count"><span data-rv-count>@comment.Length</span>/255</p>
+                <span asp-validation-for="Form.Comment" class="sv-fld__err"></span>
+            </div>
+
+            <div class="sv-rv__actions">
+                <button type="submit" class="sv-btn sv-btn--primary">@Icons.Svg("star", 14, filled: true) Submit Review</button>
+                <a class="sv-btn sv-btn--outline" asp-controller="CustomerBookings" asp-action="Index">Cancel</a>
+            </div>
+            <p class="sv-rv__note">Reviews can't be edited after posting. The provider can see your review but cannot change it.</p>
+        </form>
+    </section>
+</div>
+
+@section Scripts {
+    <script>
+        (function () {
+            var words = ["", "Poor", "Fair", "Good", "Very good", "Excellent"];
+            var out = document.querySelector("[data-rv-word]");
+            document.querySelectorAll(".sv-stars input").forEach(function (r) {
+                r.addEventListener("change", function () { if (out) out.textContent = words[+r.value] || ""; });
+            });
+            var box = document.querySelector("[data-rv-comment]");
+            var count = document.querySelector("[data-rv-count]");
+            if (box && count) box.addEventListener("input", function () { count.textContent = box.value.length; });
+        })();
+    </script>
+}

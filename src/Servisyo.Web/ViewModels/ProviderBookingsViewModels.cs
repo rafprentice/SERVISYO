@@ -25,6 +25,12 @@ public sealed record BookingActionInfo(BookingAction Action, string Label, strin
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown booking action.")
     };
 
+    /// Like ForStatus, but an Accepted booking only offers "Mark In Progress" once the customer has paid.
+    public static IReadOnlyList<BookingActionInfo> ForBooking(string status, string paymentStatus) =>
+        status == BookingStatuses.Accepted && paymentStatus != PaymentStatuses.Paid
+            ? Array.Empty<BookingActionInfo>()
+            : ForStatus(status);
+
     /// The buttons that make sense for a booking in this status (empty once it is finished or cancelled).
     public static IReadOnlyList<BookingActionInfo> ForStatus(string status) => status switch
     {
@@ -103,6 +109,12 @@ public class ProviderBookingCardViewModel
     public string SubmittedText { get; set; } = string.Empty;   // "Sep 16, 2026"
     public string? Notes { get; set; }
     public IReadOnlyList<BookingActionInfo> Actions { get; set; } = Array.Empty<BookingActionInfo>();
+    public string PaymentStatus { get; set; } = string.Empty;
+
+    /// Accepted, quotation sent, customer has not paid yet.
+    public bool AwaitingPayment => Status == BookingStatuses.Accepted && PaymentStatus != PaymentStatuses.Paid;
+    /// Accepted and paid: scheduled, ready to start on the day.
+    public bool IsScheduled => Status == BookingStatuses.Accepted && PaymentStatus == PaymentStatuses.Paid;
 
     public string FromLine => string.IsNullOrWhiteSpace(CategoryText)
         ? $"from {CustomerName}"

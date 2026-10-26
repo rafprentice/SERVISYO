@@ -162,6 +162,9 @@ public class ProviderBookingsServiceTests
             CustomerId = c.CustomerId, ProviderId = p.ProviderId,
             BookingDate = date ?? Day, BookingTime = time ?? new TimeOnly(9, 0), TotalDurationMinutes = minutes,
             TotalFee = 600m, Status = status, ServiceLocation = location, ServiceDescription = notes,
+            // a booking past "Accepted" has been paid (demo "Approve & Pay"), so the provider may start it
+            PaymentStatus = status is BookingStatuses.Accepted or BookingStatuses.InProgress or BookingStatuses.Completed
+                ? PaymentStatuses.Paid : PaymentStatuses.Unpaid,
             CreatedAt = createdUtc ?? NowUtc.AddDays(-1), UpdatedAt = NowUtc.AddDays(-1),
             RowVersion = new byte[] { 1 }
         };

@@ -175,6 +175,8 @@
     }, 30000);
 
     document.addEventListener("visibilitychange", function () { if (!document.hidden) load(false); });
+    // live-bookings.js asks for a fresh number when a booking changed (a notification was probably added)
+    document.addEventListener("sv:notifications-refresh", function () { load(false); });
 
     // the first number is already on the page; set the panel's own pieces to match it
     setUnread(parseInt(badge.textContent, 10) > 0 && !badge.hasAttribute("hidden") ? parseInt(badge.textContent, 10) : 0);

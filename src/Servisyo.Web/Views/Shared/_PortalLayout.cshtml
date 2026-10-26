@@ -128,10 +128,13 @@
         </aside>
 
         <main class="sv-portal__main @(ViewData["MainClass"])" id="main">
-            <div class="sv-portal__inner">@RenderBody()</div>
+            @* Pages that set ViewData["Live"] = true refresh this area by themselves when one of the user's bookings changes. *@
+            <div class="sv-portal__inner" data-sv-live="@(ViewData["Live"] is true ? "on" : "off")">@RenderBody()</div>
         </main>
     </div>
     <script src="~/js/notifications.js" asp-append-version="true"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@8.0.7/dist/browser/signalr.min.js" crossorigin="anonymous"></script>
+    <script src="~/js/live-bookings.js" asp-append-version="true" data-hub="/hubs/bookings"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

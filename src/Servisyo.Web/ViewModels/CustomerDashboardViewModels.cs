@@ -92,6 +92,10 @@ public class RecentBookingViewModel
     public string ProviderName { get; set; } = string.Empty;
     public DateOnly Date { get; set; }
     public string Status { get; set; } = string.Empty;
+
+    /// For "Book Again": the same provider, with the same services ticked.
+    public int ProviderId { get; set; }
+    public IReadOnlyList<int> ServiceIds { get; set; } = Array.Empty<int>();
 }
 
 public class RecommendedProviderViewModel

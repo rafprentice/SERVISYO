@@ -21,11 +21,12 @@ public class BookProviderController : Controller
     public BookProviderController(IBookProviderService booking) => _booking = booking;
 
     [HttpGet("")]
-    public async Task<IActionResult> Index(int providerId, CancellationToken ct)
+    public async Task<IActionResult> Index(int providerId, [FromQuery(Name = "service")] int[]? service, CancellationToken ct)
     {
         if (!TryGetUserId(out var userId)) return Forbid();
 
-        var result = await _booking.GetPageAsync(userId, providerId, ct);
+        // ?service=12&service=15 ("Book Again") only pre-ticks boxes; every choice is checked again when the form is sent.
+        var result = await _booking.GetPageAsync(userId, providerId, service, ct);
         switch (result.Outcome)
         {
             case BookPageOutcome.NotAllowed:

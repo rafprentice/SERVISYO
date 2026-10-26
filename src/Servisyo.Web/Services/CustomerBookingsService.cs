@@ -22,9 +22,12 @@ public class CustomerBookingsService : ICustomerBookingsService
     private readonly TimeProvider _clock;
     private readonly ILogger<CustomerBookingsService> _logger;
 
-    public CustomerBookingsService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<CustomerBookingsService>? logger = null)
+    private readonly IBookingLiveUpdates? _live;
+
+    public CustomerBookingsService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<CustomerBookingsService>? logger = null, IBookingLiveUpdates? live = null)
     {
         _db = db;
+        _live = live;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<CustomerBookingsService>.Instance;
     }
@@ -47,6 +50,8 @@ public class CustomerBookingsService : ICustomerBookingsService
     {
         public int BookingId { get; set; }
         public string Status { get; set; } = string.Empty;
+        public string PaymentStatus { get; set; } = string.Empty;
+        public decimal TotalFee { get; set; }
         public DateOnly BookingDate { get; set; }
         public TimeOnly BookingTime { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -98,6 +103,8 @@ public class CustomerBookingsService : ICustomerBookingsService
             {
                 BookingId = b.BookingId,
                 Status = b.Status,
+                PaymentStatus = b.PaymentStatus,
+                TotalFee = b.TotalFee,
                 BookingDate = b.BookingDate,
                 BookingTime = b.BookingTime,
                 CreatedAt = b.CreatedAt,
@@ -152,7 +159,10 @@ public class CustomerBookingsService : ICustomerBookingsService
                 Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
                 CanCancel = r.Status == BookingStatuses.Pending,
                 CanReview = r.Status == BookingStatuses.Completed && !r.HasReview,
-                IsReviewed = r.Status == BookingStatuses.Completed && r.HasReview
+                IsReviewed = r.Status == BookingStatuses.Completed && r.HasReview,
+                CanPay = r.Status == BookingStatuses.Accepted && r.PaymentStatus == PaymentStatuses.Unpaid,
+                IsPaid = r.PaymentStatus == PaymentStatuses.Paid,
+                Fee = r.TotalFee
             }).ToList()
         };
 
@@ -211,6 +221,10 @@ public class CustomerBookingsService : ICustomerBookingsService
         }
 
         _logger.LogInformation("Customer {CustomerId} cancelled booking {BookingId}.", who.CustomerId, bookingId);
+
+        if (_live is not null)
+            await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, booking.PaymentStatus, "cancelled"),
+                booking.Provider.UserId, userId);
         return new(true, CustomerCancelOutcome.Success, $"Booking #{bookingId} has been cancelled. The provider has been notified.");
     }
 

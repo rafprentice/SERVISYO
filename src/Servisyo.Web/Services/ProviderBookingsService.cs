@@ -22,9 +22,12 @@ public class ProviderBookingsService : IProviderBookingsService
     private readonly TimeProvider _clock;
     private readonly ILogger<ProviderBookingsService> _logger;
 
-    public ProviderBookingsService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<ProviderBookingsService>? logger = null)
+    private readonly IBookingLiveUpdates? _live;
+
+    public ProviderBookingsService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<ProviderBookingsService>? logger = null, IBookingLiveUpdates? live = null)
     {
         _db = db;
+        _live = live;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ProviderBookingsService>.Instance;
     }
@@ -55,6 +58,7 @@ public class ProviderBookingsService : IProviderBookingsService
     {
         public int BookingId { get; set; }
         public string Status { get; set; } = string.Empty;
+        public string PaymentStatus { get; set; } = string.Empty;
         public DateOnly BookingDate { get; set; }
         public TimeOnly BookingTime { get; set; }
         public DateTime CreatedAt { get; set; }
@@ -98,6 +102,7 @@ public class ProviderBookingsService : IProviderBookingsService
             {
                 BookingId = b.BookingId,
                 Status = b.Status,
+                PaymentStatus = b.PaymentStatus,
                 BookingDate = b.BookingDate,
                 BookingTime = b.BookingTime,
                 CreatedAt = b.CreatedAt,
@@ -151,7 +156,8 @@ public class ProviderBookingsService : IProviderBookingsService
                 Location = string.IsNullOrWhiteSpace(r.ServiceLocation) ? null : r.ServiceLocation.Trim(),
                 SubmittedText = BookingFormat.SubmittedText(r.CreatedAt),
                 Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
-                Actions = BookingActionInfo.ForStatus(r.Status)
+                PaymentStatus = r.PaymentStatus,
+                Actions = BookingActionInfo.ForBooking(r.Status, r.PaymentStatus)
             }).ToList()
         };
 
@@ -218,6 +224,14 @@ public class ProviderBookingsService : IProviderBookingsService
                 $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}, so it can't be {Done(action)}.");
         }
 
+        // 4b. the job can only start once the customer has approved and paid the quotation (Paid -> Scheduled -> In Progress)
+        if (action == BookingAction.Start && booking.PaymentStatus != PaymentStatuses.Paid)
+        {
+            _logger.LogInformation("Booking {BookingId} is not paid yet; start refused.", bookingId);
+            return new(access, BookingActionOutcome.InvalidTransition,
+                $"Booking #{bookingId} is waiting for the customer to approve and pay the quotation, so it can't start yet.");
+        }
+
         // 5. accepting must not clash with a job the provider already accepted or started that day
         if (action == BookingAction.Accept)
         {
@@ -274,6 +288,11 @@ public class ProviderBookingsService : IProviderBookingsService
         }
 
         _logger.LogInformation("Provider {ProviderId} moved booking {BookingId} to {Status}.", who.ProviderId, bookingId, info.ToStatus);
+
+        // live: the customer's open dashboard / My Bookings page updates itself (and the provider's other tabs)
+        if (_live is not null)
+            await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, booking.PaymentStatus, action.ToString().ToLowerInvariant()),
+                booking.Customer.UserId, userId);
         return new(access, BookingActionOutcome.Success, SuccessText(bookingId, action));
     }
 }

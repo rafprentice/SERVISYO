@@ -11,7 +11,10 @@ namespace Servisyo.Web.Services;
 public interface IBookProviderService
 {
     /// The "Book this Provider" form for the signed-in customer.
+    /// preselectedServiceIds ("Book Again") only ticks services this provider still offers; anything else is ignored.
     Task<BookProviderPageResult> GetPageAsync(int userId, int providerId, CancellationToken ct = default);
+
+    Task<BookProviderPageResult> GetPageAsync(int userId, int providerId, IReadOnlyCollection<int>? preselectedServiceIds, CancellationToken ct = default);
 
     /// The start times that are free on a date for the chosen services (the form shows them as buttons).
     Task<BookSlotsResult> GetSlotsAsync(int userId, int providerId, DateOnly date, IReadOnlyCollection<int> serviceIds, CancellationToken ct = default);
@@ -33,9 +36,12 @@ public class BookProviderService : IBookProviderService
     private readonly TimeProvider _clock;
     private readonly ILogger<BookProviderService> _logger;
 
-    public BookProviderService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<BookProviderService>? logger = null)
+    private readonly IBookingLiveUpdates? _live;
+
+    public BookProviderService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<BookProviderService>? logger = null, IBookingLiveUpdates? live = null)
     {
         _db = db;
+        _live = live;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<BookProviderService>.Instance;
     }
@@ -149,7 +155,10 @@ public class BookProviderService : IBookProviderService
 
     // ------------------------------------------------------------------ the form
 
-    public async Task<BookProviderPageResult> GetPageAsync(int userId, int providerId, CancellationToken ct = default)
+    public Task<BookProviderPageResult> GetPageAsync(int userId, int providerId, CancellationToken ct = default)
+        => GetPageAsync(userId, providerId, null, ct);
+
+    public async Task<BookProviderPageResult> GetPageAsync(int userId, int providerId, IReadOnlyCollection<int>? preselectedServiceIds, CancellationToken ct = default)
     {
         var who = await FindCustomerAsync(userId, ct);
         if (who is null) return new(BookPageOutcome.NotAllowed, null, null);
@@ -182,10 +191,23 @@ public class BookProviderService : IBookProviderService
             EarliestDate = today.AddDays(Math.Max(0, provider.MinNoticeDays)),
             LatestDate = today.AddDays(BookingSlotRules.MaxAdvanceDays),
             // the saved address of the profile is offered as the place of service (the customer can change it)
-            Form = new BookProviderForm { Location = string.IsNullOrWhiteSpace(who.Address) ? null : who.Address.Trim() }
+            Form = new BookProviderForm
+            {
+                Location = string.IsNullOrWhiteSpace(who.Address) ? null : who.Address.Trim(),
+                ServiceIds = PickOffered(preselectedServiceIds, services.Select(s => s.ServiceId))
+            }
         };
 
         return new(BookPageOutcome.Ok, vm, shell);
+    }
+
+    /// Keeps only ids of services that are on this provider's page right now, at most MaxServices, in the given order.
+    private static List<int>? PickOffered(IReadOnlyCollection<int>? wanted, IEnumerable<int> offered)
+    {
+        if (wanted is null || wanted.Count == 0) return null;
+        var onPage = offered.ToHashSet();
+        var keep = wanted.Distinct().Where(onPage.Contains).Take(BookingFormRules.MaxServices).ToList();
+        return keep.Count == 0 ? null : keep;
     }
 
     // ------------------------------------------------------------------ free times
@@ -340,6 +362,10 @@ public class BookProviderService : IBookProviderService
 
             _logger.LogInformation("Customer {CustomerId} booked provider {ProviderId}: booking {BookingId} on {Date} {Time}.",
                 who.CustomerId, providerId, booking.BookingId, date, time);
+
+            if (_live is not null)
+                await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, booking.PaymentStatus, "requested"),
+                    provider.UserId, userId);
             return new(BookOutcome.Created, NoErrors, string.Empty, booking.BookingId, provider.Name.Trim());
         }
         catch (Exception ex) when (ex is DbUpdateException || ex.GetType().Name == "SqlException")

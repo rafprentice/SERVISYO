@@ -6,6 +6,7 @@
     Layout = "_PortalLayout";
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "bookings";
+    ViewData["Live"] = true;
 
     // "all" is the default tab, so it has no ?status= in its address
     string? StatusParam(string key) => key == ProviderBookingTab.AllKey ? null : key;
@@ -53,6 +54,14 @@ else
                     </div>
                     <span class="sv-tag sv-tag--@c.Tone">@c.Status</span>
                 </div>
+                @if (c.AwaitingPayment)
+                {
+                    <p class="sv-bk__pay sv-bk__pay--wait">@Icons.Svg("clock", 14) Quotation sent — waiting for the customer to approve and pay.</p>
+                }
+                else if (c.IsScheduled)
+                {
+                    <p class="sv-bk__pay sv-bk__pay--ok">@Icons.Svg("check", 14) Paid — scheduled. Mark it In Progress when you start the job.</p>
+                }
 
                 <dl class="sv-bk__facts">
                     <div>

@@ -16,6 +16,10 @@ builder.Services.AddDbContext<ServisyoDbContext>(options =>
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();
+builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();
+builder.Services.AddSignalR();
+builder.Services.AddScoped<ICustomerReviewService, CustomerReviewService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
 builder.Services.AddScoped<IBookProviderService, BookProviderService>();
 builder.Services.AddScoped<ICategoryManagementService, CategoryManagementService>();
@@ -78,4 +82,5 @@ app.MapControllerRoute(
     pattern: "{controller=Home}/{action=Index}/{id?}")
     .WithStaticAssets();
 
+app.MapHub<Servisyo.Web.Hubs.BookingHub>(Servisyo.Web.Hubs.BookingHub.Path);
 app.Run();

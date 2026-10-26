@@ -7,6 +7,9 @@
     Layout = "_PortalLayout";
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "dashboard";
+    ViewData["Live"] = true;
+    var flash = TempData["Flash"] as string;
+    var flashClass = TempData["FlashKind"] as string == "error" ? "sv-flash sv-flash--error" : "sv-flash sv-flash--ok";
 
     var inv = CultureInfo.InvariantCulture;
     var cur = Model.Current;
@@ -22,6 +25,10 @@
     };
 }
 
+@if (!string.IsNullOrEmpty(flash))
+{
+    <div class="@flashClass" role="status">@flash</div>
+}
 <p class="sv-eyebrow">Customer Dashboard</p>
 <h1 class="sv-dash__title">Welcome back, @Model.Shell.FirstName</h1>
 <p class="sv-dash__sub">
@@ -107,16 +114,19 @@ else
                     }
                     @if (Model.State == DashboardState.QuotationReceived && info.ActionLabel is not null)
                     {
-                        <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" disabled
-                                title="Online payment is not available yet">@info.ActionLabel</button>
+                        var payText = $"Approve the {Money(cur.Fee)} quotation from {cur.ProviderName} and pay now?\n\nDemo payment: no real money is charged.";
+                        <form method="post" asp-controller="CustomerPayments" asp-action="Pay" asp-route-id="@cur.BookingId"
+                              class="sv-inline-form" data-sv-once data-sv-confirm="@payText">
+                            <input type="hidden" name="returnTo" value="dashboard" />
+                            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">@info.ActionLabel</button>
+                        </form>
                     }
                     @if (Model.State == DashboardState.ServiceCompleted && info.ActionLabel is not null)
                     {
-                        <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" disabled
-                                title="Reviews open in an upcoming update">
+                        <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@cur.BookingId">
                             @Icons.Svg("star", 14, filled: true)
                             @info.ActionLabel
-                        </button>
+                        </a>
                     }
                     @if (Model.State is DashboardState.QuotationReceived or DashboardState.BookingConfirmed or DashboardState.ServiceInProgress)
                     {
@@ -154,8 +164,11 @@ else
                             <span class="sv-tag @BadgeClass(b.Status)">@b.Status</span>
                             @if (b.Status == "Completed")
                             {
-                                <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled
-                                        title="Available in an upcoming update">Book Again</button>
+                                // same provider, same services ticked (?service=1&service=2); the booking page re-checks everything
+                                var again = Url.Action("Index", "BookProvider", new { providerId = b.ProviderId })
+                                            + (b.ServiceIds.Count > 0 ? "?" + string.Join("&", b.ServiceIds.Select(id => "service=" + id)) : "");
+                                var againLabel = "Book " + b.Title + " again with " + b.ProviderName;
+                                <a class="sv-btn sv-btn--soft sv-btn--xs" href="@again" aria-label="@againLabel">Book Again</a>
                             }
                         </div>
                     </li>
