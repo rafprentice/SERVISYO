@@ -1,11 +1,19 @@
 @using Servisyo.Web.Helpers
 @using Servisyo.Web.ViewModels
+@inject Servisyo.Web.Services.IProfilePhotoService ProfilePhotos
 @{
     var shell = ViewData["Shell"] as PortalShellViewModel ?? new PortalShellViewModel();
     var active = ViewData["ActiveNav"] as string ?? "dashboard";
     var isProvider = shell.Role == "Provider";
     var isAdmin = shell.Role == "Admin";
     var roleLabel = isAdmin ? "Admin" : isProvider ? "Service Provider" : "Customer";
+
+    // the signed-in user's photo for the sidebar (customers and providers; admins have none)
+    string? sidebarPhoto = null;
+    if (!isAdmin && int.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var signedInId))
+    {
+        sidebarPhoto = await ProfilePhotos.GetUrlAsync(signedInId);
+    }
 
     // Url = null means "not built yet": shown greyed out. Give it a URL when that stage is built.
     var items = isAdmin
@@ -87,7 +95,14 @@
     <div class="sv-portal">
         <aside class="sv-side" aria-label="@roleLabel navigation">
             <div class="sv-side__user">
-                <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@shell.Initials</span>
+                @if (sidebarPhoto is not null)
+                {
+                    <img class="sv-avatar sv-avatar--lg sv-avatar--img" src="@sidebarPhoto" alt="" />
+                }
+                else
+                {
+                    <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@shell.Initials</span>
+                }
                 <div>
                     <div class="sv-side__name">@shell.FullName</div>
                     <div class="sv-side__sub">@shell.Subtitle</div>

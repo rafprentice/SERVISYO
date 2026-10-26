@@ -9,6 +9,10 @@
 
     var form = Model.Form;
     var nameError = Model.ErrorFor("FullName");
+    // only when there IS an active booking; with none, the boxes are normal white editable fields
+    string? lockClass = Model.NameLocked ? "is-locked" : null;
+    string? lockTitle = Model.NameLocked ? "Name editing is locked while you have active bookings." : null;
+    string? lockId = Model.NameLocked ? "cp-lock" : null;
     var emailError = Model.ErrorFor("Email");
     var phoneError = Model.ErrorFor("PhoneNumber");
     var cityError = Model.ErrorFor("City");
@@ -33,11 +37,8 @@
     <div class="sv-cp__grid">
         <!-- Summary -->
         <aside class="sv-panel sv-cp__side" aria-label="Account summary">
-            <div class="sv-pf__avatarwrap">
-                <span class="sv-avatar sv-cp__avatar" aria-hidden="true">@Model.Initials</span>
-                <button type="button" class="sv-pf__edit" disabled title="Photo upload is coming in a later update" aria-label="Change profile photo (coming soon)">
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
-                </button>
+            <div class="sv-photo">
+                <partial name="_ProfilePhoto" model="@(new ProfilePhotoViewModel(Model.Initials, Model.PhotoUrl, "sv-cp__avatar"))" />
             </div>
             <div class="sv-cp__name">@Model.FullName</div>
             <div class="sv-cp__email">@Model.Email</div>
@@ -66,7 +67,13 @@
                         <div class="sv-fld">
                             <label for="cp-name">Full Name</label>
                             <input id="cp-name" name="FullName" type="text" value="@form.FullName" required maxlength="155" autocomplete="name"
+                                   class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
                                    aria-invalid="@(nameError is null ? null : "true")" />
+                            @if (Model.NameLocked)
+                            {
+                                <input type="hidden" name="FullName" value="@form.FullName" />
+                                <p class="sv-lockhint" id="cp-lock" role="note">@Icons.Svg("clock", 12) Name editing is locked while you have active bookings.</p>
+                            }
                             @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
                         </div>
                         <div class="sv-fld">

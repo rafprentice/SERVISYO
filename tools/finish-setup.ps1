@@ -27,6 +27,7 @@ $lines = @(
     "builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();",
     "builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();",
     "builder.Services.AddSignalR();",
+    "builder.Services.AddScoped<IProfilePhotoService, ProfilePhotoService>();",
     "builder.Services.AddScoped<IEmailService, EmailService>();",
     "builder.Services.AddScoped<IFindServicesService, FindServicesService>();",
     "builder.Services.AddScoped<IHomePageService, HomePageService>();",
@@ -62,6 +63,25 @@ Edit-File "src\Servisyo.Web\Program.cs" {
     $i = $c.LastIndexOf($anchor)
     if ($i -lt 0) { Write-Host "COULD NOT FIND 'app.Run();' in Program.cs - tell Claude"; return $c }
     $c.Insert($i, $hub + "`r`n")
+}
+
+# ---- 1c. Program.cs: serve uploaded profile photos (MapStaticAssets only serves files that existed at build time) ----
+Edit-File "src\Servisyo.Web\Program.cs" {
+    param($c)
+    if ($c.Contains("app.UseStaticFiles(")) { return $c }
+    foreach ($anchor in @("app.UseRouting();", "app.MapStaticAssets();", "app.UseAuthentication();")) {
+        $i = $c.IndexOf($anchor)
+        if ($i -ge 0) { return $c.Insert($i, "app.UseStaticFiles();`r`n") }
+    }
+    Write-Host "COULD NOT FIND a place for app.UseStaticFiles() in Program.cs - tell Claude"
+    return $c
+}
+
+# ---- 1d. .gitignore: uploaded photos are user data, not source code ----
+$gi = ".gitignore"
+if (-not (Test-Path $gi) -or -not (Select-String -Path $gi -SimpleMatch "wwwroot/uploads/" -Quiet)) {
+    Add-Content $gi "`nsrc/Servisyo.Web/wwwroot/uploads/"
+    Write-Host "Edited: .gitignore"
 }
 
 # ---- 2. Entities.cs: User.EmailVerificationPending ----

@@ -1019,21 +1019,21 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-rv__booking { display: flex; align-items: center; gap: 12px; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--color-border); }
 .sv-rv__title { font-weight: 600; }
 .sv-rv__meta { font-size: .8125rem; color: var(--color-text-muted); }
-.sv-rv__rating { margin: 0 0 18px; padding: 0; border: 0; }
-.sv-rv__rating legend { margin-bottom: 6px; font-size: .75rem; color: var(--color-text-muted); }
-.sv-stars { display: inline-flex; flex-direction: row-reverse; gap: 2px; vertical-align: middle; }
-.sv-stars input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.sv-stars label { padding: 2px; border-radius: 6px; font-size: 2rem; line-height: 1; color: #D0D5DD; cursor: pointer; transition: color .15s, transform .1s; }
-.sv-stars label:hover, .sv-stars label:hover ~ label, .sv-stars input:checked ~ label { color: #F5A524; }
-.sv-stars label:active { transform: scale(.92); }
-.sv-stars input:focus-visible + label { outline: 2px solid var(--color-primary); outline-offset: 1px; }
-.sv-rv__word { margin-left: 10px; font-size: .875rem; font-weight: 600; color: var(--color-text-muted); vertical-align: middle; }
+.sv-rv__rating { display: flex; flex-direction: column; align-items: center; margin: 0 0 18px; padding: 0; border: 0; text-align: center; }
+.sv-rv__rating legend { margin: 0 auto 6px; font-size: .75rem; color: var(--color-text-muted); }
+.sv-starpick { display: inline-flex; flex-direction: row-reverse; gap: 2px; vertical-align: middle; }
+.sv-starpick input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.sv-starpick label { padding: 2px; border-radius: 6px; font-size: 2rem; line-height: 1; color: #D0D5DD; cursor: pointer; transition: color .15s, transform .1s; }
+.sv-starpick label:hover, .sv-starpick label:hover ~ label, .sv-starpick input:checked ~ label { color: #F5A524; }
+.sv-starpick label:active { transform: scale(.92); }
+.sv-starpick input:focus-visible + label { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.sv-rv__word { margin-top: 4px; font-size: .875rem; font-weight: 600; color: var(--color-text-muted); }
 .sv-rv__rating .sv-fld__err { display: block; margin-top: 6px; }
 .sv-rv__count { margin: 4px 0 0; text-align: right; font-size: .75rem; color: var(--color-text-muted); }
 .sv-rv__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
 .sv-rv__actions .sv-btn { display: inline-flex; align-items: center; gap: 6px; }
 .sv-rv__note { margin: 12px 0 0; font-size: .75rem; color: var(--color-text-muted); }
-@media (prefers-reduced-motion: reduce) { .sv-stars label { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .sv-starpick label { transition: none; } }
 
 
 /* ---------- Payment state on the provider's booking cards ---------- */
@@ -1053,3 +1053,34 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-live-note button { border: 0; background: transparent; color: #9CA3AF; font-size: 1.1rem; line-height: 1; cursor: pointer; }
 .sv-booking[data-busy], .sv-bk[data-busy] { opacity: .7; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .sv-live-flash { animation: none; } }
+
+
+/* ---------- Profile photo + name lock ---------- */
+.sv-photo { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.sv-avatar--img { object-fit: cover; padding: 0; background: #E5E7EB; }
+.sv-photo__form { display: contents; }
+.sv-pf__edit:not([disabled]) { cursor: pointer; }
+.sv-pf__edit:not([disabled]):hover { filter: brightness(1.1); transform: scale(1.06); }
+.sv-pf__edit:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.sv-pf__edit.is-busy { opacity: .6; cursor: progress; }
+.sv-photo__remove { margin: 0; }
+.sv-linkbtn-sm { padding: 0; border: 0; background: none; font-size: .6875rem; color: var(--color-text-muted); text-decoration: underline; cursor: pointer; }
+.sv-linkbtn-sm:hover { color: #B91C1C; }
+.sv-photo__err { max-width: 160px; margin: 0; font-size: .6875rem; color: #B91C1C; text-align: center; }
+.sv-fld input.is-locked { background: #F3F4F6; color: var(--color-text-muted); cursor: not-allowed; }
+.sv-lockhint { display: flex; align-items: center; gap: 4px; margin: 4px 0 0; font-size: .6875rem; color: #92400E; }
+
+.sv-fld input.is-locked:disabled { opacity: 1; }
+.sv-lockhint { padding: 8px 10px; border: 1px solid #FDE68A; border-radius: 6px; background: #FFFBEB; font-size: .75rem; }
+
+/* ---------- "Choose profile photo" window ---------- */
+
+.sv-starpick { justify-content: center; align-items: center; gap: 4px; }
+
+/* ---------- Review stars centered (review cards) ---------- */
+.sv-pf__rate, .sv-list .sv-review__rating { display: flex; justify-content: center; align-items: center; gap: 4px; }
+.sv-pf__rate .sv-stars, .sv-review__rating .sv-stars { display: flex; justify-content: center; align-items: center; gap: 4px; }
+.sv-pf__review .sv-pf__quote, .sv-pf__review .sv-pf__by, .sv-list .sv-review .sv-review__text, .sv-list .sv-review .sv-review__by { text-align: center; }
+
+/* name boxes: normal white + text cursor unless the server marked them locked */
+.sv-fld input.is-locked { background: #F3F4F6; border-color: #E5E7EB; color: #6B7280; cursor: not-allowed; }

@@ -64,6 +64,12 @@ public class ProviderProfilePageViewModel
 {
     public PortalShellViewModel Shell { get; set; } = new() { Role = "Provider" };
 
+    /// "/uploads/avatars/…" or null (then the initials are shown).
+    public string? PhotoUrl { get; set; }
+
+    /// True while the user has an active booking: the name fields are read-only (see ActiveBookingRules).
+    public bool NameLocked { get; set; }
+
     // what is SAVED (shown in the header card; typing in the form does not change it until Save)
     public string FullName { get; set; } = string.Empty;
     public string Initials { get; set; } = string.Empty;

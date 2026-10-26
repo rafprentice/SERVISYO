@@ -107,6 +107,8 @@ public class ProviderProfileService : IProviderProfileService
             },
             FullName = fullName,
             Initials = NameFormat.Initials(fullName),
+            PhotoUrl = string.IsNullOrWhiteSpace(p.ProfilePhoto) ? null : p.ProfilePhoto,
+            NameLocked = await _db.Bookings.AnyAsync(b => b.ProviderId == p.ProviderId && ActiveBookingRules.Statuses.Contains(b.Status), ct),
             BusinessName = p.BusinessName,
             City = string.IsNullOrWhiteSpace(p.City) ? null : p.City.Trim(),
             StrengthPercent = percent,
@@ -170,6 +172,15 @@ public class ProviderProfileService : IProviderProfileService
             errors["BusinessName"] = "Enter your business name.";
         else if (businessName.Length > ProfileRules.MaxBusinessNameLength)
             errors["BusinessName"] = $"The business name can be at most {ProfileRules.MaxBusinessNameLength} characters.";
+
+        // ---- no name changes while a customer has an open booking with this provider ----
+        var businessChanged = !string.Equals(businessName, (provider.BusinessName ?? string.Empty).Trim(), StringComparison.Ordinal);
+        if ((nameChanged || businessChanged)
+            && await _db.Bookings.AnyAsync(b => b.ProviderId == provider.ProviderId && ActiveBookingRules.Statuses.Contains(b.Status), ct))
+        {
+            if (nameChanged && !errors.ContainsKey("FullName")) errors["FullName"] = ActiveBookingRules.NameLockedMessage;
+            if (businessChanged && !errors.ContainsKey("BusinessName")) errors["BusinessName"] = ActiveBookingRules.NameLockedMessage;
+        }
 
         // ---- phone (optional; a number saved earlier in another style is left alone unless it is edited) ----
         var typedPhone = (form.PhoneNumber ?? string.Empty).Trim();

@@ -14,6 +14,10 @@
     // the problem text for each box (null = no problem)
     var nameError = Model.ErrorFor("FullName");
     var businessError = Model.ErrorFor("BusinessName");
+    // only when there IS an active booking; with none, the boxes are normal white editable fields
+    string? lockClass = Model.NameLocked ? "is-locked" : null;
+    string? lockTitle = Model.NameLocked ? "Name and Business Name editing is locked while you have active bookings." : null;
+    string? lockId = Model.NameLocked ? "pf-lock" : null;
     var phoneError = Model.ErrorFor("PhoneNumber");
     var emailError = Model.ErrorFor("Email");
     var cityError = Model.ErrorFor("City");
@@ -33,11 +37,8 @@
 
     <!-- Profile header + strength -->
     <section class="sv-panel sv-pf__head" aria-label="Profile summary">
-        <div class="sv-pf__avatarwrap">
-            <span class="sv-avatar sv-avatar--ink sv-pf__avatar" aria-hidden="true">@Model.Initials</span>
-            <button type="button" class="sv-pf__edit" disabled title="Photo upload is coming in a later update" aria-label="Change profile photo (coming soon)">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
-            </button>
+        <div class="sv-photo">
+            <partial name="_ProfilePhoto" model="@(new ProfilePhotoViewModel(Model.Initials, Model.PhotoUrl, "sv-avatar--ink sv-pf__avatar"))" />
         </div>
         <div class="sv-pf__who">
             <div class="sv-pf__name">@Model.FullName</div>
@@ -68,6 +69,7 @@
             <div class="sv-fld">
                 <label for="pf-name">Full Name</label>
                 <input id="pf-name" name="FullName" type="text" value="@form.FullName" required maxlength="155" autocomplete="name"
+                       class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
                        aria-invalid="@(nameError is null ? null : "true")" />
                 @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
             </div>
@@ -75,9 +77,18 @@
             <div class="sv-fld">
                 <label for="pf-business">Business Name</label>
                 <input id="pf-business" name="BusinessName" type="text" value="@form.BusinessName" required maxlength="155" autocomplete="organization"
+                       class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
                        aria-invalid="@(businessError is null ? null : "true")" />
                 @if (businessError is not null) { <p class="sv-fld__err" role="alert">@businessError</p> }
             </div>
+
+            @if (Model.NameLocked)
+            {
+                @* disabled boxes are not sent with the form, so the current names travel in hidden fields (the server re-checks anyway) *@
+                <input type="hidden" name="FullName" value="@form.FullName" />
+                <input type="hidden" name="BusinessName" value="@form.BusinessName" />
+                <p class="sv-lockhint" id="pf-lock" role="note">@Icons.Svg("clock", 12) Name and Business Name editing is locked while you have active bookings.</p>
+            }
 
             <div class="sv-fld">
                 <label for="pf-phone">Phone Number</label>

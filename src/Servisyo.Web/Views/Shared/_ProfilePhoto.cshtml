@@ -1,0 +1,150 @@
+@model Servisyo.Web.ViewModels.ProfilePhotoViewModel
+@* Avatar with a pencil button. The pencil opens the "Choose profile photo" window:
+   "+ Upload photo" picks a file, a round preview is shown, and Save sends it (the server checks type and size again:
+   JPG/PNG/WebP, max 2 MB). After saving, the page reloads, so the sidebar, the avatar and Profile Strength all update. *@
+<div class="sv-pf__avatarwrap">
+    @if (Model.PhotoUrl is not null)
+    {
+        <img class="sv-avatar @Model.AvatarClass sv-avatar--img" src="@Model.PhotoUrl" alt="Profile photo" />
+    }
+    else
+    {
+        <span class="sv-avatar @Model.AvatarClass" aria-hidden="true">@Model.Initials</span>
+    }
+    <button type="button" class="sv-pf__edit" data-photo-open aria-haspopup="dialog" aria-label="Change profile photo" title="Change profile photo">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+    </button>
+</div>
+
+<dialog class="sv-pm" data-photo-dialog aria-labelledby="pm-title">
+    <div class="sv-pm__card">
+        <button type="button" class="sv-pm__x" data-photo-cancel aria-label="Close">✕</button>
+
+        <form method="post" asp-controller="ProfilePhoto" asp-action="Upload" enctype="multipart/form-data" class="sv-pm__body" data-photo-form>
+            <h2 id="pm-title" class="sv-pm__title">Choose profile photo</h2>
+
+            <div class="sv-pm__preview">
+                @if (Model.PhotoUrl is not null)
+                {
+                    <img class="sv-pm__img" src="@Model.PhotoUrl" alt="Current profile photo" data-photo-preview />
+                }
+                else
+                {
+                    <img class="sv-pm__img" alt="Selected photo" data-photo-preview hidden />
+                    <span class="sv-pm__initials" aria-hidden="true" data-photo-initials>@Model.Initials</span>
+                }
+            </div>
+
+            <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" class="sv-sr-only" tabindex="-1" data-photo-input />
+            <button type="button" class="sv-pm__pick" data-photo-pick>+ Upload photo</button>
+            <p class="sv-pm__help">JPG, PNG or WebP, up to 2 MB</p>
+            <p class="sv-pm__err" role="alert" data-photo-error hidden></p>
+
+            <div class="sv-pm__actions">
+                <button type="button" class="sv-pm__btn sv-pm__btn--ghost" data-photo-cancel>Cancel</button>
+                <button type="submit" class="sv-pm__btn sv-pm__btn--primary" data-photo-save disabled>Save</button>
+            </div>
+        </form>
+
+        @if (Model.PhotoUrl is not null)
+        {
+            <form method="post" asp-controller="ProfilePhoto" asp-action="Remove" class="sv-pm__remove"
+                  onsubmit="return confirm('Remove your profile photo? Your initials will be shown instead.');">
+                <button type="submit" class="sv-linkbtn-sm">Remove current photo</button>
+            </form>
+        }
+    </div>
+</dialog>
+
+<style>
+    /* "Choose profile photo" window (kept with the window so it always looks right) */
+    .sv-pm { width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 0; border-radius: 16px; background: #fff; color: var(--color-text, #111827);
+             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, .12), 0 8px 10px -6px rgba(0, 0, 0, .12); overflow: auto; }
+    .sv-pm::backdrop { background: rgba(0, 0, 0, .5); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+    .sv-pm__card { position: relative; padding: 24px; }
+    .sv-pm__x { position: absolute; top: 16px; right: 16px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+                border: 0; border-radius: 8px; background: transparent; color: #9CA3AF; font-size: 1rem; line-height: 1; cursor: pointer; }
+    .sv-pm__x:hover { color: #4B5563; background: #F3F4F6; }
+    .sv-pm__body { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 0; text-align: center; }
+    .sv-pm__title { margin: 4px 32px 4px; font-size: 1.125rem; font-weight: 700; }
+    .sv-pm__preview { display: grid; place-items: center; width: 100px; height: 100px; border-radius: 50%; background: #121426; overflow: hidden;
+                      box-shadow: 0 0 0 4px #EEF2FF; }
+    .sv-pm__img { width: 100%; height: 100%; object-fit: cover; }
+    .sv-pm__img[hidden], .sv-pm__initials[hidden] { display: none; }
+    .sv-pm__initials { color: #fff; font: 600 2rem var(--font-display, inherit); }
+    .sv-pm__pick { padding: 9px 18px; border: 0; border-radius: 8px; background: #EEF2FF; color: #4F46E5; font: 500 .875rem var(--font-body, inherit); cursor: pointer; }
+    .sv-pm__pick:hover { background: #E0E7FF; }
+    .sv-pm__pick:focus-visible, .sv-pm__btn:focus-visible, .sv-pm__x:focus-visible { outline: 2px solid #4F46E5; outline-offset: 2px; }
+    .sv-pm__help { margin: -4px 0 0; font-size: .75rem; color: #6B7280; }
+    .sv-pm__err { margin: 0; font-size: .75rem; color: #B91C1C; }
+    .sv-pm__actions { display: flex; justify-content: center; gap: 8px; width: 100%; margin-top: 8px; padding-top: 16px; border-top: 1px solid #E5E7EB; }
+    .sv-pm__btn { min-width: 96px; padding: 9px 16px; border-radius: 8px; font: 600 .875rem var(--font-body, inherit); cursor: pointer; }
+    .sv-pm__btn--ghost { border: 1px solid #E5E7EB; background: #fff; color: #374151; }
+    .sv-pm__btn--ghost:hover { background: #F9FAFB; }
+    .sv-pm__btn--primary { border: 1px solid #4F46E5; background: #4F46E5; color: #fff; }
+    .sv-pm__btn--primary:hover:not(:disabled) { background: #4338CA; }
+    .sv-pm__btn--primary:disabled { opacity: .5; cursor: not-allowed; }
+    .sv-pm__remove { margin: 12px 0 0; text-align: center; }
+</style>
+
+<script>
+    (function () {
+        var dialog = document.querySelector("[data-photo-dialog]");
+        var openBtn = document.querySelector("[data-photo-open]");
+        if (!dialog || !openBtn || dialog.dataset.ready) return;
+        dialog.dataset.ready = "1";
+
+        var form = dialog.querySelector("[data-photo-form]");
+        var input = dialog.querySelector("[data-photo-input]");
+        var pick = dialog.querySelector("[data-photo-pick]");
+        var save = dialog.querySelector("[data-photo-save]");
+        var preview = dialog.querySelector("[data-photo-preview]");
+        var initials = dialog.querySelector("[data-photo-initials]");
+        var err = dialog.querySelector("[data-photo-error]");
+        var originalSrc = preview.getAttribute("src");
+        var objectUrl = null;
+
+        function showError(text) { err.textContent = text; err.hidden = !text; }
+
+        function reset() {
+            input.value = "";
+            save.disabled = true;
+            showError("");
+            if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+            if (originalSrc) { preview.src = originalSrc; preview.hidden = false; }
+            else { preview.removeAttribute("src"); preview.hidden = true; if (initials) initials.hidden = false; }
+        }
+
+        function close() { reset(); if (dialog.open) dialog.close(); openBtn.focus(); }
+
+        openBtn.addEventListener("click", function () {
+            reset();
+            if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+        });
+        dialog.querySelectorAll("[data-photo-cancel]").forEach(function (b) { b.addEventListener("click", close); });
+        dialog.addEventListener("cancel", function (e) { e.preventDefault(); close(); });                 // Esc key
+        dialog.addEventListener("click", function (e) { if (e.target === dialog) close(); });             // click on the dark backdrop
+
+        pick.addEventListener("click", function () { input.click(); });
+        input.addEventListener("change", function () {
+            var f = input.files && input.files[0];
+            if (!f) return;
+            if (!/^image\/(jpeg|png|webp)$/.test(f.type)) { reset(); showError("Please choose a JPG, PNG or WebP image."); return; }
+            if (f.size > 2 * 1024 * 1024) { reset(); showError("That photo is too large. Please choose one under 2 MB."); return; }
+            showError("");
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+            objectUrl = URL.createObjectURL(f);
+            preview.src = objectUrl;
+            preview.hidden = false;
+            if (initials) initials.hidden = true;
+            save.disabled = false;
+            save.focus();
+        });
+
+        form.addEventListener("submit", function (e) {
+            if (!input.files || !input.files[0]) { e.preventDefault(); showError("Choose a photo first."); return; }
+            save.disabled = true;               // sent once; the page reloads with the new photo
+            save.textContent = "Saving…";
+        });
+    })();
+</script>

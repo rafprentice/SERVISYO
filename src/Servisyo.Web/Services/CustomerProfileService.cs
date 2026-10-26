@@ -63,7 +63,7 @@ public class CustomerProfileService : ICustomerProfileService
                      && x.User.AccountStatus == AccountStatuses.Active)
             .Select(x => new
             {
-                x.CustomerId, x.City, x.Address,
+                x.CustomerId, x.City, x.Address, x.ProfilePhoto,
                 x.User.FirstName, x.User.LastName, x.User.Email, x.User.PhoneNumber, x.User.CreatedAt
             })
             .FirstOrDefaultAsync(ct);
@@ -86,6 +86,8 @@ public class CustomerProfileService : ICustomerProfileService
             },
             FullName = fullName,
             Initials = NameFormat.Initials(fullName),
+            PhotoUrl = string.IsNullOrWhiteSpace(c.ProfilePhoto) ? null : c.ProfilePhoto,
+            NameLocked = await _db.Bookings.AnyAsync(b => b.CustomerId == c.CustomerId && ActiveBookingRules.Statuses.Contains(b.Status), ct),
             Email = c.Email,
             // stored in UTC, shown in Philippine time
             MemberSince = c.CreatedAt.AddHours(ManilaOffsetHours).ToString("MMM d, yyyy", CultureInfo.InvariantCulture),
@@ -118,6 +120,8 @@ public class CustomerProfileService : ICustomerProfileService
             errors["FullName"] = $"The name can be at most {ProfileRules.MaxFullNameLength} characters.";
         else if (nameChanged && !fullName.Contains(' '))
             errors["FullName"] = "Enter your first and last name.";
+        else if (nameChanged && await _db.Bookings.AnyAsync(b => b.CustomerId == customer.CustomerId && ActiveBookingRules.Statuses.Contains(b.Status), ct))
+            errors["FullName"] = ActiveBookingRules.NameLockedMessage;       // the provider must keep seeing the name they were booked by
 
         // ---- phone (optional; a number saved earlier in another style is left alone unless it is edited) ----
         var typedPhone = (form.PhoneNumber ?? string.Empty).Trim();

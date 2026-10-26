@@ -16,6 +16,7 @@ builder.Services.AddDbContext<ServisyoDbContext>(options =>
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IProfilePhotoService, ProfilePhotoService>();
 builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();
 builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();
 builder.Services.AddSignalR();
@@ -70,6 +71,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseStaticFiles();
 app.UseRouting();
 
 app.UseAuthentication();   // must come BEFORE UseAuthorization

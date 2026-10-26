@@ -36,7 +36,7 @@
             <fieldset class="sv-rv__rating">
                 <legend>Your rating</legend>
                 @* Stars are listed 5 → 1 and shown right-to-left, so hovering a star also lights the ones before it. *@
-                <div class="sv-stars">
+                <div class="sv-starpick">
                     @for (var n = 5; n >= 1; n--)
                     {
                         var id = "rating-" + n;
@@ -71,7 +71,7 @@
         (function () {
             var words = ["", "Poor", "Fair", "Good", "Very good", "Excellent"];
             var out = document.querySelector("[data-rv-word]");
-            document.querySelectorAll(".sv-stars input").forEach(function (r) {
+            document.querySelectorAll(".sv-starpick input").forEach(function (r) {
                 r.addEventListener("change", function () { if (out) out.textContent = words[+r.value] || ""; });
             });
             var box = document.querySelector("[data-rv-comment]");

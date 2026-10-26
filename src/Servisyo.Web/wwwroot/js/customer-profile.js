@@ -25,7 +25,8 @@
             // the form stays on screen; the boxes are just locked until Edit is pressed
             var actions = section.querySelector("[data-cp-actions]");
             var form = section.querySelector("[data-cp-form]");
-            fieldsOf(section).forEach(function (f) { f.readOnly = !open; });
+            // a field the server locked (class is-locked: name during active bookings) always stays read-only
+            fieldsOf(section).forEach(function (f) { f.readOnly = !open || f.classList.contains("is-locked"); });
             if (form) form.classList.toggle("is-readonly", !open);
             if (actions) actions.hidden = !open;
         } else {
