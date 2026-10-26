@@ -1084,3 +1084,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 
 /* name boxes: normal white + text cursor unless the server marked them locked */
 .sv-fld input.is-locked { background: #F3F4F6; border-color: #E5E7EB; color: #6B7280; cursor: not-allowed; }
+
+/* buttons with a small icon before the text ("★ Leave a Review"): space between them, like "Submit Review" */
+.sv-btn--withicon { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding-left: 18px; padding-right: 20px; }
+.sv-btn--withicon svg { flex: none; }

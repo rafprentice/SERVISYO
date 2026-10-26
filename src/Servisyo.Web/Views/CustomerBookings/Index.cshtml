@@ -114,7 +114,7 @@
                             }
                             @if (c.CanReview)
                             {
-                                <a class="sv-btn sv-btn--soft sv-btn--sm" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@c.BookingId"
+                                <a class="sv-btn sv-btn--soft sv-btn--sm sv-btn--withicon" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@c.BookingId"
                                    aria-label="Leave a review for booking #@c.BookingId">@Icons.Svg("star", 14, filled: true) Leave a Review</a>
                             }
                             @if (c.IsReviewed)

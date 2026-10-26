@@ -123,7 +123,7 @@ else
                     }
                     @if (Model.State == DashboardState.ServiceCompleted && info.ActionLabel is not null)
                     {
-                        <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@cur.BookingId">
+                        <a class="sv-btn sv-btn--primary sv-btn--sm sv-btn--withicon" asp-controller="CustomerReviews" asp-action="Create" asp-route-bookingId="@cur.BookingId">
                             @Icons.Svg("star", 14, filled: true)
                             @info.ActionLabel
                         </a>
