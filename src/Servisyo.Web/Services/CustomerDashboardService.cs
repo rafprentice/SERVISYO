@@ -40,6 +40,7 @@ public class CustomerDashboardService : ICustomerDashboardService
         public decimal TotalFee { get; set; }
         public DateTime CreatedAt { get; set; }
         public string ProviderName { get; set; } = string.Empty;
+        public int ProviderUserId { get; set; }
     }
 
     private static readonly Expression<Func<Booking, BookingRow>> ToRow = b => new BookingRow
@@ -51,7 +52,8 @@ public class CustomerDashboardService : ICustomerDashboardService
         BookingTime = b.BookingTime,
         TotalFee = b.TotalFee,
         CreatedAt = b.CreatedAt,
-        ProviderName = b.Provider.BusinessName
+        ProviderName = b.Provider.BusinessName,
+        ProviderUserId = b.Provider.UserId
     };
 
     public async Task<CustomerDashboardViewModel?> GetAsync(int userId, CancellationToken ct = default)
@@ -131,6 +133,7 @@ public class CustomerDashboardService : ICustomerDashboardService
                 Reference = $"BK-{currentRow.CreatedAt.Year}-{currentRow.BookingId:D4}",
                 Title = title,
                 ProviderName = currentRow.ProviderName,
+                ProviderUserId = currentRow.ProviderUserId,
                 Date = currentRow.BookingDate,
                 Time = currentRow.BookingTime,
                 Fee = currentRow.TotalFee,

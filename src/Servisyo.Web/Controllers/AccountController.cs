@@ -11,11 +11,13 @@ namespace Servisyo.Web.Controllers;
 public class AccountController : Controller
 {
     private readonly IAuthService _auth;
+    private readonly IPasswordResetService _passwordReset;
     private readonly ILogger<AccountController> _logger;
 
-    public AccountController(IAuthService auth, ILogger<AccountController> logger)
+    public AccountController(IAuthService auth, IPasswordResetService passwordReset, ILogger<AccountController> logger)
     {
         _auth = auth;
+        _passwordReset = passwordReset;
         _logger = logger;
     }
 
@@ -113,9 +115,67 @@ public class AccountController : Controller
         return RedirectToAction("Index", "Home");
     }
 
-    // Password reset is not built yet; this page says so honestly instead of a dead link.
+    // ---------- Forgot / reset password (6-digit code sent by email) ----------
     [HttpGet]
-    public IActionResult ForgotPassword() => View();
+    public IActionResult ForgotPassword()
+    {
+        if (User.Identity?.IsAuthenticated == true) return RedirectToAction("Index", "Home");
+        return View(new ForgotPasswordViewModel());
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordViewModel vm)
+    {
+        if (!ModelState.IsValid) return View(vm);
+
+        // Same answer whether or not the address is registered, so this page cannot be used to find out who has an account.
+        await _passwordReset.RequestResetAsync(vm.Email);
+
+        TempData["ResetInfo"] = "If that email is registered, we sent a 6-digit code to it. It expires in 15 minutes.";
+        return RedirectToAction(nameof(ResetPassword), new { email = vm.Email.Trim() });
+    }
+
+    [HttpGet]
+    public IActionResult ResetPassword(string? email = null)
+    {
+        if (User.Identity?.IsAuthenticated == true) return RedirectToAction("Index", "Home");
+        return View(new ResetPasswordViewModel { Email = email?.Trim() ?? string.Empty });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ResetPassword(ResetPasswordViewModel vm)
+    {
+        if (!ModelState.IsValid) return View(vm);
+
+        var status = await _passwordReset.ResetPasswordAsync(vm.Email, vm.Code, vm.NewPassword);
+        switch (status)
+        {
+            case PasswordResetStatus.Ok:
+                TempData["LoginNotice"] = "Your password was changed. Please sign in with your new password.";
+                return RedirectToAction(nameof(Login));
+
+            case PasswordResetStatus.TooManyAttempts:
+                ModelState.AddModelError(nameof(vm.Code), "Too many wrong tries. Please request a new code.");
+                break;
+
+            default:
+                ModelState.AddModelError(nameof(vm.Code), "That code is incorrect or has expired.");
+                break;
+        }
+
+        _logger.LogWarning("Password reset code was refused ({Status}).", status);
+        return View(vm);       // password boxes are never filled back in by the page
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ResendResetCode(string? email)
+    {
+        // Silent when the address is unknown or asked again within a minute, like the first request.
+        await _passwordReset.RequestResetAsync(email);
+
+        TempData["ResetInfo"] = "If that email is registered, a new 6-digit code was sent. You can ask for a new code once a minute.";
+        return RedirectToAction(nameof(ResetPassword), new { email = email?.Trim() });
+    }
 
     [HttpGet]
     public IActionResult AccessDenied() => View();

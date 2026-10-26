@@ -7,8 +7,6 @@
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "providers";
 
-    var soon = "Available in an upcoming update";
-
     // The four tabs from the design are always shown. "Rejected" and "Deactivated" only appear when
     // there is at least one, so no provider is ever hidden from the filters.
     var tabs = new List<(string Key, string Label, int Count)>
@@ -23,6 +21,8 @@
 
     string? StatusParam() => Model.Status == "All" ? null : Model.Status;
 }
+
+<partial name="_AdminToast" />
 
 <p class="sv-eyebrow">Management</p>
 <h1 class="sv-dash__title">Service Providers</h1>
@@ -109,7 +109,16 @@ else
                             <span class="sv-tag sv-tag--@b.Tone">@b.Text</span>
                         }
                     </div>
-                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">View Details</button>
+                    @if (c.ApprovalStatus == "Pending")
+                    {
+                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                           href="@Url.Action("Review", "AdminApplications", new { providerId = c.ProviderId, returnTo = "providers", status = StatusParam(), page = Model.Page })">Review Application</a>
+                    }
+                    else
+                    {
+                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                           href="@Url.Action("Details", "AdminProviders", new { providerId = c.ProviderId, status = StatusParam(), page = Model.Page })">View Details</a>
+                    }
                 </div>
             </article>
         }
@@ -132,4 +141,10 @@ else
             }
         </span>
     </nav>
+}
+
+<partial name="_ApplicationReviewDialog" />
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
 }

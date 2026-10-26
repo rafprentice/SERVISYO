@@ -22,6 +22,7 @@ public class ServisyoDbContext : DbContext
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<AdminAction> AdminActions => Set<AdminAction>();
     public DbSet<BookingReport> BookingReports => Set<BookingReport>();
 
@@ -191,6 +192,15 @@ public class ServisyoDbContext : DbContext
             e.HasOne(x => x.Receiver).WithMany().HasForeignKey(x => x.ReceiverId);
         });
 
+        mb.Entity<EmailOtp>(e =>
+        {
+            e.ToTable("EMAIL_OTPS");
+            e.Property(x => x.Purpose).HasMaxLength(30);
+            e.Property(x => x.CodeHash).HasMaxLength(255);
+            e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.UserId, x.Purpose });
+        });
         mb.Entity<Notification>(e =>
         {
             e.ToTable("NOTIFICATIONS");

@@ -16,6 +16,23 @@ builder.Services.AddDbContext<ServisyoDbContext>(options =>
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));
+builder.Services.AddScoped<IBookProviderService, BookProviderService>();
+builder.Services.AddScoped<ICategoryManagementService, CategoryManagementService>();
+builder.Services.AddScoped<ICustomerBookingsService, CustomerBookingsService>();
+builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<IFindServicesService, FindServicesService>();
+builder.Services.AddScoped<IMessagingService, MessagingService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IOtpService, OtpService>();
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
+builder.Services.AddScoped<IProviderApprovalService, ProviderApprovalService>();
+builder.Services.AddScoped<IProviderAvailabilityService, ProviderAvailabilityService>();
+builder.Services.AddScoped<IProviderBookingsService, ProviderBookingsService>();
+builder.Services.AddScoped<IProviderOfferingsService, ProviderOfferingsService>();
+builder.Services.AddScoped<IProviderProfileService, ProviderProfileService>();
+builder.Services.AddScoped<IReviewModerationService, ReviewModerationService>();
 builder.Services.AddScoped<IHomePageService, HomePageService>();
 builder.Services.AddScoped<ICustomerDashboardService, CustomerDashboardService>();
 builder.Services.AddScoped<IProviderDashboardService, ProviderDashboardService>();

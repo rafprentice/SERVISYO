@@ -1,0 +1,119 @@
+@using Servisyo.Web.ViewModels
+@model ProviderDetailsViewModel
+@{
+    // Where "Close" goes when JavaScript is not opening this as a pop-up.
+    var closeUrl = Url.Action("Index", "AdminProviders", new { status = Model.ReturnStatus == ProviderStatuses.All ? null : Model.ReturnStatus, page = Model.ReturnPage });
+}
+<div class="sv-rv sv-pd" data-sv-review>
+    <div class="sv-rv__head">
+        <div>
+            <h2 class="sv-rv__title" id="sv-rv-title">Provider Details</h2>
+            <p class="sv-rv__id">Manage account status and view the complete business profile</p>
+        </div>
+        <a class="sv-rv__x" href="@closeUrl" data-sv-close aria-label="Close">&times;</a>
+    </div>
+
+    <div class="sv-pd__banner">
+        <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@Model.Initials</span>
+        <div class="sv-pd__who">
+            <div class="sv-pd__name">@Model.Name</div>
+            <div class="sv-pd__biz">@Model.BusinessName</div>
+            @if (Model.Location is not null)
+            {
+                <div class="sv-pd__where">@Model.Location</div>
+            }
+        </div>
+        <div class="sv-pd__badges">
+            @foreach (var b in Model.Badges)
+            {
+                <span class="sv-tag sv-tag--@b.Tone">@b.Text</span>
+            }
+        </div>
+    </div>
+
+    <dl class="sv-pd__grid">
+        <div class="sv-pd__cell">
+            <dt>Email Address</dt>
+            <dd>@Model.Email</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Phone Number</dt>
+            <dd>@if (Model.Phone is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.Phone }</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Member Since</dt>
+            <dd>@Model.MemberSince</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Completed Jobs</dt>
+            <dd>@Model.CompletedJobs</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Rating</dt>
+            <dd>@Model.RatingText</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Address</dt>
+            <dd>@if (Model.Address is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.Address }</dd>
+        </div>
+    </dl>
+
+    <div class="sv-pd__section">
+        <h3 class="sv-pd__h">About / Business Summary</h3>
+        @if (Model.Description is null)
+        {
+            <p class="sv-pd__box sv-rv__none">No description yet.</p>
+        }
+        else
+        {
+            <p class="sv-pd__box">@Model.Description</p>
+        }
+    </div>
+
+    <div class="sv-pd__section">
+        <h3 class="sv-pd__h">Services &amp; Base Fees</h3>
+        @if (Model.Services.Count == 0)
+        {
+            <p class="sv-rv__none sv-pd__none">No active services listed.</p>
+        }
+        else
+        {
+            <ul class="sv-pd__services">
+                @foreach (var s in Model.Services)
+                {
+                    <li>
+                        <span class="sv-pd__sname">@s.Name <span class="sv-pd__scat">@s.Category</span></span>
+                        <span class="sv-pd__sprice">@s.PriceText <span>· @s.DurationText</span></span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+
+    <form asp-controller="AdminProviders" asp-action="ChangeStatus" asp-route-providerId="@Model.ProviderId"
+          method="post" class="sv-rv__form sv-pd__form" data-sv-decision-form>
+        <input type="hidden" name="ReturnStatus" value="@Model.ReturnStatus" />
+        <input type="hidden" name="ReturnPage" value="@Model.ReturnPage" />
+
+        @if (Model.AsksReason)
+        {
+            <div class="sv-rv__note">
+                <label for="sv-pd-reason">Reason <span>(optional)</span></label>
+                <textarea id="sv-pd-reason" name="Reason" rows="2" maxlength="255"
+                          placeholder="Saved in the admin activity log. The provider does not see it."></textarea>
+            </div>
+        }
+
+        <div class="sv-rv__foot">
+            <a class="sv-btn sv-btn--sm sv-btn--outline" href="@closeUrl" data-sv-close>Close</a>
+            @foreach (var a in Model.Actions)
+            {
+                var confirmText = $"{a.Label} {Model.Name}? {a.Text}";
+                var cssTone = a.Tone == "warn" ? "sv-btn--warn-outline" : a.Tone == "danger" ? "sv-btn--danger-outline" : "sv-btn--primary";
+                var noun = (a.Action == "Suspend" || a.Action == "Deactivate") ? "Provider" : "Account";
+                <button type="submit" name="Action" value="@a.Action" class="sv-btn sv-btn--sm @cssTone"
+                        data-confirm="@confirmText">@a.Label @noun</button>
+            }
+        </div>
+    </form>
+</div>

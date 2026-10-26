@@ -164,7 +164,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 
 /* ================= Provider dashboard additions ================= */
 .sv-side__foot { margin: 0; margin-top: auto; border-top: 1px solid var(--color-border); }
-.sv-side__logout { display: flex; align-items: center; gap: 10px; width: 100%; padding: 16px 20px; border: 0; background: transparent; font: 500 .875rem var(--font-body); color: var(--color-text); cursor: pointer; }
+.sv-side__logout { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 16px 20px; border: 0; background: transparent; font: 500 .875rem var(--font-body); color: var(--color-text); cursor: pointer; }
 .sv-side__logout:hover { color: var(--color-primary); }
 
 .sv-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }

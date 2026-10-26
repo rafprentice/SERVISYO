@@ -1,0 +1,151 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model BookProviderPageViewModel
+@{
+    ViewData["Title"] = "Book " + Model.BusinessName;
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "find";
+
+    var inv = CultureInfo.InvariantCulture;
+    var form = Model.Form;
+
+    var servicesError = Model.ErrorFor("ServiceIds");
+    var dateError = Model.ErrorFor("Date");
+    var timeError = Model.ErrorFor("Time");
+    var locationError = Model.ErrorFor("Location");
+    var descriptionError = Model.ErrorFor("Description");
+
+    var chosenTime = form.Time?.ToString("HH:mm", inv) ?? string.Empty;
+}
+
+<div class="sv-bp">
+    <p class="sv-eyebrow">Book a Service</p>
+    <h1 class="sv-dash__title">Book @Model.ProviderName</h1>
+    <p class="sv-dash__sub">Choose what you need, pick a date and time, and send your request. The provider then accepts or rejects it.</p>
+
+    <noscript>
+        <div class="sv-flash sv-flash--error">This page needs JavaScript to show the available times. Please turn it on and reload.</div>
+    </noscript>
+
+    <div class="sv-bp__grid">
+        <form method="post" asp-controller="BookProvider" asp-action="Create" asp-route-providerId="@Model.ProviderId"
+              class="sv-bp__form" id="bp-form" data-bp-form data-sv-once
+              data-slots-url="@Url.Action("Slots", "BookProvider", new { providerId = Model.ProviderId })"
+              data-selected-time="@chosenTime">
+
+            @if (!string.IsNullOrEmpty(Model.FormError))
+            {
+                <p class="sv-formerr" role="alert">@Model.FormError</p>
+            }
+
+            <!-- 1. Services -->
+            <section class="sv-panel sv-bp__card" aria-labelledby="bp-svc-title">
+                <h2 id="bp-svc-title" class="sv-bp__title"><span class="sv-bp__step">1</span> What do you need?</h2>
+                <p class="sv-bp__hint">You can choose more than one service for the same visit.</p>
+                <ul class="sv-bp__services">
+                    @foreach (var s in Model.Services)
+                    {
+                        <li>
+                            <label class="sv-bp__svc">
+                                <input type="checkbox" name="ServiceIds" value="@s.ServiceId" data-bp-service
+                                       data-price="@(s.Price.ToString(inv))" data-minutes="@s.DurationMinutes" checked="@Model.IsSelected(s.ServiceId)" />
+                                <span class="sv-bp__svcbody">
+                                    <span class="sv-bp__svcname">@s.Name</span>
+                                    <span class="sv-bp__svcmeta">@s.CategoryName · @s.DurationText</span>
+                                    @if (s.Description is not null) { <span class="sv-bp__svcdesc">@s.Description</span> }
+                                </span>
+                                <span class="sv-bp__svcprice">@s.PriceText</span>
+                            </label>
+                        </li>
+                    }
+                </ul>
+                @if (servicesError is not null) { <p class="sv-fld__err" role="alert">@servicesError</p> }
+            </section>
+
+            <!-- 2. Date and time -->
+            <section class="sv-panel sv-bp__card" aria-labelledby="bp-when-title">
+                <h2 id="bp-when-title" class="sv-bp__title"><span class="sv-bp__step">2</span> When?</h2>
+                <div class="sv-fld">
+                    <label for="bp-date">Date</label>
+                    <input id="bp-date" name="Date" type="date" value="@(form.Date?.ToString("yyyy-MM-dd", inv))" data-bp-date
+                           min="@(Model.EarliestDate.ToString("yyyy-MM-dd", inv))" max="@(Model.LatestDate.ToString("yyyy-MM-dd", inv))"
+                           aria-invalid="@(dateError is null ? null : "true")" />
+                    @if (Model.MinNoticeDays > 0)
+                    {
+                        <p class="sv-bp__hint">This provider needs at least @Model.MinNoticeDays day@(Model.MinNoticeDays == 1 ? "" : "s") of notice.</p>
+                    }
+                    @if (dateError is not null) { <p class="sv-fld__err" role="alert">@dateError</p> }
+                </div>
+
+                <div class="sv-fld">
+                    <span class="sv-bp__label" id="bp-time-label">Start time</span>
+                    <div class="sv-bp__slots" role="radiogroup" aria-labelledby="bp-time-label" data-bp-slots></div>
+                    <p class="sv-bp__hint" data-bp-slotmsg>Choose a service and a date to see the available times.</p>
+                    @if (timeError is not null) { <p class="sv-fld__err" role="alert" data-bp-timeerr>@timeError</p> }
+                </div>
+            </section>
+
+            <!-- 3. Where and what -->
+            <section class="sv-panel sv-bp__card" aria-labelledby="bp-where-title">
+                <h2 id="bp-where-title" class="sv-bp__title"><span class="sv-bp__step">3</span> Where and what?</h2>
+                <div class="sv-fld">
+                    <label for="bp-location">Service address</label>
+                    <input id="bp-location" name="Location" type="text" value="@form.Location" maxlength="255" autocomplete="street-address"
+                           placeholder="House no., street, barangay, city"
+                           aria-invalid="@(locationError is null ? null : "true")" />
+                    @if (locationError is not null) { <p class="sv-fld__err" role="alert">@locationError</p> }
+                </div>
+                <div class="sv-fld">
+                    <label for="bp-desc">What needs to be done?</label>
+                    <textarea id="bp-desc" name="Description" rows="3" maxlength="255" placeholder="Describe the problem or the work you need."
+                              aria-invalid="@(descriptionError is null ? null : "true")">@form.Description</textarea>
+                    @if (descriptionError is not null) { <p class="sv-fld__err" role="alert">@descriptionError</p> }
+                </div>
+            </section>
+
+            <div class="sv-bp__actions">
+                <button type="submit" class="sv-btn sv-btn--primary" data-bp-submit>Send Booking Request</button>
+                <a class="sv-btn sv-btn--outline" asp-controller="FindServices" asp-action="Index">Cancel</a>
+            </div>
+        </form>
+
+        <!-- Summary -->
+        <aside class="sv-panel sv-bp__side" aria-label="Booking summary">
+            <div class="sv-bp__who">
+                <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@Model.Initials</span>
+                <div>
+                    <div class="sv-bp__name">@Model.ProviderName</div>
+                    <div class="sv-bp__biz">@(Model.BusinessName + (Model.City is null ? "" : " · " + Model.City))</div>
+                </div>
+            </div>
+            <div class="sv-bp__rating">
+                @if (Model.AvgRating is decimal rating && Model.ReviewCount > 0)
+                {
+                    <span class="sv-stars" role="img" aria-label="@("Rated " + rating.ToString("0.0", inv) + " out of 5")">
+                        @for (var n = 1; n <= 5; n++)
+                        {
+                            <span class="@(n <= Math.Round(rating) ? "is-on" : "")">@Icons.Svg("star", 13, filled: true)</span>
+                        }
+                    </span>
+                    <span>@(rating.ToString("0.0", inv) + " (" + Model.ReviewCount + ")")</span>
+                }
+                else
+                {
+                    <span>No reviews yet</span>
+                }
+            </div>
+            <dl class="sv-bp__sum">
+                <div><dt>Services</dt><dd data-bp-count>0</dd></div>
+                <div><dt>Time needed</dt><dd data-bp-duration>—</dd></div>
+                <div class="sv-bp__sum--total"><dt>Estimated total</dt><dd data-bp-total>₱0</dd></div>
+            </dl>
+            <p class="sv-bp__note">Nothing is charged online. The provider confirms your request first, and you can cancel it while it is still pending.</p>
+        </aside>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/book-provider.js" asp-append-version="true"></script>
+}

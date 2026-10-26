@@ -36,7 +36,7 @@
         <div class="sv-empty-hero__icon">@Icons.Svg("bag", 22)</div>
         <h2 id="empty-title" class="sv-empty-hero__title">Need help at home?</h2>
         <p class="sv-empty-hero__text">Find trusted plumbing, cleaning, and repair professionals near you.</p>
-        <a class="sv-btn sv-btn--primary" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Service</a>
+        <a class="sv-btn sv-btn--primary" asp-controller="FindServices" asp-action="Index">Find a Service</a>
     </section>
 }
 else
@@ -97,15 +97,33 @@ else
                     <span>@info.Message</span>
                 </p>
                 <div class="sv-booking__actions">
-                    @if (info.ActionLabel is not null)
+                    @if (Model.State == DashboardState.WaitingForQuotation)
+                    {
+                        var confirmText = $"Cancel booking #{cur.BookingId} with {cur.ProviderName}? The provider will be told it was cancelled. This can't be undone.";
+                        <form method="post" asp-controller="CustomerBookings" asp-action="Cancel" asp-route-id="@cur.BookingId"
+                              class="sv-inline-form" data-sv-once data-sv-confirm="@confirmText">
+                            <button type="submit" class="sv-btn sv-btn--danger-outline sv-btn--sm">Cancel Request</button>
+                        </form>
+                    }
+                    @if (Model.State == DashboardState.QuotationReceived && info.ActionLabel is not null)
                     {
                         <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" disabled
-                                title="Available in an upcoming update">
-                            @if (Model.State == DashboardState.ServiceCompleted) { @Icons.Svg("star", 14, filled: true) }
+                                title="Online payment is not available yet">@info.ActionLabel</button>
+                    }
+                    @if (Model.State == DashboardState.ServiceCompleted && info.ActionLabel is not null)
+                    {
+                        <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" disabled
+                                title="Reviews open in an upcoming update">
+                            @Icons.Svg("star", 14, filled: true)
                             @info.ActionLabel
                         </button>
                     }
-                    <span class="sv-link-muted" title="Available in an upcoming update">View booking details @Icons.Svg("arrow-right", 12)</span>
+                    @if (Model.State is DashboardState.QuotationReceived or DashboardState.BookingConfirmed or DashboardState.ServiceInProgress)
+                    {
+                        <a class="sv-btn @(Model.State == DashboardState.QuotationReceived ? "sv-btn--outline" : "sv-btn--primary") sv-btn--sm"
+                           asp-controller="Messages" asp-action="Index" asp-route-with="@cur.ProviderUserId">Message Provider</a>
+                    }
+                    <a class="sv-link-muted sv-link-muted--live" asp-controller="CustomerBookings" asp-action="Index" asp-fragment="@("booking-" + cur.BookingId)">View booking details @Icons.Svg("arrow-right", 12)</a>
                 </div>
             </div>
         </div>
@@ -116,7 +134,7 @@ else
     <section class="sv-panel" aria-labelledby="recent-title">
         <div class="sv-panel__head">
             <h2 id="recent-title" class="sv-panel__title">Recent Bookings</h2>
-            <span class="sv-link-muted" title="Available in an upcoming update">View all @Icons.Svg("arrow-right", 12)</span>
+            <a class="sv-link-muted sv-link-muted--live" asp-controller="CustomerBookings" asp-action="Index">View all @Icons.Svg("arrow-right", 12)</a>
         </div>
         @if (Model.Recent.Count == 0)
         {
@@ -150,7 +168,7 @@ else
         <section class="sv-cta-dark">
             <h2 class="sv-cta-dark__title">Need a service?</h2>
             <p>Find trusted plumbing, cleaning, and repair professionals near you.</p>
-            <a class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm" asp-controller="Home" asp-action="Index" asp-fragment="providers">Find a Service</a>
+            <a class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm" asp-controller="FindServices" asp-action="Index">Find a Service</a>
         </section>
 
         <section class="sv-panel" aria-labelledby="rec-title">
@@ -197,3 +215,7 @@ else
         </section>
     </div>
 </div>
+
+@section Scripts {
+    <script src="~/js/customer-bookings.js" asp-append-version="true"></script>
+}

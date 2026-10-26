@@ -1,0 +1,19 @@
+@using Servisyo.Web.ViewModels
+@model ProviderApplicationViewModel
+@{
+    // The same content as the pop-up, shown as a normal page. It is used when JavaScript is off or could not open the pop-up.
+    ViewData["Title"] = "Review Provider Application";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "providers";
+}
+
+<p class="sv-eyebrow">Management</p>
+
+<div class="sv-panel sv-rv-page">
+    <partial name="_ApplicationReview" model="Model" />
+</div>
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
+}

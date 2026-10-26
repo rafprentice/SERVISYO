@@ -18,21 +18,35 @@ public sealed record AdminBookingDisplay(string Badge, string Tone)
     };
 }
 
+/// What a button in the "Needs Admin Attention" list does. None = the screen is not built yet (button stays greyed out).
+public enum AdminAttentionAction { None, ReviewApplication, ApplicationList, ModerateReviews }
+
+/// One row of "Needs Admin Attention": the shared row (text, colour, button label) plus where its button goes.
+public class AdminAttentionItem : AttentionItemViewModel
+{
+    public AdminAttentionAction Action { get; set; } = AdminAttentionAction.None;
+    public int? TargetId { get; set; }          // ReviewApplication: the provider whose application opens
+}
+
 public static class AdminAttention
 {
     /// Builds the "Needs Admin Attention" rows. A row only exists when its count is above zero,
     /// so the list never shows something that is not really waiting.
-    public static List<AttentionItemViewModel> Build(
-        int pendingApplications, int flaggedReviews, int suspendedAccounts, int openReports)
+    /// firstPendingProviderId = the oldest waiting application: "Review Applications" opens that one first (fair queue).
+    public static List<AdminAttentionItem> Build(
+        int pendingApplications, int flaggedReviews, int suspendedAccounts, int openReports,
+        int? firstPendingProviderId = null)
     {
-        var rows = new List<AttentionItemViewModel>();
+        var rows = new List<AdminAttentionItem>();
 
         if (pendingApplications > 0)
             rows.Add(new()
             {
                 Tone = "alert",
                 Text = $"{Plural.Of(pendingApplications, "provider application")} waiting for review",
-                ActionLabel = "Review Applications"
+                ActionLabel = "Review Applications",
+                Action = firstPendingProviderId is null ? AdminAttentionAction.ApplicationList : AdminAttentionAction.ReviewApplication,
+                TargetId = firstPendingProviderId
             });
 
         if (flaggedReviews > 0)
@@ -42,7 +56,8 @@ public static class AdminAttention
                 Text = flaggedReviews == 1
                     ? "1 flagged review needs moderation"
                     : $"{flaggedReviews} flagged reviews need moderation",
-                ActionLabel = "Moderate Reviews"
+                ActionLabel = "Moderate Reviews",
+                Action = AdminAttentionAction.ModerateReviews
             });
 
         if (suspendedAccounts > 0)
@@ -94,7 +109,7 @@ public class AdminDashboardViewModel
     public int TotalBookings { get; set; }
     public int FlaggedReviews { get; set; }
 
-    public IReadOnlyList<AttentionItemViewModel> Attention { get; set; } = Array.Empty<AttentionItemViewModel>();
+    public IReadOnlyList<AdminAttentionItem> Attention { get; set; } = Array.Empty<AdminAttentionItem>();
     public IReadOnlyList<AdminBookingRowViewModel> RecentBookings { get; set; } = Array.Empty<AdminBookingRowViewModel>();
     public IReadOnlyList<PendingApplicationViewModel> PendingApplications { get; set; } = Array.Empty<PendingApplicationViewModel>();
 }

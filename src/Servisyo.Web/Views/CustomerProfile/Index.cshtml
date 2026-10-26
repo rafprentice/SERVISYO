@@ -1,0 +1,203 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model CustomerProfilePageViewModel
+@{
+    ViewData["Title"] = "My Profile";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "profile";
+
+    var form = Model.Form;
+    var nameError = Model.ErrorFor("FullName");
+    var emailError = Model.ErrorFor("Email");
+    var phoneError = Model.ErrorFor("PhoneNumber");
+    var cityError = Model.ErrorFor("City");
+
+    var currentError = Model.PasswordErrorFor("CurrentPassword");
+    var newError = Model.PasswordErrorFor("NewPassword");
+    var confirmError = Model.PasswordErrorFor("ConfirmPassword");
+
+    var hasAddress = Model.SavedAddress is not null;
+}
+
+<div class="sv-cp">
+    <p class="sv-eyebrow">Account</p>
+    <h1 class="sv-dash__title">My Profile</h1>
+    <p class="sv-dash__sub">Manage your personal information, saved address, and password.</p>
+
+    @if (!string.IsNullOrEmpty(Model.FlashMessage))
+    {
+        <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+    }
+
+    <div class="sv-cp__grid">
+        <!-- Summary -->
+        <aside class="sv-panel sv-cp__side" aria-label="Account summary">
+            <div class="sv-pf__avatarwrap">
+                <span class="sv-avatar sv-cp__avatar" aria-hidden="true">@Model.Initials</span>
+                <button type="button" class="sv-pf__edit" disabled title="Photo upload is coming in a later update" aria-label="Change profile photo (coming soon)">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                </button>
+            </div>
+            <div class="sv-cp__name">@Model.FullName</div>
+            <div class="sv-cp__email">@Model.Email</div>
+            <span class="sv-tag sv-tag--completed">Active Account</span>
+            <dl class="sv-cp__meta">
+                <div><dt>Member since</dt><dd>@Model.MemberSince</dd></div>
+                <div><dt>Total bookings</dt><dd>@Model.TotalBookings</dd></div>
+            </dl>
+        </aside>
+
+        <div class="sv-cp__main">
+            <!-- Personal information -->
+            <section class="sv-panel sv-cp__card" aria-labelledby="cp-info-title"
+                     data-cp-section data-cp-mode="readonly" data-open="@(Model.PersonalHasProblems ? "true" : "false")">
+                <div class="sv-cp__head">
+                    <h2 id="cp-info-title" class="sv-cp__title">Personal Information</h2>
+                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" data-cp-open hidden>Edit</button>
+                </div>
+
+                <form method="post" asp-controller="CustomerProfile" asp-action="Save" class="sv-cp__form" data-sv-once data-cp-form>
+                    @if (!string.IsNullOrEmpty(Model.FormError))
+                    {
+                        <p class="sv-formerr" role="alert">@Model.FormError</p>
+                    }
+                    <div class="sv-cp__fields">
+                        <div class="sv-fld">
+                            <label for="cp-name">Full Name</label>
+                            <input id="cp-name" name="FullName" type="text" value="@form.FullName" required maxlength="155" autocomplete="name"
+                                   aria-invalid="@(nameError is null ? null : "true")" />
+                            @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
+                        </div>
+                        <div class="sv-fld">
+                            <label for="cp-email">Email Address</label>
+                            <input id="cp-email" name="Email" type="email" value="@form.Email" required maxlength="155" autocomplete="email"
+                                   aria-invalid="@(emailError is null ? null : "true")" />
+                            @if (emailError is not null) { <p class="sv-fld__err" role="alert">@emailError</p> }
+                        </div>
+                        <div class="sv-fld">
+                            <label for="cp-phone">Phone Number</label>
+                            <input id="cp-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="20" autocomplete="tel" placeholder="e.g. +63 917 555 1234"
+                                   aria-invalid="@(phoneError is null ? null : "true")" />
+                            @if (phoneError is not null) { <p class="sv-fld__err" role="alert">@phoneError</p> }
+                        </div>
+                        <div class="sv-fld">
+                            <label for="cp-city">City</label>
+                            <input id="cp-city" name="City" type="text" value="@form.City" maxlength="50" autocomplete="address-level2" placeholder="e.g. Cebu City"
+                                   aria-invalid="@(cityError is null ? null : "true")" />
+                            @if (cityError is not null) { <p class="sv-fld__err" role="alert">@cityError</p> }
+                        </div>
+                    </div>
+                    <div class="sv-cp__actions" data-cp-actions>
+                        <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Save Changes</button>
+                        <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-cp-cancel hidden>Cancel</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Saved address -->
+            <section class="sv-panel sv-cp__card" aria-labelledby="cp-addr-title"
+                     data-cp-section data-cp-mode="collapse" data-open="@(Model.AddressHasProblem ? "true" : "false")">
+                <div class="sv-cp__head">
+                    <div>
+                        <h2 id="cp-addr-title" class="sv-cp__title">Saved Address</h2>
+                        <p class="sv-cp__sub">Pre-filled when creating a new booking</p>
+                    </div>
+                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" data-cp-open hidden>@(hasAddress ? "Edit Address" : "+ Add Address")</button>
+                </div>
+
+                @if (hasAddress)
+                {
+                    <div class="sv-cp__item">
+                        <span class="sv-cp__itemicon" aria-hidden="true">@Icons.Svg("map-pin", 14)</span>
+                        <div class="sv-cp__itembody">
+                            <div class="sv-cp__itemname">Home <span class="sv-cp__badge">Default</span></div>
+                            <div class="sv-cp__itemtext">@Model.SavedAddress</div>
+                        </div>
+                        <form method="post" asp-controller="CustomerProfile" asp-action="SaveAddress" class="sv-cp__trashform"
+                              data-sv-once data-confirm="Remove your saved address?">
+                            <input type="hidden" name="Address" value="" />
+                            <button type="submit" class="sv-cp__trash" aria-label="Remove saved address" title="Remove saved address">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                            </button>
+                        </form>
+                    </div>
+                }
+                else
+                {
+                    <p class="sv-cp__empty">No address saved yet.</p>
+                }
+
+                <form method="post" asp-controller="CustomerProfile" asp-action="SaveAddress" class="sv-cp__form sv-cp__inline" data-sv-once data-cp-form data-cp-panel>
+                    <div class="sv-fld">
+                        <label for="cp-address">Address</label>
+                        <input id="cp-address" name="Address" type="text" value="@Model.AddressForm.Address" maxlength="255" autocomplete="street-address"
+                               placeholder="House no., street, barangay, city"
+                               aria-invalid="@(Model.AddressHasProblem ? "true" : null)" />
+                        @if (Model.AddressHasProblem) { <p class="sv-fld__err" role="alert">@Model.AddressError</p> }
+                    </div>
+                    <div class="sv-cp__actions">
+                        <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Save Address</button>
+                        <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-cp-cancel hidden>Cancel</button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Security -->
+            <section class="sv-panel sv-cp__card" aria-labelledby="cp-sec-title">
+                <h2 id="cp-sec-title" class="sv-cp__title sv-cp__title--solo">Security</h2>
+
+                <div data-cp-section data-cp-mode="collapse" data-open="@(Model.PasswordHasProblems ? "true" : "false")">
+                    <div class="sv-cp__row">
+                        <div>
+                            <div class="sv-cp__rowtitle">Password</div>
+                            <div class="sv-cp__rowsub">Use at least 8 characters with a letter and a number.</div>
+                        </div>
+                        <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" data-cp-open hidden>Change Password</button>
+                    </div>
+
+                    <form method="post" asp-controller="CustomerProfile" asp-action="ChangePassword" class="sv-cp__form sv-cp__inline" data-sv-once data-cp-form data-cp-panel>
+                        @if (!string.IsNullOrEmpty(Model.PasswordFormError))
+                        {
+                            <p class="sv-formerr" role="alert">@Model.PasswordFormError</p>
+                        }
+                        <div class="sv-fld">
+                            <label for="cp-pw-current">Current Password</label>
+                            <input id="cp-pw-current" name="CurrentPassword" type="password" maxlength="100" autocomplete="current-password"
+                                   aria-invalid="@(currentError is null ? null : "true")" />
+                            @if (currentError is not null) { <p class="sv-fld__err" role="alert">@currentError</p> }
+                        </div>
+                        <div class="sv-fld">
+                            <label for="cp-pw-new">New Password</label>
+                            <input id="cp-pw-new" name="NewPassword" type="password" maxlength="100" autocomplete="new-password"
+                                   aria-invalid="@(newError is null ? null : "true")" />
+                            @if (newError is not null) { <p class="sv-fld__err" role="alert">@newError</p> }
+                        </div>
+                        <div class="sv-fld">
+                            <label for="cp-pw-confirm">Confirm New Password</label>
+                            <input id="cp-pw-confirm" name="ConfirmPassword" type="password" maxlength="100" autocomplete="new-password"
+                                   aria-invalid="@(confirmError is null ? null : "true")" />
+                            @if (confirmError is not null) { <p class="sv-fld__err" role="alert">@confirmError</p> }
+                        </div>
+                        <div class="sv-cp__actions">
+                            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Update Password</button>
+                            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-cp-cancel hidden>Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="sv-cp__row sv-cp__row--line">
+                    <div>
+                        <div class="sv-cp__rowtitle">Account Status</div>
+                        <div class="sv-cp__rowsub">Your account is in good standing</div>
+                    </div>
+                    <span class="sv-tag sv-tag--completed">Active</span>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/customer-profile.js" asp-append-version="true"></script>
+}

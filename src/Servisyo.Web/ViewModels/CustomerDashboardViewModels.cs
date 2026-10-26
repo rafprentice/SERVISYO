@@ -76,6 +76,8 @@ public class CurrentBookingViewModel
     public string Reference { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string ProviderName { get; set; } = string.Empty;
+    /// The provider's USER id (what the Messages page uses to open a conversation).
+    public int ProviderUserId { get; set; }
     public DateOnly Date { get; set; }
     public TimeOnly Time { get; set; }
     public decimal Fee { get; set; }

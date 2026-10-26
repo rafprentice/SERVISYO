@@ -1,0 +1,141 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model CustomerBookingsPageViewModel
+@{
+    ViewData["Title"] = "My Bookings";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "bookings";
+
+    // "all" is the default tab, so it has no ?status= in its address
+    string? StatusParam(string key) => key == CustomerBookingTab.AllKey ? null : key;
+    int? PageParam(int number) => number > 1 ? number : null;
+
+    var activeLabel = Model.Tabs.FirstOrDefault(t => t.Key == Model.ActiveTab)?.Label ?? "All";
+}
+
+<div class="sv-cb">
+    <p class="sv-eyebrow">History</p>
+    <h1 class="sv-dash__title">My Bookings</h1>
+    <p class="sv-dash__sub">Track and manage all your service requests.</p>
+
+    @if (!string.IsNullOrEmpty(Model.FlashMessage))
+    {
+        <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+    }
+
+    <nav class="sv-tabs sv-tabs--inline sv-bk__tabs" aria-label="Filter bookings by status">
+        @foreach (var t in Model.Tabs)
+        {
+            <a class="sv-tab @(t.Key == Model.ActiveTab ? "is-active" : "")"
+               href="@Url.Action("Index", "CustomerBookings", new { status = StatusParam(t.Key) })"
+               aria-current="@(t.Key == Model.ActiveTab ? "page" : null)">
+                @t.Label <span class="sv-tab__n">(@t.Count)</span>
+            </a>
+        }
+    </nav>
+
+    @if (Model.Cards.Count == 0)
+    {
+        if (Model.HasAnyBookings)
+        {
+            <div class="sv-panel sv-bk__empty">
+                <p class="sv-panel__empty">No bookings in this category.</p>
+            </div>
+        }
+        else
+        {
+            <div class="sv-panel sv-empty-hero">
+                <span class="sv-empty-hero__icon" aria-hidden="true">@Icons.Svg("calendar", 22)</span>
+                <h2 class="sv-empty-hero__title">No bookings yet</h2>
+                <p class="sv-empty-hero__text">When you book a service, it will show up here so you can follow its progress.</p>
+                <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="FindServices" asp-action="Index">Find a Service</a>
+            </div>
+        }
+    }
+    else
+    {
+        <ul class="sv-bk__list">
+            @foreach (var c in Model.Cards)
+            {
+                <li class="sv-bk" id="booking-@c.BookingId">
+                    <div class="sv-bk__head">
+                        <div class="sv-bk__who">
+                            <h2 class="sv-bk__title">@c.Title <span class="sv-bk__id">#@c.BookingId</span></h2>
+                            <p class="sv-bk__from">@c.FromLine</p>
+                        </div>
+                        <span class="@("sv-tag sv-tag--" + c.Tone)">@c.Status</span>
+                    </div>
+
+                    <dl class="sv-bk__facts">
+                        <div>
+                            <dt>Date &amp; Time</dt>
+                            <dd>@c.WhenText</dd>
+                        </div>
+                        <div>
+                            <dt>Location</dt>
+                            <dd>@(c.Location ?? "Not provided")</dd>
+                        </div>
+                        <div>
+                            <dt>Submitted</dt>
+                            <dd>@c.SubmittedText</dd>
+                        </div>
+                    </dl>
+
+                    @if (c.Notes is not null)
+                    {
+                        <p class="sv-bk__notes">@c.Notes</p>
+                    }
+
+                    @if (c.CanCancel || c.CanReview || c.IsReviewed)
+                    {
+                        <div class="sv-bk__acts">
+                            @if (c.CanCancel)
+                            {
+                                var confirmText = $"Cancel booking #{c.BookingId} with {c.ProviderName}? The provider will be told it was cancelled. This can't be undone.";
+
+                                <form method="post" asp-controller="CustomerBookings" asp-action="Cancel" asp-route-id="@c.BookingId"
+                                      class="sv-inline-form" data-sv-once data-sv-confirm="@confirmText">
+                                    <input type="hidden" name="Tab" value="@Model.ActiveTab" />
+                                    <input type="hidden" name="Page" value="@Model.Page" />
+                                    <button type="submit" class="sv-btn sv-btn--danger-outline sv-btn--sm" aria-label="Cancel booking #@c.BookingId">Cancel Request</button>
+                                </form>
+                            }
+                            @if (c.CanReview)
+                            {
+                                <button type="button" class="sv-btn sv-btn--soft sv-btn--sm" disabled
+                                        title="Reviews open in an upcoming update" aria-label="Leave a review for booking #@c.BookingId">Leave a Review</button>
+                            }
+                            @if (c.IsReviewed)
+                            {
+                                <span class="sv-cb__reviewed"><span aria-hidden="true">@Icons.Svg("check", 14)</span>You reviewed this booking</span>
+                            }
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+
+        <div class="sv-table__foot">
+            <span>Showing @Model.Cards.Count of @Model.TotalMatching @(Model.TotalMatching == 1 ? "booking" : "bookings") in @activeLabel</span>
+            @if (Model.PageCount > 1)
+            {
+                <nav class="sv-pager" aria-label="Pages">
+                    @if (Model.Page > 1)
+                    {
+                        <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "CustomerBookings", new { status = StatusParam(Model.ActiveTab), page = PageParam(Model.Page - 1) })">Previous</a>
+                    }
+                    <span>Page @Model.Page of @Model.PageCount</span>
+                    @if (Model.Page < Model.PageCount)
+                    {
+                        <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "CustomerBookings", new { status = StatusParam(Model.ActiveTab), page = Model.Page + 1 })">Next</a>
+                    }
+                </nav>
+            }
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script src="~/js/customer-bookings.js" asp-append-version="true"></script>
+}

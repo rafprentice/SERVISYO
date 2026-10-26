@@ -11,6 +11,8 @@
     var soon = "Available in an upcoming update";
 }
 
+<partial name="_AdminToast" />
+
 <p class="sv-eyebrow">Overview</p>
 <h1 class="sv-dash__title">Admin Dashboard</h1>
 <p class="sv-dash__sub">Platform-wide overview. Manage users, providers, bookings, and reviews.</p>
@@ -43,7 +45,25 @@
                         </span>
                         @a.Text
                     </span>
-                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">@a.ActionLabel</button>
+                    @{
+                        // Where the button goes. Screens that are not built yet keep a greyed-out button.
+                        string? href = a.Action switch
+                        {
+                            AdminAttentionAction.ReviewApplication => Url.Action("Review", "AdminApplications", new { providerId = a.TargetId, returnTo = "dashboard" }),
+                            AdminAttentionAction.ApplicationList => Url.Action("Index", "AdminProviders", new { status = "Pending" }),
+                            AdminAttentionAction.ModerateReviews => Url.Action("Index", "AdminReviews", new { status = "Flagged" }),
+                            _ => null
+                        };
+                    }
+                    @if (href is null)
+                    {
+                        <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">@a.ActionLabel</button>
+                    }
+                    else
+                    {
+                        <a class="sv-btn sv-btn--soft sv-btn--xs" href="@href"
+                           data-review-link="@(a.Action == AdminAttentionAction.ReviewApplication ? "true" : null)">@a.ActionLabel</a>
+                    }
                 </li>
             }
         </ul>
@@ -79,7 +99,7 @@
     <section class="sv-panel" aria-labelledby="bk-title">
         <div class="sv-panel__head">
             <h2 id="bk-title" class="sv-panel__title">Recent Bookings</h2>
-            <span class="sv-link-muted" title="@soon">View all @Icons.Svg("arrow-right", 12)</span>
+            <a class="sv-link-muted sv-link-muted--live" href="@Url.Action("Index", "AdminBookings")">View all @Icons.Svg("arrow-right", 12)</a>
         </div>
         @if (Model.RecentBookings.Count == 0)
         {
@@ -106,11 +126,11 @@
     <section class="sv-panel" aria-labelledby="app-title">
         <div class="sv-panel__head">
             <h2 id="app-title" class="sv-panel__title">Pending Applications</h2>
-            <span class="sv-link-muted" title="@soon">View all @Icons.Svg("arrow-right", 12)</span>
+            <a class="sv-link-muted sv-link-muted--live" href="@Url.Action("Index", "AdminProviders", new { status = "Pending" })">View all @Icons.Svg("arrow-right", 12)</a>
         </div>
         @if (Model.PendingApplications.Count == 0)
         {
-            <p class="sv-panel__empty">No applications waiting. New provider sign-ups will appear here.</p>
+            <p class="sv-panel__empty">No pending applications. New provider sign-ups will appear here.</p>
         }
         else
         {
@@ -125,12 +145,19 @@
                                 <div class="sv-app__meta">@p.Details</div>
                             </div>
                         </div>
-                        <button type="button" class="sv-btn sv-btn--outline sv-btn--xs sv-app__btn" disabled title="@soon">
-                            Review Applications @Icons.Svg("arrow-right", 12)
-                        </button>
+                        <a class="sv-btn sv-btn--outline sv-btn--xs sv-app__btn" data-review-link="true"
+                           href="@Url.Action("Review", "AdminApplications", new { providerId = p.ProviderId, returnTo = "dashboard" })">
+                            Review Application @Icons.Svg("arrow-right", 12)
+                        </a>
                     </li>
                 }
             </ul>
         }
     </section>
 </div>
+
+<partial name="_ApplicationReviewDialog" />
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
+}

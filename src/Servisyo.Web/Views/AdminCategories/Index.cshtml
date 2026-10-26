@@ -1,0 +1,171 @@
+@using Servisyo.Web.Services
+@using Servisyo.Web.ViewModels
+@model CategoriesPageViewModel
+@{
+    ViewData["Title"] = "Categories";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "categories";
+}
+
+<div class="sv-pagehead">
+    <div>
+        <p class="sv-eyebrow">Service Catalog</p>
+        <h1 class="sv-dash__title">Categories</h1>
+        <p class="sv-dash__sub">@Model.ActiveCount active · @Model.DisabledCount disabled</p>
+    </div>
+    <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" id="sv-add-toggle"
+            aria-controls="sv-add-panel" aria-expanded="@(Model.ShowAddForm ? "true" : "false")">+ Add Category</button>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.FlashMessage))
+{
+    <div class="sv-flash @(Model.FlashIsError ? "sv-flash--error" : "sv-flash--ok")" role="status">@Model.FlashMessage</div>
+}
+
+<!-- New Category: opens and closes with the "+ Add Category" button (admin-categories.js) -->
+<section id="sv-add-panel" class="sv-addpanel" aria-labelledby="sv-add-title" hidden="@(!Model.ShowAddForm)">
+    <form method="post" asp-controller="AdminCategories" asp-action="Create" id="sv-add-form">
+        <h2 id="sv-add-title" class="sv-addpanel__title">New Category</h2>
+
+        @if (!string.IsNullOrEmpty(Model.AddFormError))
+        {
+            <p class="sv-formerr" role="alert">@Model.AddFormError</p>
+        }
+
+        <div class="sv-addpanel__grid">
+            <div class="sv-fld">
+                <label for="sv-add-name">Category Name <span aria-hidden="true">*</span></label>
+                <input id="sv-add-name" name="Name" type="text" value="@Model.NewCategory.Name" required
+                       maxlength="@CategoryManagementService.MaxNameLength" placeholder="e.g. Landscaping" autocomplete="off" />
+            </div>
+            <div class="sv-fld">
+                <label for="sv-add-desc" class="sv-sr-only">Description (optional)</label>
+                <input id="sv-add-desc" name="Description" type="text" value="@Model.NewCategory.Description"
+                       maxlength="@CategoryManagementService.MaxDescriptionLength" placeholder="Short description of services..." autocomplete="off" />
+            </div>
+        </div>
+
+        <div class="sv-addpanel__btns">
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Add Category</button>
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" id="sv-add-cancel">Cancel</button>
+        </div>
+    </form>
+</section>
+
+<div class="sv-table-wrap">
+    <table class="sv-table sv-table--categories">
+        <thead>
+            <tr>
+                <th scope="col">Category</th>
+                <th scope="col">Description</th>
+                <th scope="col" class="sv-table__center">Providers</th>
+                <th scope="col" class="sv-table__center">Bookings</th>
+                <th scope="col" class="sv-table__center">Status</th>
+                <th scope="col" class="sv-table__right">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr>
+                    <td colspan="6" class="sv-table__empty">No categories yet. Use “+ Add Category” to create the first one.</td>
+                </tr>
+            }
+            @foreach (var c in Model.Rows)
+            {
+                <tr class="@(c.IsActive ? "" : "is-off")">
+                    <td>
+                        <span class="sv-cat__name">
+                            <span class="sv-dot sv-dot--@(c.IsActive ? "success" : "off")" aria-hidden="true"></span>
+                            @c.Name
+                        </span>
+                    </td>
+                    <td class="sv-cat__desc">@(c.Description ?? "—")</td>
+                    <td class="sv-table__center">@c.Providers</td>
+                    <td class="sv-table__center">@c.Bookings</td>
+                    <td class="sv-table__center"><span class="sv-tag sv-tag--@c.StatusTone">@c.StatusText</span></td>
+                    <td class="sv-table__right">
+                        <div class="sv-table__acts">
+                            <button type="button" class="sv-act sv-act--view"
+                                    data-cat-edit
+                                    data-cat-id="@c.CategoryId"
+                                    data-cat-name="@c.Name"
+                                    data-cat-description="@c.Description">Edit</button>
+                            @if (c.IsActive)
+                            {
+                                <button type="button" class="sv-act sv-act--warn"
+                                        data-cat-toggle
+                                        data-cat-id="@c.CategoryId"
+                                        data-cat-name="@c.Name"
+                                        data-enable="false"
+                                        data-title="Disable this category?"
+                                        data-text="It will no longer be shown to customers or offered to providers. Existing bookings are not affected, and you can enable it again at any time."
+                                        data-label="Disable"
+                                        data-tone="warn">Disable</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="sv-act sv-act--ok"
+                                        data-cat-toggle
+                                        data-cat-id="@c.CategoryId"
+                                        data-cat-name="@c.Name"
+                                        data-enable="true"
+                                        data-title="Enable this category?"
+                                        data-text="It will be shown to customers and offered to providers again."
+                                        data-label="Enable"
+                                        data-tone="ok">Enable</button>
+                            }
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="sv-table__foot">
+    <span>@Model.Rows.Count @(Model.Rows.Count == 1 ? "category" : "categories")</span>
+</div>
+
+<!-- Edit dialog: admin-categories.js fills it in for the row that was clicked. -->
+<dialog id="sv-cat-edit" class="sv-dialog" aria-labelledby="sv-cat-edit-title">
+    <form method="post" asp-controller="AdminCategories" asp-action="Update" class="sv-dialog__form">
+        <h2 id="sv-cat-edit-title" class="sv-dialog__title">Edit category</h2>
+        <input type="hidden" name="CategoryId" />
+
+        <div class="sv-fld">
+            <label for="sv-edit-name">Category Name <span aria-hidden="true">*</span></label>
+            <input id="sv-edit-name" name="Name" type="text" required maxlength="@CategoryManagementService.MaxNameLength" autocomplete="off" />
+        </div>
+        <div class="sv-fld">
+            <label for="sv-edit-desc">Description <span class="sv-fld__opt">(optional)</span></label>
+            <input id="sv-edit-desc" name="Description" type="text" maxlength="@CategoryManagementService.MaxDescriptionLength" autocomplete="off" />
+        </div>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Save changes</button>
+        </div>
+    </form>
+</dialog>
+
+<!-- Disable / Enable confirmation -->
+<dialog id="sv-cat-toggle" class="sv-dialog" aria-labelledby="sv-cat-toggle-title">
+    <form method="post" asp-controller="AdminCategories" asp-action="ChangeStatus" class="sv-dialog__form">
+        <h2 id="sv-cat-toggle-title" class="sv-dialog__title"></h2>
+        <p class="sv-dialog__who"></p>
+        <p class="sv-dialog__text"></p>
+        <input type="hidden" name="CategoryId" />
+        <input type="hidden" name="Enable" />
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--sm" id="sv-cat-toggle-ok">Confirm</button>
+        </div>
+    </form>
+</dialog>
+
+@section Scripts {
+    <script src="~/js/admin-categories.js" asp-append-version="true"></script>
+}

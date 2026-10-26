@@ -1,0 +1,190 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.ViewModels
+@model FindServicesPageViewModel
+@{
+    ViewData["Title"] = "Find Services";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "find";
+
+    // The default values are left out of the address, so a plain visit is just /customer/find-services
+    string? QParam() => Model.Q.Length > 0 ? Model.Q : null;
+    string? SortParam(string key) => key == FindServicesSort.RatingKey ? null : key;
+    int? PageParam(int number) => number > 1 ? number : null;
+
+    var selectedSort = FindServicesSort.Find(Model.Sort);
+}
+
+<div class="sv-fs">
+    <p class="sv-eyebrow">Discover</p>
+    <h1 class="sv-dash__title">Find a Service Provider</h1>
+    <p class="sv-dash__sub">Browse approved providers by category or search by name and city.</p>
+
+    <!-- Search + sort. Both are plain GET, so the result can be bookmarked and the Back button works. -->
+    <form method="get" asp-controller="FindServices" asp-action="Index" class="sv-fs__bar" role="search" data-fs-form>
+        @if (Model.CategoryId is int chosenCategory)
+        {
+            <input type="hidden" name="category" value="@chosenCategory" data-fs-category />
+        }
+        <div class="sv-fs__search">
+            <span class="sv-fs__searchicon" aria-hidden="true">@Icons.Svg("search", 16)</span>
+            <input type="search" name="q" value="@Model.Q" maxlength="100" autocomplete="off"
+                   placeholder="Search providers by name, business, or city..."
+                   aria-label="Search providers by name, business, or city" data-fs-q />
+        </div>
+        <label class="sv-fs__sort">
+            <span class="sv-fs__sortlabel">Sort:</span>
+            <select name="sort" aria-label="Sort providers" data-fs-sort>
+                @foreach (var option in FindServicesSort.All)
+                {
+                    <option value="@option.Key" selected="@(option.Key == selectedSort.Key ? "selected" : null)">@option.Label</option>
+                }
+            </select>
+        </label>
+        <button type="submit" class="sv-fs__go">Search</button>
+    </form>
+
+    <!-- Category chips (each one is a link; the search text and the sort order are kept) -->
+    <nav class="sv-fs__chips" aria-label="Filter by category">
+        <a class="sv-fs__chip @(Model.CategoryId is null ? "is-active" : "")"
+           href="@Url.Action("Index", "FindServices", new { q = QParam(), sort = SortParam(selectedSort.Key) })"
+           aria-current="@(Model.CategoryId is null ? "true" : null)">All <span>@Model.AllCount.ToString("N0")</span></a>
+        @foreach (var chip in Model.Chips)
+        {
+            var isActive = Model.CategoryId == chip.CategoryId;
+            <a class="sv-fs__chip @(isActive ? "is-active" : "")"
+               href="@Url.Action("Index", "FindServices", new { q = QParam(), category = chip.CategoryId, sort = SortParam(selectedSort.Key) })"
+               aria-current="@(isActive ? "true" : null)">@chip.Name <span>@chip.Count.ToString("N0")</span></a>
+        }
+    </nav>
+
+    <p class="sv-fs__found" role="status" aria-live="polite">
+        @Model.FoundText
+        @if (Model.IsFiltered)
+        {
+            <a class="sv-fs__clear" href="@Url.Action("Index", "FindServices")">Clear filters</a>
+        }
+    </p>
+
+    @if (Model.Cards.Count == 0)
+    {
+        <div class="sv-panel sv-empty-hero">
+            <span class="sv-empty-hero__icon" aria-hidden="true">@Icons.Svg("search", 22)</span>
+            @if (Model.IsFiltered)
+            {
+                <h2 class="sv-empty-hero__title">No providers match your search</h2>
+                <p class="sv-empty-hero__text">Try a different name or city, or choose another category.</p>
+                <a class="sv-btn sv-btn--outline sv-btn--sm" href="@Url.Action("Index", "FindServices")">Clear filters</a>
+            }
+            else
+            {
+                <h2 class="sv-empty-hero__title">No providers are available yet</h2>
+                <p class="sv-empty-hero__text">Approved providers will appear here as soon as they publish a service. Please check back soon.</p>
+            }
+        </div>
+    }
+    else
+    {
+        <ul class="sv-fs__grid">
+            @foreach (var card in Model.Cards)
+            {
+                <li class="sv-fs-card">
+                    <div class="sv-fs-card__top">
+                        <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@card.Initials</span>
+                        <div class="sv-fs-card__who">
+                            <h2 class="sv-fs-card__name">@card.Name</h2>
+                            <p class="sv-fs-card__biz">@card.BusinessName</p>
+                            @if (card.LocationText is not null)
+                            {
+                                <p class="sv-fs-card__city"><span aria-hidden="true">@Icons.Svg("map-pin", 12)</span>@card.LocationText</p>
+                            }
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(card.CategoryName) || !string.IsNullOrEmpty(card.AvailabilityText))
+                    {
+                        <div class="sv-fs-card__badges">
+                            @if (!string.IsNullOrEmpty(card.CategoryName))
+                            {
+                                <span class="sv-tag sv-tag--accepted">@card.CategoryName</span>
+                            }
+                            @if (!string.IsNullOrEmpty(card.AvailabilityText))
+                            {
+                                <span class="@("sv-tag sv-tag--" + card.AvailabilityTone)">@card.AvailabilityText</span>
+                            }
+                        </div>
+                    }
+
+                    <div class="sv-fs-card__rating">
+                        @if (card.HasReviews)
+                        {
+                            <span class="sv-stars" role="img" aria-label="Rated @card.RatingText out of 5">
+                                @for (var star = 1; star <= 5; star++)
+                                {
+                                    <span class="@(star <= card.FilledStars ? "is-on" : "")" aria-hidden="true">@Icons.Svg("star", 13, filled: true)</span>
+                                }
+                            </span>
+                            <strong>@card.RatingText</strong>
+                            <span class="sv-fs-card__count">@card.ReviewsText</span>
+                        }
+                        else
+                        {
+                            <span class="sv-fs-card__count">No reviews yet</span>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(card.Description))
+                    {
+                        <p class="sv-fs-card__desc">@card.Description</p>
+                    }
+
+                    @if (card.ServiceTags.Count > 0)
+                    {
+                        <ul class="sv-fs-card__tags" aria-label="Services offered">
+                            @foreach (var tag in card.ServiceTags)
+                            {
+                                <li>@NameFormat.Truncate(tag, 28)</li>
+                            }
+                            @if (card.MoreText is not null)
+                            {
+                                <li class="sv-fs-card__more">@card.MoreText</li>
+                            }
+                        </ul>
+                    }
+
+                    <div class="sv-fs-card__foot">
+                        <div class="sv-fs-card__price">
+                            <span>@card.PriceLabel</span>
+                            <strong>@(card.PriceText ?? "—")</strong>
+                        </div>
+                        <a class="sv-btn sv-btn--primary sv-btn--sm" asp-controller="BookProvider" asp-action="Index" asp-route-providerId="@card.ProviderId">Book this Provider</a>
+                    </div>
+                </li>
+            }
+        </ul>
+
+        @if (Model.PageCount > 1)
+        {
+            <div class="sv-table__foot">
+                <span>Showing @Model.Cards.Count of @Model.TotalMatching.ToString("N0") @(Model.TotalMatching == 1 ? "provider" : "providers")</span>
+                <nav class="sv-pager" aria-label="Pages">
+                    @if (Model.Page > 1)
+                    {
+                        <a class="sv-btn sv-btn--outline sv-btn--xs"
+                           href="@Url.Action("Index", "FindServices", new { q = QParam(), category = Model.CategoryId, sort = SortParam(selectedSort.Key), page = PageParam(Model.Page - 1) })">Previous</a>
+                    }
+                    <span>Page @Model.Page of @Model.PageCount</span>
+                    @if (Model.Page < Model.PageCount)
+                    {
+                        <a class="sv-btn sv-btn--outline sv-btn--xs"
+                           href="@Url.Action("Index", "FindServices", new { q = QParam(), category = Model.CategoryId, sort = SortParam(selectedSort.Key), page = Model.Page + 1 })">Next</a>
+                    }
+                </nav>
+            </div>
+        }
+    }
+</div>
+
+@section Scripts {
+    <script src="~/js/find-services.js" asp-append-version="true"></script>
+}
