@@ -34,17 +34,17 @@
             <div class="row">
                 <div class="col-md-4 mb-3">
                     <label asp-for="BaseFee" class="form-label"></label>
-                    <input asp-for="BaseFee" class="form-control" />
+                    <input asp-for="BaseFee" class="form-control" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" data-sv-number />
                     <span asp-validation-for="BaseFee" class="text-danger"></span>
                 </div>
                 <div class="col-md-4 mb-3">
                     <label asp-for="MinNoticeDays" class="form-label"></label>
-                    <input asp-for="MinNoticeDays" class="form-control" />
+                    <input asp-for="MinNoticeDays" class="form-control" type="number" min="0" max="30" step="1" inputmode="numeric" data-sv-number data-sv-whole />
                     <span asp-validation-for="MinNoticeDays" class="text-danger"></span>
                 </div>
                 <div class="col-md-4 mb-3">
                     <label asp-for="MaxJobsPerDay" class="form-label"></label>
-                    <input asp-for="MaxJobsPerDay" class="form-control" />
+                    <input asp-for="MaxJobsPerDay" class="form-control" type="number" min="1" max="50" step="1" inputmode="numeric" data-sv-number data-sv-whole />
                     <span asp-validation-for="MaxJobsPerDay" class="text-danger"></span>
                 </div>
             </div>
@@ -54,4 +54,21 @@
     </div>
 </div>
 
-@section Scripts { <partial name="_ValidationScriptsPartial" /> }
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        // Number boxes: browsers accept "1e5", "+" and "-" in type=number; block those keys and anything pasted that is not a plain number.
+        (function () {
+            document.querySelectorAll("[data-sv-number]").forEach(function (box) {
+                var whole = box.hasAttribute("data-sv-whole");
+                box.addEventListener("keydown", function (e) {
+                    if (["e", "E", "+", "-"].indexOf(e.key) >= 0 || (whole && (e.key === "." || e.key === ","))) e.preventDefault();
+                });
+                box.addEventListener("paste", function (e) {
+                    var text = (e.clipboardData || window.clipboardData).getData("text");
+                    if (!(whole ? /^\d+$/ : /^\d+(\.\d{1,2})?$/).test(text.trim())) e.preventDefault();
+                });
+            });
+        })();
+    </script>
+}

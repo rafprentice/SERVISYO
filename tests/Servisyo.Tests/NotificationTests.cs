@@ -264,7 +264,9 @@ public class AdminApplicationNotificationTests
 
     private static RegisterProviderViewModel Provider(string business = "Juan Plumbing Services", string email = "juan@email.com") => new()
     {
-        FirstName = "Juan", LastName = "Dela Cruz", Email = email, Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", BusinessName = business
+        FirstName = "Juan", MiddleName = "Reyes", LastName = "Dela Cruz", Email = email, PhoneNumber = "09171234567",
+        Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", BusinessName = business,
+        Description = "Pipe repair and installation.", Address = "Lahug, Cebu City", BaseFee = 500m
     };
 
     private static User Admin(string status = AccountStatuses.Active) =>
@@ -327,7 +329,8 @@ public class AdminApplicationNotificationTests
 
         await svc.RegisterCustomerAsync(new RegisterCustomerViewModel
         {
-            FirstName = "Maria", LastName = "Santos", Email = "maria@email.com", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
+            FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = "maria@email.com", PhoneNumber = "09171234567",
+            Address = "123 Rizal St., Brgy. Lahug", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
         });
         await svc.RegisterProviderAsync(Provider(email: "dup@email.com"));
         db.Notifications.RemoveRange(db.Notifications);

@@ -17,6 +17,21 @@ internal sealed class FakeLiveUpdates : IBookingLiveUpdates
         Sent.Add((change, userIds));
         return Task.CompletedTask;
     }
+
+    public List<(int Receiver, int From, int Unread)> MessagesReceived { get; } = new();
+    public List<(int User, int Unread)> MessagesRead { get; } = new();
+
+    public Task MessageReceivedAsync(int receiverUserId, int fromUserId, int unreadTotal)
+    {
+        MessagesReceived.Add((receiverUserId, fromUserId, unreadTotal));
+        return Task.CompletedTask;
+    }
+
+    public Task MessagesReadAsync(int userId, int unreadTotal)
+    {
+        MessagesRead.Add((userId, unreadTotal));
+        return Task.CompletedTask;
+    }
 }
 
 public class PaymentAndLiveTests

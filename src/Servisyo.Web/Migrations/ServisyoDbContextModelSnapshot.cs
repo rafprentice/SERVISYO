@@ -161,12 +161,16 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("BOOKINGS", null, t =>
                         {
+                            t.HasTrigger("trg_Bookings_Audit");
+
                             t.HasCheckConstraint("CK_BOOKINGS_DURATION", "[TOTAL_DURATION_MINUTES] > 0");
 
                             t.HasCheckConstraint("CK_BOOKINGS_PAYMENT", "[PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')");
 
                             t.HasCheckConstraint("CK_BOOKINGS_STATUS", "[STATUS] IN ('Pending','Accepted','Rejected','In Progress','Completed','Cancelled')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.BookingReport", b =>
@@ -749,10 +753,14 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("SERVICES", null, t =>
                         {
+                            t.HasTrigger("trg_Services_Audit");
+
                             t.HasCheckConstraint("CK_SERVICES_DURATION", "[DURATION_MINUTES] > 0");
 
                             t.HasCheckConstraint("CK_SERVICES_PRICE", "[PRICE] >= 0");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.ServiceCategory", b =>
@@ -785,6 +793,62 @@ namespace Servisyo.Web.Migrations
                         .IsUnique();
 
                     b.ToTable("SERVICE_CATEGORIES", (string)null);
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.SystemLog", b =>
+                {
+                    b.Property<int>("SystemLogId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("SYSTEM_LOG_ID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("SystemLogId"));
+
+                    b.Property<string>("ActionType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasColumnName("ACTION_TYPE");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("CREATED_AT")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("DESCRIPTION");
+
+                    b.Property<int?>("EntityId")
+                        .HasColumnType("int")
+                        .HasColumnName("ENTITY_ID");
+
+                    b.Property<string>("EntityName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("ENTITY_NAME");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int")
+                        .HasColumnName("USER_ID");
+
+                    b.Property<string>("UserRole")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("USER_ROLE");
+
+                    b.HasKey("SystemLogId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("ActionType", "UserRole");
+
+                    b.ToTable("SYSTEM_LOGS", (string)null);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.User", b =>
@@ -859,10 +923,14 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("USERS", null, t =>
                         {
+                            t.HasTrigger("trg_Users_Audit");
+
                             t.HasCheckConstraint("CK_USERS_ROLE", "[ROLE] IN ('Customer','Service Provider','Administrator')");
 
                             t.HasCheckConstraint("CK_USERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.AdminAction", b =>

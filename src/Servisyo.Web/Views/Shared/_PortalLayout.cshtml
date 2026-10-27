@@ -24,7 +24,8 @@
             ("providers",  "Providers",  "wrench",   Url.Action("Index", "AdminProviders"), 0),
             ("bookings",   "Bookings",   "calendar", Url.Action("Index", "AdminBookings"), 0),
             ("categories", "Categories", "list",     Url.Action("Index", "AdminCategories"), 0),
-            ("reviews",    "Reviews",    "star",     Url.Action("Index", "AdminReviews"), 0)
+            ("reviews",    "Reviews",    "star",     Url.Action("Index", "AdminReviews"), 0),
+            ("logs",       "System Logs", "activity", Url.Action("Index", "AdminSystemLogs"), 0)
         }
         : isProvider
         ? new List<(string Key, string Label, string Icon, string? Url, int Badge)>

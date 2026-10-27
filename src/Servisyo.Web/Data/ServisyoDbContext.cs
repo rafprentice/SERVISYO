@@ -22,6 +22,7 @@ public class ServisyoDbContext : DbContext
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<AdminAction> AdminActions => Set<AdminAction>();
     public DbSet<BookingReport> BookingReports => Set<BookingReport>();
@@ -46,6 +47,7 @@ public class ServisyoDbContext : DbContext
         {   
             e.ToTable("USERS", t =>
             {
+                t.HasTrigger("trg_Users_Audit");
                 t.HasCheckConstraint("CK_USERS_ROLE", "[ROLE] IN ('Customer','Service Provider','Administrator')");
                 t.HasCheckConstraint("CK_USERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
             });
@@ -129,6 +131,7 @@ public class ServisyoDbContext : DbContext
         {
             e.ToTable("SERVICES", t =>
             {
+                t.HasTrigger("trg_Services_Audit");
                 t.HasCheckConstraint("CK_SERVICES_PRICE", "[PRICE] >= 0");
                 t.HasCheckConstraint("CK_SERVICES_DURATION", "[DURATION_MINUTES] > 0");
             });
@@ -141,6 +144,7 @@ public class ServisyoDbContext : DbContext
         {
             e.ToTable("BOOKINGS", t =>
             {
+                t.HasTrigger("trg_Bookings_Audit");
                 t.HasCheckConstraint("CK_BOOKINGS_STATUS",
                     "[STATUS] IN ('Pending','Accepted','Rejected','In Progress','Completed','Cancelled')");
                 t.HasCheckConstraint("CK_BOOKINGS_PAYMENT", "[PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')");
@@ -200,6 +204,17 @@ public class ServisyoDbContext : DbContext
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.UserId, x.Purpose });
+        });
+        mb.Entity<SystemLog>(e =>
+        {
+            e.ToTable("SYSTEM_LOGS");
+            e.Property(x => x.UserRole).HasMaxLength(50);
+            e.Property(x => x.ActionType).HasMaxLength(20);
+            e.Property(x => x.EntityName).HasMaxLength(50);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.ActionType, x.UserRole });
         });
         mb.Entity<Notification>(e =>
         {

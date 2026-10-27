@@ -13,9 +13,17 @@
 
 <partial name="_AdminToast" />
 
-<p class="sv-eyebrow">Overview</p>
-<h1 class="sv-dash__title">Admin Dashboard</h1>
-<p class="sv-dash__sub">Platform-wide overview. Manage users, providers, bookings, and reviews.</p>
+<div class="sv-dash__headrow">
+    <div>
+        <p class="sv-eyebrow">Overview</p>
+        <h1 class="sv-dash__title">Admin Dashboard</h1>
+        <p class="sv-dash__sub">Platform-wide overview. Manage users, providers, bookings, and reviews.</p>
+    </div>
+    @* opens the print-ready monthly report in a new tab and shows the print window ("Save as PDF") *@
+    <a class="sv-btn sv-btn--primary sv-btn--sm" href="@Url.Action("Summary", "AdminReports", new { print = true })" target="_blank" rel="noopener">
+        @Icons.Svg("file-text", 16) Export PDF Report
+    </a>
+</div>
 
 <!-- Needs admin attention: only rows that are really waiting -->
 <section class="sv-panel sv-attn" aria-labelledby="attn-title">

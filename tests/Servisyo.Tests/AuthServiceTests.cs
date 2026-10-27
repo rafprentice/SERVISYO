@@ -21,8 +21,8 @@ public class AuthServiceTests
 
     private static RegisterCustomerViewModel Customer(string email = "maria@email.com") => new()
     {
-        FirstName = "Maria", LastName = "Santos", Email = email,
-        Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
+        FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = email, PhoneNumber = "09171234567",
+        Address = "123 Rizal St., Brgy. Lahug", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
     };
 
     [Fact]
@@ -55,9 +55,9 @@ public class AuthServiceTests
         var (svc, db) = Create();
         var result = await svc.RegisterProviderAsync(new RegisterProviderViewModel
         {
-            FirstName = "Juan", LastName = "Dela Cruz", Email = "juan@email.com",
+            FirstName = "Juan", MiddleName = "Reyes", LastName = "Dela Cruz", Email = "juan@email.com", PhoneNumber = "09171234567",
             Password = "Passw0rd1", ConfirmPassword = "Passw0rd1",
-            BusinessName = "Juan Plumbing Services"
+            BusinessName = "Juan Plumbing Services", Description = "Pipe repair and installation.", Address = "Lahug, Cebu City", BaseFee = 500m
         });
 
         Assert.True(result.Succeeded);

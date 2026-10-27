@@ -91,6 +91,23 @@
         timer = setTimeout(function () { refresh(pending); }, 300);
     });
 
+    // ---- chat messages: keep the sidebar "Messages" badge right on every page
+    function setMessageBadge(total) {
+        document.querySelectorAll("[data-sv-msg-badge]").forEach(function (b) {
+            var n = Math.max(0, parseInt(total, 10) || 0);
+            b.textContent = n > 99 ? "99+" : String(n);
+            if (n > 0) b.removeAttribute("hidden"); else b.setAttribute("hidden", "hidden");
+        });
+    }
+
+    connection.on("ReceiveMessage", function (data) {
+        setMessageBadge(data && data.unreadTotal);
+        // the Messages page fetches the new message straight away (and marks it read if that chat is open)
+        document.dispatchEvent(new CustomEvent("sv:message-received", { detail: data || {} }));
+    });
+
+    connection.on("MessagesRead", function (data) { setMessageBadge(data && data.unreadTotal); });
+
     // after a lost connection, catch up once (something may have changed while we were away)
     connection.onreconnected(function () { refresh({ bookingId: "" }); });
 

@@ -294,6 +294,9 @@
         if (!document.hidden) { clearTimeout(timer); poll(); }
     });
 
+    // live-bookings.js: a message just arrived (SignalR) -> fetch it now instead of waiting for the next poll
+    document.addEventListener("sv:message-received", function () { clearTimeout(timer); poll(); });
+
     // ---------------------------------------------------------------- start
 
     scrollToBottom();

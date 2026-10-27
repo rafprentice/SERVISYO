@@ -3,7 +3,7 @@
 <div class="row">
     <div class="col-md-4 mb-3">
         <label asp-for="FirstName" class="form-label"></label>
-        <input asp-for="FirstName" class="form-control" autocomplete="given-name" />
+        <input asp-for="FirstName" class="form-control" autocomplete="given-name" maxlength="155" />
         <span asp-validation-for="FirstName" class="text-danger"></span>
     </div>
     <div class="col-md-4 mb-3">
@@ -13,7 +13,7 @@
     </div>
     <div class="col-md-4 mb-3">
         <label asp-for="LastName" class="form-label"></label>
-        <input asp-for="LastName" class="form-control" autocomplete="family-name" />
+        <input asp-for="LastName" class="form-control" autocomplete="family-name" maxlength="155" />
         <span asp-validation-for="LastName" class="text-danger"></span>
     </div>
 </div>
@@ -25,7 +25,8 @@
     </div>
     <div class="col-md-6 mb-3">
         <label asp-for="PhoneNumber" class="form-label"></label>
-        <input asp-for="PhoneNumber" class="form-control" autocomplete="tel" />
+        <input asp-for="PhoneNumber" type="tel" class="form-control" autocomplete="tel" inputmode="tel"
+               pattern="\+?[0-9\s\-]{7,15}" maxlength="16" placeholder="09XX XXX XXXX" title="Digits, spaces and hyphens only, e.g. 0917 555 1234" />
         <span asp-validation-for="PhoneNumber" class="text-danger"></span>
     </div>
 </div>

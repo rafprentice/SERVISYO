@@ -12,10 +12,14 @@ builder.Services.AddControllersWithViews(o =>
     o.Filters.Add(new Microsoft.AspNetCore.Mvc.AutoValidateAntiforgeryTokenAttribute()));
 
 builder.Services.AddDbContext<ServisyoDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+           .AddInterceptors(new Servisyo.Web.Data.AuditSessionInterceptor(new Microsoft.AspNetCore.Http.HttpContextAccessor())));
 
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ISystemLogService, SystemLogService>();
+builder.Services.AddScoped<IAdminReportService, AdminReportService>();
 builder.Services.AddScoped<IProfilePhotoService, ProfilePhotoService>();
 builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();
 builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();

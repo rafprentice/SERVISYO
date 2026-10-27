@@ -12,12 +12,14 @@ public class AccountController : Controller
 {
     private readonly IAuthService _auth;
     private readonly IPasswordResetService _passwordReset;
+    private readonly ISystemLogService _systemLog;
     private readonly ILogger<AccountController> _logger;
 
-    public AccountController(IAuthService auth, IPasswordResetService passwordReset, ILogger<AccountController> logger)
+    public AccountController(IAuthService auth, IPasswordResetService passwordReset, ISystemLogService systemLog, ILogger<AccountController> logger)
     {
         _auth = auth;
         _passwordReset = passwordReset;
+        _systemLog = systemLog;
         _logger = logger;
     }
 
@@ -37,7 +39,8 @@ public class AccountController : Controller
         var result = await _auth.RegisterCustomerAsync(form.ToServiceModel());
         if (!result.Succeeded)
         {
-            ModelState.AddModelError(nameof(form.Email), result.Error!);
+            // "email already registered" belongs under the Email box; any other rule problem goes at the top of the form
+            ModelState.AddModelError(IsEmailProblem(result.Error) ? nameof(form.Email) : string.Empty, result.Error!);
             return View(form);
         }
 
@@ -62,7 +65,7 @@ public class AccountController : Controller
         var result = await _auth.RegisterProviderAsync(vm);
         if (!result.Succeeded)
         {
-            ModelState.AddModelError(nameof(vm.Email), result.Error!);
+            ModelState.AddModelError(IsEmailProblem(result.Error) ? nameof(vm.Email) : string.Empty, result.Error!);
             return View(vm);
         }
 
@@ -100,6 +103,7 @@ public class AccountController : Controller
 
         await SignInUserAsync(result.User!, vm.RememberMe);
         _logger.LogInformation("User signed in. UserId={UserId}", result.User!.UserId);
+        await _systemLog.LogLoginAsync(result.User!);         // System Logs: LOGIN (the database triggers can't see sign-ins)
 
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             return LocalRedirect(returnUrl);
@@ -181,6 +185,9 @@ public class AccountController : Controller
     public IActionResult AccessDenied() => View();
 
     // ---------- helpers ----------
+    private static bool IsEmailProblem(string? error) =>
+        error is not null && error.Contains("email", StringComparison.OrdinalIgnoreCase);
+
     private IActionResult RedirectAfterSignIn(Servisyo.Web.Models.User user) => user.Role switch
     {
         Servisyo.Web.Models.Roles.Customer => RedirectToAction("Customer", "Dashboard"),

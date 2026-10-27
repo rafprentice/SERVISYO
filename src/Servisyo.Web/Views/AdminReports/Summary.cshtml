@@ -1,0 +1,203 @@
+@using System.Globalization
+@model Servisyo.Web.ViewModels.AdminReportViewModel
+@{
+    Layout = null;      // a stand-alone page made for printing / "Save as PDF"
+    var inv = CultureInfo.InvariantCulture;
+    string Peso(decimal v) => "₱" + v.ToString("#,##0.00", inv);
+    string N(int v) => v.ToString("#,##0", inv);
+    var autoPrint = ViewData["AutoPrint"] is true;
+    var maxTrend = Model.Trend.Count == 0 ? 0m : Model.Trend.Max(t => t.Revenue);
+    var title = "SERVISYO Monthly Report - " + Model.MonthLabel;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@title</title>
+    <link rel="icon" type="image/svg+xml" href="~/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@@400;500;600&family=Poppins:wght@@600;700&display=swap" rel="stylesheet" />
+    <style>
+        :root { --ink: #111827; --muted: #6B7280; --line: #E5E7EB; --brand: #4F46E5; --brand-soft: #EEF2FF; --ok: #166534; --bad: #991B1B; }
+        * { box-sizing: border-box; }
+        html { background: #F3F4F6; }
+        body { margin: 0; font: 13px/1.5 Inter, "Segoe UI", Arial, sans-serif; color: var(--ink); }
+        .bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap;
+               padding: 12px 16px; background: #111827; color: #fff; }
+        .bar form { display: flex; align-items: center; gap: 8px; margin: 0; }
+        .bar input { padding: 6px 8px; border: 0; border-radius: 6px; font: inherit; }
+        .bar button, .bar a { padding: 8px 14px; border: 0; border-radius: 8px; font: 600 13px Inter, sans-serif; cursor: pointer; text-decoration: none; }
+        .bar .primary { background: var(--brand); color: #fff; }
+        .bar .ghost { background: #374151; color: #fff; }
+        .bar .hint { color: #9CA3AF; font-size: 12px; }
+        .page { width: 210mm; min-height: 297mm; margin: 20px auto; padding: 16mm 15mm; background: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.08); }
+        header.doc { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 3px solid var(--brand); }
+        .brand { display: flex; align-items: center; gap: 10px; }
+        .brand__icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; background: var(--brand); color: #fff; }
+        .brand__name { font: 700 20px Poppins, Inter, sans-serif; letter-spacing: .02em; }
+        .brand__tag { color: var(--muted); font-size: 11px; }
+        .doc__meta { text-align: right; font-size: 11px; color: var(--muted); }
+        .doc__meta strong { display: block; font: 700 16px Poppins, Inter, sans-serif; color: var(--ink); }
+        h2 { margin: 22px 0 10px; font: 600 14px Poppins, Inter, sans-serif; color: var(--brand); text-transform: uppercase; letter-spacing: .08em; }
+        .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .kpi { padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+        .kpi span { display: block; color: var(--muted); font-size: 11px; }
+        .kpi strong { display: block; margin-top: 2px; font: 700 17px Poppins, Inter, sans-serif; }
+        .kpi.hl { background: var(--brand-soft); border-color: #C7D2FE; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 7px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+        th { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; background: #F9FAFB; }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .barcell { width: 40%; }
+        .meter { height: 8px; border-radius: 4px; background: #E5E7EB; overflow: hidden; }
+        .meter i { display: block; height: 100%; background: var(--brand); }
+        .ok { color: var(--ok); font-weight: 600; }
+        .bad { color: var(--bad); font-weight: 600; }
+        .note { margin-top: 18px; padding: 10px 12px; border-radius: 8px; background: #F9FAFB; color: var(--muted); font-size: 10.5px; }
+        footer.doc { margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; }
+        .empty { color: var(--muted); font-style: italic; }
+        @@page { size: A4; margin: 12mm; }
+        @@media print {
+            html { background: #fff; }
+            .bar { display: none; }
+            .page { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+            .kpi, table, .note { break-inside: avoid; }
+            * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+        @@media (max-width: 860px) { .page { width: auto; margin: 0; padding: 20px 16px; } .kpis { grid-template-columns: repeat(2, 1fr); } .two { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="bar">
+        <form method="get" asp-controller="AdminReports" asp-action="Summary">
+            <label for="rp-month">Month</label>
+            <input id="rp-month" type="month" name="month" value="@Model.MonthKey" />
+            <button type="submit" class="ghost">Show</button>
+        </form>
+        <button type="button" class="primary" onclick="window.print()">Save as PDF</button>
+        <a class="ghost" asp-controller="Dashboard" asp-action="Admin">Back to dashboard</a>
+        <span class="hint">In the print window choose “Save as PDF” as the printer.</span>
+    </div>
+
+    <main class="page">
+        <header class="doc">
+            <div class="brand">
+                <span class="brand__icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                </span>
+                <div>
+                    <div class="brand__name">SERVISYO</div>
+                    <div class="brand__tag">Cebu service-provider booking platform</div>
+                </div>
+            </div>
+            <div class="doc__meta">
+                <strong>Monthly Report · @Model.MonthLabel</strong>
+                Generated @Model.GeneratedText<br />by @Model.GeneratedBy
+            </div>
+        </header>
+
+        <h2>Sales &amp; Earnings</h2>
+        <div class="kpis">
+            <div class="kpi hl"><span>Total revenue</span><strong>@Peso(Model.TotalRevenue)</strong></div>
+            <div class="kpi"><span>Platform fees (@Model.PlatformFeePercent.ToString("0.##", inv)%)</span><strong>@Peso(Model.PlatformFees)</strong></div>
+            <div class="kpi"><span>Provider earnings</span><strong>@Peso(Model.ProviderEarnings)</strong></div>
+            <div class="kpi"><span>Paid bookings · avg. value</span><strong>@N(Model.PaidBookings) · @Peso(Model.AverageBookingValue)</strong></div>
+        </div>
+
+        <div class="two">
+            <section>
+                <h2>Bookings</h2>
+                <table>
+                    <thead><tr><th>Status</th><th class="num">Bookings</th></tr></thead>
+                    <tbody>
+                        @foreach (var s in Model.ByStatus)
+                        {
+                            var css = s.Status == "Completed" ? "ok" : (s.Status is "Cancelled" or "Rejected" ? "bad" : "");
+                            <tr><td class="@css">@s.Status</td><td class="num">@N(s.Count)</td></tr>
+                        }
+                        <tr><th>Total</th><th class="num">@N(Model.TotalBookings)</th></tr>
+                    </tbody>
+                </table>
+                <p><span class="ok">Completed @N(Model.Completed)</span> vs <span class="bad">Cancelled @N(Model.Cancelled)</span>
+                   · completion rate <strong>@Model.CompletionRatePercent.ToString("0.#", inv)%</strong>
+                   <span class="empty">(of finished bookings: completed, cancelled or rejected)</span></p>
+            </section>
+
+            <section>
+                <h2>Customers &amp; Providers</h2>
+                <table>
+                    <tbody>
+                        <tr><td>Active customers</td><td class="num">@N(Model.ActiveCustomers)</td></tr>
+                        <tr><td>Active service providers</td><td class="num">@N(Model.ActiveProviders)</td></tr>
+                        <tr><td>Provider applications waiting</td><td class="num">@N(Model.PendingApplications)</td></tr>
+                        <tr><td>New customers this month</td><td class="num">@N(Model.NewCustomers)</td></tr>
+                        <tr><td>New providers this month</td><td class="num">@N(Model.NewProviders)</td></tr>
+                    </tbody>
+                </table>
+            </section>
+        </div>
+
+        <h2>In-Demand Services (Top 5 Categories)</h2>
+        @if (Model.TopCategories.Count == 0)
+        {
+            <p class="empty">No services were booked in @Model.MonthLabel.</p>
+        }
+        else
+        {
+            <table>
+                <thead><tr><th>#</th><th>Category</th><th class="num">Times booked</th><th class="num">Share</th><th class="barcell"></th></tr></thead>
+                <tbody>
+                    @foreach (var c in Model.TopCategories)
+                    {
+                        var width = c.SharePercent.ToString("0.#", inv) + "%";
+                        <tr>
+                            <td>@c.Rank</td>
+                            <td>@c.Name</td>
+                            <td class="num">@N(c.Bookings)</td>
+                            <td class="num">@width</td>
+                            <td class="barcell"><div class="meter"><i style="width:@width"></i></div></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+
+        <h2>Revenue — Last 6 Months</h2>
+        <table>
+            <thead><tr><th>Month</th><th class="num">Paid bookings</th><th class="num">Revenue</th><th class="barcell"></th></tr></thead>
+            <tbody>
+                @foreach (var t in Model.Trend)
+                {
+                    var pct = maxTrend == 0 ? "0%" : (t.Revenue * 100m / maxTrend).ToString("0.#", inv) + "%";
+                    <tr>
+                        <td>@t.Month</td>
+                        <td class="num">@N(t.PaidBookings)</td>
+                        <td class="num">@Peso(t.Revenue)</td>
+                        <td class="barcell"><div class="meter"><i style="width:@pct"></i></div></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <p class="note">
+            How these numbers are counted: a booking belongs to the month of its service date. Revenue is the total fee of paid bookings
+            (customer "Approve &amp; Pay"). Platform fees are an estimate at @Model.PlatformFeePercent.ToString("0.##", inv)% of revenue
+            (setting <em>Reports:PlatformFeePercent</em>); provider earnings are revenue minus platform fees. "Times booked" counts every service
+            in a booking, whatever its status.
+        </p>
+
+        <footer class="doc">
+            <span>SERVISYO · Confidential — for internal use</span>
+            <span>@Model.MonthLabel report</span>
+        </footer>
+    </main>
+
+    @if (autoPrint)
+    {
+        <script>window.addEventListener("load", function () { setTimeout(function () { window.print(); }, 300); });</script>
+    }
+</body>
+</html>

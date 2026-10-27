@@ -1,0 +1,118 @@
+@using System.Globalization
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.Models
+@using Servisyo.Web.ViewModels
+@model SystemLogsPageViewModel
+@{
+    ViewData["Title"] = "System Logs";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "logs";
+
+    var q = Model.Query;
+    var inv = CultureInfo.InvariantCulture;
+    var fromText = q.From?.ToString("yyyy-MM-dd", inv);
+    var toText = q.To?.ToString("yyyy-MM-dd", inv);
+    var anyFilter = q.From is not null || q.To is not null || q.Action is not null || q.Role is not null || q.Q is not null;
+
+    object PageLink(int page) => new { from = fromText, to = toText, action = q.Action, role = q.Role, q = q.Q, page = page > 1 ? page : (int?)null };
+}
+
+<p class="sv-eyebrow">Audit</p>
+<h1 class="sv-dash__title">System Logs</h1>
+<p class="sv-dash__sub">Every booking, payment, account and service change recorded by the database, plus sign-ins.</p>
+
+<form method="get" asp-controller="AdminSystemLogs" asp-action="Index" class="sv-panel sv-logs__filters" role="search" aria-label="Filter the logs">
+    <div class="sv-fld">
+        <label for="lg-q">Search</label>
+        <input id="lg-q" type="search" name="q" value="@q.Q" maxlength="100" placeholder="Booking #6, email, service…" />
+    </div>
+    <div class="sv-fld">
+        <label for="lg-from">From</label>
+        <input id="lg-from" type="date" name="from" value="@fromText" />
+    </div>
+    <div class="sv-fld">
+        <label for="lg-to">To</label>
+        <input id="lg-to" type="date" name="to" value="@toText" />
+    </div>
+    <div class="sv-fld">
+        <label for="lg-action">Action</label>
+        <select id="lg-action" name="action">
+            <option value="">All actions</option>
+            @foreach (var a in SystemLogActions.All)
+            {
+                <option value="@a" selected="@(a == q.Action)">@a</option>
+            }
+        </select>
+    </div>
+    <div class="sv-fld">
+        <label for="lg-role">Role</label>
+        <select id="lg-role" name="role">
+            <option value="">All roles</option>
+            @foreach (var r in SystemLogsPageViewModel.Roles)
+            {
+                <option value="@r" selected="@(r == q.Role)">@r</option>
+            }
+        </select>
+    </div>
+    <div class="sv-logs__btns">
+        <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Apply</button>
+        @if (anyFilter)
+        {
+            <a class="sv-btn sv-btn--outline sv-btn--sm" asp-controller="AdminSystemLogs" asp-action="Index">Reset</a>
+        }
+    </div>
+</form>
+
+<div class="sv-table-wrap">
+    <table class="sv-table sv-logs__table">
+        <thead>
+            <tr>
+                <th scope="col">Log ID</th>
+                <th scope="col">Timestamp</th>
+                <th scope="col">User / Role</th>
+                <th scope="col">Entity</th>
+                <th scope="col">Action</th>
+                <th scope="col">Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr><td colspan="6" class="sv-table__empty">@(anyFilter ? "No log entries match these filters." : "No log entries yet. Changes to bookings, payments, accounts and services will appear here.")</td></tr>
+            }
+            @foreach (var r in Model.Rows)
+            {
+                <tr>
+                    <td class="sv-table__muted">#@r.Id</td>
+                    <td class="sv-table__small sv-logs__time">@r.TimeText</td>
+                    <td>
+                        <div>@r.UserText</div>
+                        <div class="sv-table__muted sv-table__small">@r.Role</div>
+                    </td>
+                    <td class="sv-table__small">@r.EntityText</td>
+                    <td><span class="sv-tag sv-tag--@r.ActionTone">@r.Action</span></td>
+                    <td class="sv-logs__desc">@r.Description</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="sv-table__foot">
+    <span>Showing @Model.Rows.Count of @Model.TotalMatching @(Model.TotalMatching == 1 ? "entry" : "entries") · times in Cebu time</span>
+    @if (Model.PageCount > 1)
+    {
+        <nav class="sv-pager" aria-label="Pages">
+            @if (Model.Page > 1)
+            {
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminSystemLogs", PageLink(Model.Page - 1))">Previous</a>
+            }
+            <span>Page @Model.Page of @Model.PageCount</span>
+            @if (Model.Page < Model.PageCount)
+            {
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminSystemLogs", PageLink(Model.Page + 1))">Next</a>
+            }
+        </nav>
+    }
+</div>

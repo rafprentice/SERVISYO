@@ -29,9 +29,12 @@ public class MessagingService : IMessagingService
     private readonly TimeProvider _clock;
     private readonly ILogger<MessagingService> _logger;
 
-    public MessagingService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<MessagingService>? logger = null)
+    private readonly IBookingLiveUpdates? _live;
+
+    public MessagingService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<MessagingService>? logger = null, IBookingLiveUpdates? live = null)
     {
         _db = db;
+        _live = live;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<MessagingService>.Instance;
     }
@@ -300,7 +303,9 @@ public class MessagingService : IMessagingService
         if (await IsCounterpartAsync(me, partnerUserId, ct))
             await MarkReadCoreAsync(me.UserId, partnerUserId, ct);
 
-        return new(ProviderDashboardAccess.Allowed, await UnreadTotalAsync(userId, ct));
+        var total = await UnreadTotalAsync(userId, ct);
+        if (_live is not null) await _live.MessagesReadAsync(userId, total);      // the user's other tabs lower their badge too
+        return new(ProviderDashboardAccess.Allowed, total);
     }
 
     // ------------------------------------------------------------------ sending
@@ -344,6 +349,10 @@ public class MessagingService : IMessagingService
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation("User {UserId} sent message {MessageId} to user {PartnerId}.", userId, message.MessageId, partnerUserId);
+
+        // live: the receiver's Messages badge goes up at once, on whatever page they have open
+        if (_live is not null)
+            await _live.MessageReceivedAsync(partnerUserId, userId, await UnreadTotalAsync(partnerUserId, ct));
         return new(access, SendOutcome.Sent, string.Empty, new ChatMessageViewModel
         {
             Id = message.MessageId,

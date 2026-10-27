@@ -1088,3 +1088,16 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 /* buttons with a small icon before the text ("★ Leave a Review"): space between them, like "Submit Review" */
 .sv-btn--withicon { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding-left: 18px; padding-right: 20px; }
 .sv-btn--withicon svg { flex: none; }
+
+/* ---------- Admin > System Logs ---------- */
+.sv-logs__filters { display: grid; grid-template-columns: 2fr repeat(4, minmax(120px, 1fr)) auto; gap: 12px; align-items: end; margin-bottom: 18px; padding: 16px 18px; }
+.sv-logs__filters .sv-fld { margin: 0; }
+.sv-logs__filters select, .sv-logs__filters input { width: 100%; padding: 9px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; font: .8125rem var(--font-body); color: var(--color-text); }
+.sv-logs__btns { display: flex; gap: 8px; }
+.sv-logs__time { white-space: nowrap; }
+.sv-logs__desc { min-width: 260px; }
+@media (max-width: 1100px) { .sv-logs__filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---------- Admin dashboard: export button ---------- */
+.sv-dash__headrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.sv-dash__headrow .sv-btn { display: inline-flex; align-items: center; gap: 8px; }

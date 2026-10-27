@@ -11,4 +11,10 @@ public class BookingHub : Hub
 {
     public const string Path = "/hubs/bookings";
     public const string BookingChangedEvent = "bookingChanged";
+
+    /// A new chat message arrived for this user: { fromUserId, unreadTotal }.
+    public const string ReceiveMessageEvent = "ReceiveMessage";
+
+    /// This user read messages (maybe in another tab): { unreadTotal }.
+    public const string MessagesReadEvent = "MessagesRead";
 }

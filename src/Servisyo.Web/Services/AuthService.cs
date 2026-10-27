@@ -41,6 +41,10 @@ public class AuthService : IAuthService
 
     public async Task<AuthResult> RegisterCustomerAsync(RegisterCustomerViewModel vm)
     {
+        var problem = CheckCommon(vm)
+            ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your street address and barangay." : null);
+        if (problem is not null) return AuthResult.Fail(problem);
+
         var email = NormalizeEmail(vm.Email);
         if (await _db.Users.AnyAsync(u => u.Email == email))
             return AuthResult.Fail(EmailTaken);
@@ -54,6 +58,17 @@ public class AuthService : IAuthService
 
     public async Task<AuthResult> RegisterProviderAsync(RegisterProviderViewModel vm)
     {
+        var problem = CheckCommon(vm)
+            ?? (string.IsNullOrWhiteSpace(vm.MiddleName) ? "Please enter your middle name." : null)
+            ?? (InputRules.HasALetter(vm.BusinessName?.Trim()) ? null : InputRules.BusinessNameMessage)
+            ?? (string.IsNullOrWhiteSpace(vm.Description) ? "Please describe your services." : null)
+            ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your business address." : null)
+            ?? (vm.BaseFee is null ? "Please enter your base fee." : null)
+            ?? (vm.MinNoticeDays is < 0 or > 30 ? "Enter a whole number of days from 0 to 30." : null)
+            ?? (vm.MaxJobsPerDay is < 1 or > 50 ? "Enter a whole number of jobs from 1 to 50." : null)
+            ?? (vm.BaseFee is < 0 or > 1000000 ? "Enter a base fee from 0 to 1,000,000 (numbers only)." : null);
+        if (problem is not null) return AuthResult.Fail(problem);
+
         var email = NormalizeEmail(vm.Email);
         if (await _db.Users.AnyAsync(u => u.Email == email))
             return AuthResult.Fail(EmailTaken);
@@ -131,6 +146,25 @@ public class AuthService : IAuthService
         return AuthResult.Ok(user);
     }
 
+    /// The sign-up rules again, on the server: the page checks them in the browser too, but a request can skip the page.
+    private static string? CheckCommon(RegisterBaseViewModel vm)
+    {
+        if (!InputRules.IsName(vm.FirstName?.Trim()) || !InputRules.IsName(vm.LastName?.Trim()))
+            return InputRules.NameMessage;
+        // the customer page asks for one Full Name (no middle name box); the provider form requires it (checked below)
+        if (!string.IsNullOrWhiteSpace(vm.MiddleName) && !InputRules.IsName(vm.MiddleName.Trim())) return InputRules.NameMessage;
+        if (string.IsNullOrWhiteSpace(vm.PhoneNumber)) return "Please enter your phone number.";
+        if (!InputRules.IsPhone(vm.PhoneNumber.Trim())) return InputRules.PhoneMessage;
+        if ((ProfileRules.NormalizePhone(vm.PhoneNumber) ?? string.Empty).Length > 15) return "Phone number is too long.";
+        if (string.IsNullOrEmpty(vm.Password) || vm.Password.Length < 8 || !System.Text.RegularExpressions.Regex.IsMatch(vm.Password, InputRules.Password))
+            return "Password must be at least 8 characters, with a letter and a number.";
+        if (vm.Password != vm.ConfirmPassword)
+            return "The passwords do not match.";
+        if (string.IsNullOrWhiteSpace(vm.Email) || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(vm.Email.Trim()))
+            return "Please enter a valid email address.";
+        return null;
+    }
+
     private User BuildUser(RegisterBaseViewModel vm, string email, string role)
     {
         var user = new User
@@ -139,7 +173,7 @@ public class AuthService : IAuthService
             MiddleName = Clean(vm.MiddleName),
             LastName = vm.LastName.Trim(),
             Email = email,
-            PhoneNumber = Clean(vm.PhoneNumber),
+            PhoneNumber = ProfileRules.NormalizePhone(vm.PhoneNumber),      // stored without spaces/hyphens: "09171234567"
             Role = role,                          // set by the server, never by the browser
             AccountStatus = AccountStatuses.Active
         };
