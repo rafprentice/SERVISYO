@@ -100,8 +100,16 @@ public class ProviderDashboardService : IProviderDashboardService
         var activeRows = await mine.Where(b => b.Status == BookingStatuses.InProgress)
             .OrderBy(b => b.BookingDate).ThenBy(b => b.BookingTime).Take(3).Select(ToRow).ToListAsync(ct);
 
+        // finished jobs whose customer chose cash on completion and the cash is not confirmed yet
+        var cashRows = await mine
+            .Where(b => b.Status == BookingStatuses.Completed
+                     && b.Payment != null && b.Payment.PaymentStatus == PaymentRecordStatuses.PendingCollection)
+            .OrderBy(b => b.BookingDate).ThenBy(b => b.BookingTime).Take(3)
+            .Select(b => new { b.BookingId, Amount = b.Payment!.Amount, CustomerName = b.Customer.User.FirstName + " " + b.Customer.User.LastName })
+            .ToListAsync(ct);
+
         var ids = recentRows.Concat(todayRows).Concat(soonRows).Concat(activeRows)
-                            .Select(r => r.BookingId).Distinct().ToList();
+                            .Select(r => r.BookingId).Concat(cashRows.Select(r => r.BookingId)).Distinct().ToList();
         var titles = await _db.GetBookingTitlesAsync(ids, ct);
         string TitleOf(int id) => titles.TryGetValue(id, out var t) ? t : "Service booking";
 
@@ -137,6 +145,15 @@ public class ProviderDashboardService : IProviderDashboardService
                 Text = $"In progress: {TitleOf(r.BookingId)}, {r.CustomerName} — mark it complete when finished",
                 Tone = "success",
                 ActionLabel = "Complete Service"
+            });
+        }
+        foreach (var r in cashRows)
+        {
+            attention.Add(new AttentionItemViewModel
+            {
+                Text = $"Collect {PaymentNotes.Money(r.Amount)} cash: {TitleOf(r.BookingId)}, {r.CustomerName} — confirm it once received",
+                Tone = "warning",
+                ActionLabel = "Confirm Cash"
             });
         }
 

@@ -54,13 +54,9 @@ else
                     </div>
                     <span class="sv-tag sv-tag--@c.Tone">@c.Status</span>
                 </div>
-                @if (c.AwaitingPayment)
+                @if (c.Payment is not null)
                 {
-                    <p class="sv-bk__pay sv-bk__pay--wait">@Icons.Svg("clock", 14) Quotation sent — waiting for the customer to approve and pay.</p>
-                }
-                else if (c.IsScheduled)
-                {
-                    <p class="sv-bk__pay sv-bk__pay--ok">@Icons.Svg("check", 14) Paid — scheduled. Mark it In Progress when you start the job.</p>
+                    <partial name="_PaymentNote" model="c.Payment" />
                 }
 
                 <dl class="sv-bk__facts">
@@ -83,9 +79,21 @@ else
                     <p class="sv-bk__notes">@c.Notes</p>
                 }
 
-                @if (c.Actions.Count > 0)
+                @if (c.Actions.Count > 0 || c.CanConfirmCash)
                 {
                     <div class="sv-bk__acts">
+                        @if (c.CanConfirmCash)
+                        {
+                            var cashText = $"Confirm that you received {PaymentNotes.Money(c.Fee)} in cash from {c.CustomerName} for booking #{c.BookingId}? This can't be undone.";
+                            <form method="post" asp-controller="ProviderPayments" asp-action="CashReceived" asp-route-id="@c.BookingId"
+                                  class="sv-inline-form" data-sv-once data-sv-confirm="@cashText">
+                                <input type="hidden" name="tab" value="@Model.ActiveTab" />
+                                <input type="hidden" name="page" value="@Model.Page" />
+                                <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm sv-btn--withicon" aria-label="Confirm cash received for booking #@c.BookingId">
+                                    @Icons.Svg("banknote", 14) Confirm Cash Received
+                                </button>
+                            </form>
+                        }
                         @foreach (var a in c.Actions)
                         {
                             var confirmText = a.Confirm

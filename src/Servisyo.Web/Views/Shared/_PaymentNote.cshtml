@@ -1,0 +1,11 @@
+@using Servisyo.Web.Helpers
+@model Servisyo.Web.ViewModels.PaymentNote
+@* One line about how a booking is paid (customer and provider booking cards). *@
+<p class="sv-paynote sv-paynote--@Model.Tone">
+    <span class="sv-paynote__ico" aria-hidden="true">@Icons.Svg(Model.Icon, 14)</span>
+    <span class="sv-paynote__text">@Model.Text</span>
+    @if (Model.Reference is not null)
+    {
+        <span class="sv-paynote__ref">Ref <code>@Model.Reference</code></span>
+    }
+</p>

@@ -88,6 +88,11 @@
                         <p class="sv-bk__notes">@c.Notes</p>
                     }
 
+                    @if (c.Payment is not null)
+                    {
+                        <partial name="_PaymentNote" model="c.Payment" />
+                    }
+
                     @if (c.CanCancel || c.CanReview || c.IsReviewed || c.CanPay)
                     {
                         <div class="sv-bk__acts">
@@ -104,13 +109,11 @@
                             }
                             @if (c.CanPay)
                             {
-                                var feeText = "₱" + c.Fee.ToString("#,##0.##", System.Globalization.CultureInfo.InvariantCulture);
-                                var payText = $"Approve the {feeText} quotation from {c.ProviderName} and pay now?\n\nDemo payment: no real money is charged.";
-                                <form method="post" asp-controller="CustomerPayments" asp-action="Pay" asp-route-id="@c.BookingId"
-                                      class="sv-inline-form" data-sv-once data-sv-confirm="@payText">
-                                    <input type="hidden" name="returnTo" value="bookings" />
-                                    <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" aria-label="Approve and pay booking #@c.BookingId">Approve &amp; Pay @feeText</button>
-                                </form>
+                                var feeText = PaymentNotes.Money(c.Fee);
+                                @* opens the "Approve & Pay" window: Cash on Service Completion or Mock E-Wallet (payment-choice.js) *@
+                                <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" data-pay-open="pay-@c.BookingId" aria-haspopup="dialog"
+                                        aria-label="Approve and pay booking #@c.BookingId">Approve &amp; Pay @feeText</button>
+                                <partial name="_PayChoice" model="@(new PayChoiceViewModel { BookingId = c.BookingId, Amount = c.Fee, ProviderName = c.ProviderName, Title = c.Title, ReturnTo = "bookings" })" />
                             }
                             @if (c.CanReview)
                             {
@@ -149,4 +152,5 @@
 
 @section Scripts {
     <script src="~/js/customer-bookings.js" asp-append-version="true"></script>
+    <script src="~/js/payment-choice.js" asp-append-version="true"></script>
 }

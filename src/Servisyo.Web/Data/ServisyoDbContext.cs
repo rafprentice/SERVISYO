@@ -22,6 +22,8 @@ public class ServisyoDbContext : DbContext
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<CashPaymentDetails> CashPayments => Set<CashPaymentDetails>();
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<AdminAction> AdminActions => Set<AdminAction>();
@@ -215,6 +217,36 @@ public class ServisyoDbContext : DbContext
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
             e.HasIndex(x => x.CreatedAt);
             e.HasIndex(x => new { x.ActionType, x.UserRole });
+        });
+        mb.Entity<Payment>(e =>
+        {
+            e.ToTable("PAYMENTS", t =>
+            {
+                t.HasCheckConstraint("CK_PAYMENTS_METHOD", "[PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')");
+                t.HasCheckConstraint("CK_PAYMENTS_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
+                t.HasCheckConstraint("CK_PAYMENTS_AMOUNT", "[AMOUNT] >= 0");
+                // only cash can wait to be collected, and anything paid (or refunded) has a paid date
+                t.HasCheckConstraint("CK_PAYMENTS_PENDING_CASH", "[PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_METHOD] = 'CashOnCompletion'");
+                t.HasCheckConstraint("CK_PAYMENTS_PAID_AT", "[PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL");
+            });
+            e.Property(x => x.PaymentMethod).HasMaxLength(50);
+            e.Property(x => x.PaymentStatus).HasMaxLength(50);
+            e.Property(x => x.TransactionReference).HasMaxLength(50);
+            e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+            e.HasOne(x => x.Booking).WithOne(b => b.Payment).HasForeignKey<Payment>(x => x.BookingId);
+            e.HasIndex(x => x.BookingId).IsUnique();                // one payment per booking: a second one is refused
+            e.HasIndex(x => x.TransactionReference).IsUnique();
+        });
+
+        mb.Entity<CashPaymentDetails>(e =>
+        {
+            e.ToTable("CASH_PAYMENT_DETAILS", t =>
+                t.HasCheckConstraint("CK_CASH_COLLECTED",
+                    "([IS_COLLECTED_BY_PROVIDER] = 0 AND [COLLECTED_AT] IS NULL) OR ([IS_COLLECTED_BY_PROVIDER] = 1 AND [COLLECTED_AT] IS NOT NULL)"));
+            e.HasKey(x => x.PaymentId);
+            e.Property(x => x.PaymentId).ValueGeneratedNever();     // same number as the payment
+            e.Property(x => x.IsCollectedByProvider).HasDefaultValue(false);
+            e.HasOne(x => x.Payment).WithOne(p => p.CashDetails).HasForeignKey<CashPaymentDetails>(x => x.PaymentId);
         });
         mb.Entity<Notification>(e =>
         {

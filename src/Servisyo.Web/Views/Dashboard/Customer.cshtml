@@ -13,7 +13,7 @@
 
     var inv = CultureInfo.InvariantCulture;
     var cur = Model.Current;
-    var info = DashboardStates.Describe(Model.State, cur?.Fee ?? 0m, cur?.ProviderName ?? "your provider");
+    var info = DashboardStates.Describe(Model.State, cur?.Fee ?? 0m, cur?.ProviderName ?? "your provider", cur?.CashToCollect ?? false);
     string Money(decimal v) => "₱" + v.ToString("#,##0.##", inv);
     string BadgeClass(string status) => status switch
     {
@@ -76,6 +76,11 @@ else
 
             <partial name="_Stepper" model="info" />
 
+            @if (cur.Payment is not null)
+            {
+                <partial name="_PaymentNote" model="cur.Payment" />
+            }
+
             @if (Model.State == DashboardState.BookingConfirmed && cur.UpcomingText is not null)
             {
                 <div class="sv-upcoming">
@@ -114,12 +119,10 @@ else
                     }
                     @if (Model.State == DashboardState.QuotationReceived && info.ActionLabel is not null)
                     {
-                        var payText = $"Approve the {Money(cur.Fee)} quotation from {cur.ProviderName} and pay now?\n\nDemo payment: no real money is charged.";
-                        <form method="post" asp-controller="CustomerPayments" asp-action="Pay" asp-route-id="@cur.BookingId"
-                              class="sv-inline-form" data-sv-once data-sv-confirm="@payText">
-                            <input type="hidden" name="returnTo" value="dashboard" />
-                            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">@info.ActionLabel</button>
-                        </form>
+                        @* opens the "Approve & Pay" window: Cash on Service Completion or Mock E-Wallet (payment-choice.js) *@
+                        <button type="button" class="sv-btn sv-btn--primary sv-btn--sm" data-pay-open="pay-@cur.BookingId"
+                                aria-haspopup="dialog">@info.ActionLabel</button>
+                        <partial name="_PayChoice" model="@(new PayChoiceViewModel { BookingId = cur.BookingId, Amount = cur.Fee, ProviderName = cur.ProviderName, Title = cur.Title, ReturnTo = "dashboard" })" />
                     }
                     @if (Model.State == DashboardState.ServiceCompleted && info.ActionLabel is not null)
                     {
@@ -231,4 +234,5 @@ else
 
 @section Scripts {
     <script src="~/js/customer-bookings.js" asp-append-version="true"></script>
+    <script src="~/js/payment-choice.js" asp-append-version="true"></script>
 }

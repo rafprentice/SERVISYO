@@ -20,6 +20,7 @@
     // Don't throw away something the user is in the middle of (typing, a confirm box, a form being sent).
     function busy(area) {
         if (area.querySelector("[data-busy]")) return true;
+        if (area.querySelector("dialog[open]")) return true;           // e.g. the "Approve & Pay" window is open
         var active = document.activeElement;
         return !!(active && area.contains(active) && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
     }

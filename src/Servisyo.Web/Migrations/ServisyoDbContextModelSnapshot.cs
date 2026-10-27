@@ -271,6 +271,30 @@ namespace Servisyo.Web.Migrations
                     b.ToTable("BOOKING_SERVICES", (string)null);
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.CashPaymentDetails", b =>
+                {
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("int")
+                        .HasColumnName("PAYMENT_ID");
+
+                    b.Property<DateTime?>("CollectedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("COLLECTED_AT");
+
+                    b.Property<bool>("IsCollectedByProvider")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("IS_COLLECTED_BY_PROVIDER");
+
+                    b.HasKey("PaymentId");
+
+                    b.ToTable("CASH_PAYMENT_DETAILS", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CASH_COLLECTED", "([IS_COLLECTED_BY_PROVIDER] = 0 AND [COLLECTED_AT] IS NULL) OR ([IS_COLLECTED_BY_PROVIDER] = 1 AND [COLLECTED_AT] IS NOT NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.Customer", b =>
                 {
                     b.Property<int>("CustomerId")
@@ -433,6 +457,74 @@ namespace Servisyo.Web.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("NOTIFICATIONS", (string)null);
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.Payment", b =>
+                {
+                    b.Property<int>("PaymentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("PAYMENT_ID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("PaymentId"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("decimal(10,2)")
+                        .HasColumnName("AMOUNT");
+
+                    b.Property<int>("BookingId")
+                        .HasColumnType("int")
+                        .HasColumnName("BOOKING_ID");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("CREATED_AT")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("PAID_AT");
+
+                    b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("PAYMENT_METHOD");
+
+                    b.Property<string>("PaymentStatus")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("PAYMENT_STATUS");
+
+                    b.Property<string>("TransactionReference")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("TRANSACTION_REFERENCE");
+
+                    b.HasKey("PaymentId");
+
+                    b.HasIndex("BookingId")
+                        .IsUnique();
+
+                    b.HasIndex("TransactionReference")
+                        .IsUnique();
+
+                    b.ToTable("PAYMENTS", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PAYMENTS_AMOUNT", "[AMOUNT] >= 0");
+
+                            t.HasCheckConstraint("CK_PAYMENTS_METHOD", "[PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')");
+
+                            t.HasCheckConstraint("CK_PAYMENTS_PAID_AT", "[PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_PAYMENTS_PENDING_CASH", "[PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_METHOD] = 'CashOnCompletion'");
+
+                            t.HasCheckConstraint("CK_PAYMENTS_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
+                        });
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Provider", b =>
@@ -1008,6 +1100,17 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Service");
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.CashPaymentDetails", b =>
+                {
+                    b.HasOne("Servisyo.Web.Models.Payment", "Payment")
+                        .WithOne("CashDetails")
+                        .HasForeignKey("Servisyo.Web.Models.CashPaymentDetails", "PaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Payment");
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.Customer", b =>
                 {
                     b.HasOne("Servisyo.Web.Models.User", "User")
@@ -1058,6 +1161,17 @@ namespace Servisyo.Web.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.Payment", b =>
+                {
+                    b.HasOne("Servisyo.Web.Models.Booking", "Booking")
+                        .WithOne("Payment")
+                        .HasForeignKey("Servisyo.Web.Models.Payment", "BookingId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Booking");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Provider", b =>
@@ -1155,6 +1269,8 @@ namespace Servisyo.Web.Migrations
 
             modelBuilder.Entity("Servisyo.Web.Models.Booking", b =>
                 {
+                    b.Navigation("Payment");
+
                     b.Navigation("Reports");
 
                     b.Navigation("Review");
@@ -1165,6 +1281,11 @@ namespace Servisyo.Web.Migrations
             modelBuilder.Entity("Servisyo.Web.Models.Customer", b =>
                 {
                     b.Navigation("Bookings");
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.Payment", b =>
+                {
+                    b.Navigation("CashDetails");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Provider", b =>

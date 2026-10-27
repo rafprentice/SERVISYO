@@ -65,6 +65,10 @@ public class ProviderBookingsService : IProviderBookingsService
         public string CustomerName { get; set; } = string.Empty;
         public string? ServiceLocation { get; set; }
         public string? ServiceDescription { get; set; }
+        public decimal TotalFee { get; set; }
+        public string? PayMethod { get; set; }
+        public string? PayStatus { get; set; }
+        public string? PayReference { get; set; }
     }
 
     public async Task<ProviderBookingsResult> GetAsync(int userId, string? tab, int page, CancellationToken ct = default)
@@ -108,7 +112,11 @@ public class ProviderBookingsService : IProviderBookingsService
                 CreatedAt = b.CreatedAt,
                 CustomerName = b.Customer.User.FirstName + " " + b.Customer.User.LastName,
                 ServiceLocation = b.ServiceLocation,
-                ServiceDescription = b.ServiceDescription
+                ServiceDescription = b.ServiceDescription,
+                TotalFee = b.TotalFee,
+                PayMethod = b.Payment != null ? b.Payment.PaymentMethod : null,
+                PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
+                PayReference = b.Payment != null ? b.Payment.TransactionReference : null
             })
             .ToListAsync(ct);
 
@@ -144,20 +152,28 @@ public class ProviderBookingsService : IProviderBookingsService
             Tabs = tabs,
             Page = currentPage,
             TotalMatching = total,
-            Cards = rows.Select(r => new ProviderBookingCardViewModel
+            Cards = rows.Select(r =>
             {
-                BookingId = r.BookingId,
-                Title = titles.TryGetValue(r.BookingId, out var t) ? t : "Service booking",
-                CustomerName = r.CustomerName.Trim(),
-                CategoryText = categories.TryGetValue(r.BookingId, out var c) ? c : null,
-                Status = r.Status,
-                Tone = ProviderBookingBadge.Tone(r.Status),
-                WhenText = BookingFormat.DateTimeText(r.BookingDate, r.BookingTime),
-                Location = string.IsNullOrWhiteSpace(r.ServiceLocation) ? null : r.ServiceLocation.Trim(),
-                SubmittedText = BookingFormat.SubmittedText(r.CreatedAt),
-                Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
-                PaymentStatus = r.PaymentStatus,
-                Actions = BookingActionInfo.ForBooking(r.Status, r.PaymentStatus)
+                var pay = new PaymentFacts(r.Status, r.PaymentStatus, r.PayMethod, r.PayStatus, r.PayReference, r.TotalFee);
+                var customerName = r.CustomerName.Trim();
+                return new ProviderBookingCardViewModel
+                {
+                    BookingId = r.BookingId,
+                    Title = titles.TryGetValue(r.BookingId, out var t) ? t : "Service booking",
+                    CustomerName = customerName,
+                    CategoryText = categories.TryGetValue(r.BookingId, out var c) ? c : null,
+                    Status = r.Status,
+                    Tone = ProviderBookingBadge.Tone(r.Status),
+                    WhenText = BookingFormat.DateTimeText(r.BookingDate, r.BookingTime),
+                    Location = string.IsNullOrWhiteSpace(r.ServiceLocation) ? null : r.ServiceLocation.Trim(),
+                    SubmittedText = BookingFormat.SubmittedText(r.CreatedAt),
+                    Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
+                    PaymentStatus = pay.Effective,
+                    Fee = r.TotalFee,
+                    Actions = BookingActionInfo.ForBooking(r.Status, pay.Effective),
+                    Payment = PaymentNotes.ForProvider(pay, customerName),
+                    CanConfirmCash = r.Status == BookingStatuses.Completed && pay.CashToCollect
+                };
             }).ToList()
         };
 
@@ -176,11 +192,13 @@ public class ProviderBookingsService : IProviderBookingsService
         _ => "marked completed"
     };
 
-    private static string SuccessText(int bookingId, BookingAction action) => action switch
+    private static string SuccessText(int bookingId, BookingAction action, Payment? payment) => action switch
     {
         BookingAction.Accept => $"Booking #{bookingId} accepted. The customer has been notified.",
         BookingAction.Reject => $"Booking #{bookingId} rejected. The customer has been notified.",
         BookingAction.Start => $"Booking #{bookingId} is now in progress.",
+        _ when payment is { PaymentStatus: PaymentRecordStatuses.PendingCollection } =>
+            $"Booking #{bookingId} marked as completed. When the customer hands you the {PaymentNotes.Money(payment.Amount)} cash, press Confirm Cash Received.",
         _ => $"Booking #{bookingId} marked as completed."
     };
 
@@ -208,6 +226,7 @@ public class ProviderBookingsService : IProviderBookingsService
         // 3. the booking must belong to THIS provider; someone else's booking looks exactly like a missing one
         var booking = await _db.Bookings
             .Include(b => b.Customer)
+            .Include(b => b.Payment)
             .FirstOrDefaultAsync(b => b.BookingId == bookingId && b.ProviderId == who.ProviderId, ct);
         if (booking is null)
         {
@@ -224,8 +243,10 @@ public class ProviderBookingsService : IProviderBookingsService
                 $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}, so it can't be {Done(action)}.");
         }
 
-        // 4b. the job can only start once the customer has approved and paid the quotation (Paid -> Scheduled -> In Progress)
-        if (action == BookingAction.Start && booking.PaymentStatus != PaymentStatuses.Paid)
+        // 4b. the job can only start once the customer has approved the quotation and paid it, or chosen
+        //     cash on completion (Paid -> Scheduled -> In Progress)
+        var payment = PaymentProgress.Effective(booking.PaymentStatus, booking.Payment?.PaymentStatus);
+        if (action == BookingAction.Start && !PaymentProgress.IsArranged(payment))
         {
             _logger.LogInformation("Booking {BookingId} is not paid yet; start refused.", bookingId);
             return new(access, BookingActionOutcome.InvalidTransition,
@@ -291,8 +312,8 @@ public class ProviderBookingsService : IProviderBookingsService
 
         // live: the customer's open dashboard / My Bookings page updates itself (and the provider's other tabs)
         if (_live is not null)
-            await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, booking.PaymentStatus, action.ToString().ToLowerInvariant()),
+            await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, payment, action.ToString().ToLowerInvariant()),
                 booking.Customer.UserId, userId);
-        return new(access, BookingActionOutcome.Success, SuccessText(bookingId, action));
+        return new(access, BookingActionOutcome.Success, SuccessText(bookingId, action, booking.Payment));
     }
 }

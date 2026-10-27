@@ -27,17 +27,18 @@ public static class DashboardStates
     public static readonly string[] StepLabels =
         { "Requested", "Quotation", "Paid", "Scheduled", "In Progress", "Completed" };
 
-    /// Turns the REAL booking columns (STATUS + PAYMENT_STATUS) into a dashboard state.
-    ///   Pending                 -> Waiting for Quotation
-    ///   Accepted  + not Paid    -> Quotation Received  (the provider accepted at the quoted fee)
-    ///   Accepted  + Paid        -> Booking Confirmed
-    ///   In Progress             -> Service In Progress
-    ///   Completed               -> Service Completed
-    ///   Rejected / Cancelled    -> No active booking
+    /// Turns the REAL booking columns (STATUS + PAYMENT_STATUS, plus the PAYMENTS record) into a dashboard state.
+    /// paymentStatus is PaymentProgress.Effective(...): "PendingCollection" when the customer chose cash on completion.
+    ///   Pending                          -> Waiting for Quotation
+    ///   Accepted  + nothing chosen yet   -> Quotation Received  (the provider accepted at the quoted fee)
+    ///   Accepted  + Paid / cash promised -> Booking Confirmed   (Paid / Scheduled)
+    ///   In Progress                      -> Service In Progress
+    ///   Completed                        -> Service Completed
+    ///   Rejected / Cancelled             -> No active booking
     public static DashboardState FromBooking(string status, string paymentStatus) => status switch
     {
         BookingStatuses.Pending => DashboardState.WaitingForQuotation,
-        BookingStatuses.Accepted => paymentStatus == PaymentStatuses.Paid
+        BookingStatuses.Accepted => PaymentProgress.IsArranged(paymentStatus)
             ? DashboardState.BookingConfirmed
             : DashboardState.QuotationReceived,
         BookingStatuses.InProgress => DashboardState.ServiceInProgress,
@@ -45,9 +46,13 @@ public static class DashboardStates
         _ => DashboardState.NoBooking
     };
 
-    public static DashboardStateInfo Describe(DashboardState state, decimal fee, string providerName)
+    /// cashOnCompletion = the customer chose to pay cash when the job is done (and has not paid it yet).
+    public static DashboardStateInfo Describe(DashboardState state, decimal fee, string providerName, bool cashOnCompletion = false)
     {
         var amount = "₱" + fee.ToString("#,##0.##", CultureInfo.InvariantCulture);
+        if (state == DashboardState.BookingConfirmed && cashOnCompletion)
+            return new("Booking Confirmed", "success",
+                $"Your booking is confirmed. Pay {amount} in cash to {providerName} when the job is done.", "Track Booking", 4, false);
         return state switch
         {
             DashboardState.WaitingForQuotation => new(
@@ -83,6 +88,11 @@ public class CurrentBookingViewModel
     public decimal Fee { get; set; }
     /// Only filled when the booking is confirmed, e.g. "Tomorrow · 2:00 PM — Pipe Repair with Juan Plumbing".
     public string? UpcomingText { get; set; }
+
+    /// How it is paid ("Cash on completion · ...", "Paid via GCash (test) · ..."), or null before Approve & Pay.
+    public PaymentNote? Payment { get; set; }
+    /// Cash on completion, not handed over yet.
+    public bool CashToCollect { get; set; }
 }
 
 public class RecentBookingViewModel

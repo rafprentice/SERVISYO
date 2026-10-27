@@ -54,10 +54,13 @@ public class CustomerBookingCardViewModel
     /// Completed and the customer has already left a review (a booking can have only one).
     public bool IsReviewed { get; set; }
 
-    /// Accepted (quotation given) and not paid yet: "Approve & Pay" is offered.
+    /// Accepted (quotation given) and no payment chosen yet: "Approve & Pay" is offered.
     public bool CanPay { get; set; }
+    /// BOOKINGS.PAYMENT_STATUS = Paid (e-wallet, or cash the provider has confirmed).
     public bool IsPaid { get; set; }
     public decimal Fee { get; set; }
+    /// "Cash on completion · ..." / "Paid via GCash (test) · ..." (null before Approve & Pay)
+    public PaymentNote? Payment { get; set; }
 
     /// "Marco Reyes · Plumbing"
     public string FromLine => string.IsNullOrWhiteSpace(CategoryText) ? ProviderName : $"{ProviderName} · {CategoryText}";

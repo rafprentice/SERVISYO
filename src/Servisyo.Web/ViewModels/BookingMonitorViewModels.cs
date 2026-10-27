@@ -33,11 +33,13 @@ public static class BookingFilters
 /// How a payment status is shown: text + colour.
 public sealed record PaymentDisplay(string Text, string Tone)
 {
+    /// paymentStatus may be PaymentProgress.Effective(...): "PendingCollection" = cash on completion, not collected yet.
     public static PaymentDisplay For(string paymentStatus) => paymentStatus switch
     {
         PaymentStatuses.Paid => new("Paid", "completed"),         // green
         PaymentStatuses.Refunded => new("Refunded", "refunded"),  // purple
         PaymentStatuses.Unpaid => new("Unpaid", "muted"),         // grey
+        PaymentRecordStatuses.PendingCollection => new("Cash due", "pending"),   // amber
         _ => new(paymentStatus, "muted")
     };
 }

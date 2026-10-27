@@ -25,9 +25,10 @@ public sealed record BookingActionInfo(BookingAction Action, string Label, strin
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, "Unknown booking action.")
     };
 
-    /// Like ForStatus, but an Accepted booking only offers "Mark In Progress" once the customer has paid.
+    /// Like ForStatus, but an Accepted booking only offers "Mark In Progress" once the customer has approved the quotation
+    /// and paid (or chosen cash on completion). paymentStatus is PaymentProgress.Effective(...).
     public static IReadOnlyList<BookingActionInfo> ForBooking(string status, string paymentStatus) =>
-        status == BookingStatuses.Accepted && paymentStatus != PaymentStatuses.Paid
+        status == BookingStatuses.Accepted && !PaymentProgress.IsArranged(paymentStatus)
             ? Array.Empty<BookingActionInfo>()
             : ForStatus(status);
 
@@ -109,12 +110,19 @@ public class ProviderBookingCardViewModel
     public string SubmittedText { get; set; } = string.Empty;   // "Sep 16, 2026"
     public string? Notes { get; set; }
     public IReadOnlyList<BookingActionInfo> Actions { get; set; } = Array.Empty<BookingActionInfo>();
+    /// PaymentProgress.Effective(...): Unpaid, Paid, Refunded, or PendingCollection (cash on completion, not collected yet).
     public string PaymentStatus { get; set; } = string.Empty;
+    public decimal Fee { get; set; }
 
-    /// Accepted, quotation sent, customer has not paid yet.
-    public bool AwaitingPayment => Status == BookingStatuses.Accepted && PaymentStatus != PaymentStatuses.Paid;
-    /// Accepted and paid: scheduled, ready to start on the day.
-    public bool IsScheduled => Status == BookingStatuses.Accepted && PaymentStatus == PaymentStatuses.Paid;
+    /// Accepted, quotation sent, customer has not approved and paid yet.
+    public bool AwaitingPayment => Status == BookingStatuses.Accepted && !PaymentProgress.IsArranged(PaymentStatus);
+    /// Accepted and paid (or cash promised): scheduled, ready to start on the day.
+    public bool IsScheduled => Status == BookingStatuses.Accepted && PaymentProgress.IsArranged(PaymentStatus);
+
+    /// The payment line on the card (null = nothing to say).
+    public PaymentNote? Payment { get; set; }
+    /// Completed + Cash on Completion + not confirmed yet: "Confirm Cash Received" is offered.
+    public bool CanConfirmCash { get; set; }
 
     public string FromLine => string.IsNullOrWhiteSpace(CategoryText)
         ? $"from {CustomerName}"

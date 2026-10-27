@@ -1101,3 +1101,53 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 /* ---------- Admin dashboard: export button ---------- */
 .sv-dash__headrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .sv-dash__headrow .sv-btn { display: inline-flex; align-items: center; gap: 8px; }
+
+/* ---------- Approve & Pay window (_PayChoice + payment-choice.js) ---------- */
+.sv-paydlg { width: min(480px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.sv-paydlg[open] { animation: sv-dialog-in .16s ease-out; }
+.sv-paydlg__form { display: grid; gap: 14px; margin: 0; padding: 22px; }
+.sv-paydlg__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sv-paydlg__for { margin: 2px 0 0; font-size: .8125rem; color: var(--color-text-muted); }
+.sv-paydlg__x { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #9CA3AF; font-size: 1rem; line-height: 1; cursor: pointer; }
+.sv-paydlg__x:hover { background: #F3F4F6; color: #4B5563; }
+.sv-paydlg__total { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-soft); font-size: .8125rem; color: var(--color-text-muted); }
+.sv-paydlg__total strong { font: 700 1.375rem var(--font-display); color: var(--color-text); }
+.sv-paydlg__choices { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.sv-paydlg__legend { margin-bottom: 8px; padding: 0; font-size: .8125rem; font-weight: 600; color: var(--color-text); }
+.sv-payopt { display: grid; grid-template-columns: auto auto 1fr; align-items: start; gap: 12px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 10px; background: #fff; cursor: pointer; transition: border-color .15s, box-shadow .15s, background-color .15s; }
+.sv-payopt:hover { border-color: #C9CBFF; }
+.sv-payopt input { width: 16px; height: 16px; margin: 10px 0 0; accent-color: var(--color-primary); cursor: pointer; }
+.sv-payopt.is-chosen { border-color: var(--color-primary); background: #F7F7FF; box-shadow: 0 0 0 3px rgba(81, 75, 255, .12); }
+.sv-payopt__icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: #ECFDF5; color: #047857; }
+.sv-payopt__icon--wallet { background: #EFF6FF; color: #1D4ED8; }
+.sv-payopt__text { display: grid; gap: 2px; font-size: .8125rem; line-height: 1.45; color: var(--color-text-muted); }
+.sv-payopt__text strong { font-size: .875rem; color: var(--color-text); }
+.sv-payopt__tag { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: var(--color-tint); color: var(--color-primary); font-size: .6875rem; font-weight: 600; vertical-align: 1px; }
+.sv-paydlg__wallet { display: grid; gap: 12px; padding: 14px; border: 1px dashed #C9CBFF; border-radius: 10px; background: var(--color-surface-soft); }
+.sv-paydlg__wallet[hidden] { display: none; }
+.sv-paydlg__wallets { display: flex; gap: 8px; }
+.sv-wpill { position: relative; flex: 1; }
+.sv-wpill input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.sv-wpill span { display: block; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: #fff; text-align: center; font-size: .8125rem; font-weight: 600; color: var(--color-text-muted); }
+.sv-wpill input:checked + span { border-color: var(--color-primary); background: var(--color-tint); color: var(--color-primary); }
+.sv-wpill input:focus-visible + span { outline: 3px solid var(--color-highlight); outline-offset: 2px; }
+.sv-paydlg__fld { margin: 0; }
+.sv-paydlg__refrow { display: flex; gap: 8px; }
+.sv-paydlg__refrow input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em; }
+.sv-paydlg__refrow .sv-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sv-paydlg__err { margin: 0; padding: 8px 10px; border-radius: 6px; background: #FEF2F2; color: #B91C1C; font-size: .8125rem; }
+.sv-paydlg__err[hidden] { display: none; }
+.sv-paydlg .sv-dialog__buttons { margin-top: 0; }
+.sv-paydlg__demo { margin: -6px 0 0; font-size: .6875rem; color: var(--color-text-muted); text-align: right; }
+@media (max-width: 480px) { .sv-paydlg__refrow { flex-direction: column; } .sv-paydlg__demo { text-align: left; } }
+@media (prefers-reduced-motion: reduce) { .sv-paydlg[open] { animation: none; } .sv-payopt { transition: none; } }
+
+/* payment line on booking cards (_PaymentNote) */
+.sv-paynote { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; font-size: .8125rem; line-height: 1.4; }
+.sv-paynote--wait { background: #FFFBEB; color: #92400E; }
+.sv-paynote--ok { background: #F0FDF4; color: #166534; }
+.sv-paynote__ico { display: inline-flex; flex: none; }
+.sv-paynote__text { flex: 1 1 220px; }
+.sv-paynote__ref { font-size: .75rem; white-space: nowrap; }
+.sv-paynote__ref code { padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, .75); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
+.sv-booking .sv-paynote { margin: 12px 0 0; }

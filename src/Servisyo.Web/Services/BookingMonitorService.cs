@@ -76,6 +76,7 @@ public class BookingMonitorService : IBookingMonitorService
             .Select(b => new
             {
                 b.BookingId, b.BookingDate, b.BookingTime, b.Status, b.PaymentStatus,
+                PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
                 CustomerFirst = b.Customer.User.FirstName, CustomerLast = b.Customer.User.LastName,
                 ProviderFirst = b.Provider.User.FirstName, ProviderLast = b.Provider.User.LastName
             })
@@ -100,7 +101,7 @@ public class BookingMonitorService : IBookingMonitorService
                 ProviderName = $"{r.ProviderFirst} {r.ProviderLast}".Trim(),
                 Date = r.BookingDate,
                 Time = r.BookingTime,
-                Payment = PaymentDisplay.For(r.PaymentStatus),
+                Payment = PaymentDisplay.For(PaymentProgress.Effective(r.PaymentStatus, r.PayStatus)),
                 Status = AdminBookingDisplay.For(r.Status)
             }).ToList()
         };

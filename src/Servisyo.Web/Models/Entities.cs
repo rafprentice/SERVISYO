@@ -147,6 +147,7 @@ public class Booking
     public Provider Provider { get; set; } = null!;
     public ICollection<BookingService> Services { get; set; } = new List<BookingService>();
     public Review? Review { get; set; }
+    public Payment? Payment { get; set; }        // PAYMENTS (one per booking, made by Approve & Pay)
     public ICollection<BookingReport> Reports { get; set; } = new List<BookingReport>();
 }
 

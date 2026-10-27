@@ -60,6 +60,9 @@ public class CustomerBookingsService : ICustomerBookingsService
         public string? ServiceLocation { get; set; }
         public string? ServiceDescription { get; set; }
         public bool HasReview { get; set; }
+        public string? PayMethod { get; set; }
+        public string? PayStatus { get; set; }
+        public string? PayReference { get; set; }
     }
 
     public async Task<CustomerBookingsResult> GetAsync(int userId, string? tab, int page, CancellationToken ct = default)
@@ -112,7 +115,10 @@ public class CustomerBookingsService : ICustomerBookingsService
                 ProviderLastName = b.Provider.User.LastName,
                 ServiceLocation = b.ServiceLocation,
                 ServiceDescription = b.ServiceDescription,
-                HasReview = _db.Reviews.Any(r => r.BookingId == b.BookingId)
+                HasReview = _db.Reviews.Any(r => r.BookingId == b.BookingId),
+                PayMethod = b.Payment != null ? b.Payment.PaymentMethod : null,
+                PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
+                PayReference = b.Payment != null ? b.Payment.TransactionReference : null
             })
             .ToListAsync(ct);
 
@@ -145,24 +151,31 @@ public class CustomerBookingsService : ICustomerBookingsService
             Tabs = tabs,
             Page = currentPage,
             TotalMatching = total,
-            Cards = rows.Select(r => new CustomerBookingCardViewModel
+            Cards = rows.Select(r =>
             {
-                BookingId = r.BookingId,
-                Title = titles.TryGetValue(r.BookingId, out var t) ? t : "Service booking",
-                ProviderName = $"{r.ProviderFirstName} {r.ProviderLastName}".Trim(),
-                CategoryText = categories.TryGetValue(r.BookingId, out var c) ? c : null,
-                Status = r.Status,
-                Tone = ProviderBookingBadge.Tone(r.Status),         // the same status colours as the provider's page
-                WhenText = BookingFormat.DateTimeText(r.BookingDate, r.BookingTime),
-                Location = string.IsNullOrWhiteSpace(r.ServiceLocation) ? null : r.ServiceLocation.Trim(),
-                SubmittedText = BookingFormat.SubmittedText(r.CreatedAt),
-                Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
-                CanCancel = r.Status == BookingStatuses.Pending,
-                CanReview = r.Status == BookingStatuses.Completed && !r.HasReview,
-                IsReviewed = r.Status == BookingStatuses.Completed && r.HasReview,
-                CanPay = r.Status == BookingStatuses.Accepted && r.PaymentStatus == PaymentStatuses.Unpaid,
-                IsPaid = r.PaymentStatus == PaymentStatuses.Paid,
-                Fee = r.TotalFee
+                var pay = new PaymentFacts(r.Status, r.PaymentStatus, r.PayMethod, r.PayStatus, r.PayReference, r.TotalFee);
+                var providerName = $"{r.ProviderFirstName} {r.ProviderLastName}".Trim();
+                return new CustomerBookingCardViewModel
+                {
+                    BookingId = r.BookingId,
+                    Title = titles.TryGetValue(r.BookingId, out var t) ? t : "Service booking",
+                    ProviderName = providerName,
+                    CategoryText = categories.TryGetValue(r.BookingId, out var c) ? c : null,
+                    Status = r.Status,
+                    Tone = ProviderBookingBadge.Tone(r.Status),         // the same status colours as the provider's page
+                    WhenText = BookingFormat.DateTimeText(r.BookingDate, r.BookingTime),
+                    Location = string.IsNullOrWhiteSpace(r.ServiceLocation) ? null : r.ServiceLocation.Trim(),
+                    SubmittedText = BookingFormat.SubmittedText(r.CreatedAt),
+                    Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
+                    CanCancel = r.Status == BookingStatuses.Pending,
+                    CanReview = r.Status == BookingStatuses.Completed && !r.HasReview,
+                    IsReviewed = r.Status == BookingStatuses.Completed && r.HasReview,
+                    // Approve & Pay: an Accepted quotation with no payment chosen yet
+                    CanPay = r.Status == BookingStatuses.Accepted && r.PaymentStatus == PaymentStatuses.Unpaid && r.PayMethod is null,
+                    IsPaid = r.PaymentStatus == PaymentStatuses.Paid,
+                    Fee = r.TotalFee,
+                    Payment = PaymentNotes.ForCustomer(pay, providerName)
+                };
             }).ToList()
         };
 

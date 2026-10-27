@@ -42,6 +42,9 @@ public class CustomerDashboardService : ICustomerDashboardService
         public string ProviderName { get; set; } = string.Empty;
         public int ProviderUserId { get; set; }
         public int ProviderId { get; set; }
+        public string? PayMethod { get; set; }
+        public string? PayStatus { get; set; }
+        public string? PayReference { get; set; }
     }
 
     private static readonly Expression<Func<Booking, BookingRow>> ToRow = b => new BookingRow
@@ -55,7 +58,10 @@ public class CustomerDashboardService : ICustomerDashboardService
         CreatedAt = b.CreatedAt,
         ProviderName = b.Provider.BusinessName,
         ProviderUserId = b.Provider.UserId,
-        ProviderId = b.ProviderId
+        ProviderId = b.ProviderId,
+        PayMethod = b.Payment != null ? b.Payment.PaymentMethod : null,
+        PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
+        PayReference = b.Payment != null ? b.Payment.TransactionReference : null
     };
 
     public async Task<CustomerDashboardViewModel?> GetAsync(int userId, CancellationToken ct = default)
@@ -138,7 +144,9 @@ public class CustomerDashboardService : ICustomerDashboardService
 
         if (currentRow is not null)
         {
-            vm.State = DashboardStates.FromBooking(currentRow.Status, currentRow.PaymentStatus);
+            var pay = new PaymentFacts(currentRow.Status, currentRow.PaymentStatus, currentRow.PayMethod, currentRow.PayStatus,
+                currentRow.PayReference, currentRow.TotalFee);
+            vm.State = DashboardStates.FromBooking(currentRow.Status, pay.Effective);
             var title = TitleOf(currentRow.BookingId);
             vm.Current = new CurrentBookingViewModel
             {
@@ -152,7 +160,9 @@ public class CustomerDashboardService : ICustomerDashboardService
                 Fee = currentRow.TotalFee,
                 UpcomingText = vm.State == DashboardState.BookingConfirmed
                     ? $"{DayLabel(currentRow.BookingDate, today)} · {currentRow.BookingTime.ToString("h:mm tt", CultureInfo.InvariantCulture)} — {title} with {currentRow.ProviderName}"
-                    : null
+                    : null,
+                Payment = PaymentNotes.ForCustomer(pay, currentRow.ProviderName),
+                CashToCollect = pay.CashToCollect
             };
         }
 

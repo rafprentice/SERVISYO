@@ -1,0 +1,84 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.Models
+@model Servisyo.Web.ViewModels.PayChoiceViewModel
+@*
+    "Approve & Pay" window for one booking. Opened by a button with data-pay-open="pay-{id}" (payment-choice.js).
+    Two choices:
+      1. Cash on Service Completion -> the booking is scheduled now; the provider confirms the cash after the job.
+      2. Mock E-Wallet (GCash / Maya test) -> paid at once with a test reference.
+    The window only collects the choice. The server checks everything again and takes the amount from the booking.
+*@
+@{
+    var id = "pay-" + Model.BookingId;
+}
+<dialog class="sv-dialog sv-paydlg" id="@id" data-pay-dialog aria-labelledby="@(id)-title">
+    <form method="post" asp-controller="CustomerPayments" asp-action="Pay" asp-route-id="@Model.BookingId"
+          class="sv-paydlg__form" data-sv-once data-pay-form data-pay-amount="@Model.AmountText" novalidate>
+        <input type="hidden" name="returnTo" value="@Model.ReturnTo" />
+
+        <div class="sv-paydlg__head">
+            <div>
+                <h2 id="@(id)-title" class="sv-dialog__title">Approve &amp; Pay</h2>
+                <p class="sv-paydlg__for">@Model.Title · @Model.ProviderName</p>
+            </div>
+            <button type="button" class="sv-paydlg__x" data-pay-close aria-label="Close">✕</button>
+        </div>
+
+        <div class="sv-paydlg__total">
+            <span>Quotation total</span>
+            <strong>@Model.AmountText</strong>
+        </div>
+
+        <fieldset class="sv-paydlg__choices">
+            <legend class="sv-paydlg__legend">How would you like to pay?</legend>
+
+            <label class="sv-payopt" for="@(id)-cash">
+                <input type="radio" id="@(id)-cash" name="Method" value="@PaymentMethods.CashOnCompletion" data-pay-method />
+                <span class="sv-payopt__icon" aria-hidden="true">@Icons.Svg("banknote", 18)</span>
+                <span class="sv-payopt__text">
+                    <strong>Cash on Service Completion</strong>
+                    <span>Pay cash directly to the service provider upon job completion.</span>
+                </span>
+            </label>
+
+            <label class="sv-payopt" for="@(id)-wallet">
+                <input type="radio" id="@(id)-wallet" name="Method" value="@PaymentMethods.MockEWallet" data-pay-method />
+                <span class="sv-payopt__icon sv-payopt__icon--wallet" aria-hidden="true">@Icons.Svg("wallet", 18)</span>
+                <span class="sv-payopt__text">
+                    <strong>Mock E-Wallet <span class="sv-payopt__tag">GCash / Maya Test</span></strong>
+                    <span>Pay now with a test e-wallet. You get a reference code instantly.</span>
+                </span>
+            </label>
+        </fieldset>
+
+        @* only sent when the e-wallet is chosen (the inputs stay disabled otherwise) *@
+        <div class="sv-paydlg__wallet" data-pay-wallet hidden>
+            <div class="sv-paydlg__wallets" role="radiogroup" aria-label="Test wallet">
+                <label class="sv-wpill"><input type="radio" name="Wallet" value="@MockWallets.GCash" data-pay-walletname data-prefix="GCASH" checked disabled /> <span>GCash</span></label>
+                <label class="sv-wpill"><input type="radio" name="Wallet" value="@MockWallets.Maya" data-pay-walletname data-prefix="MAYA" disabled /> <span>Maya</span></label>
+            </div>
+
+            <div class="sv-fld sv-paydlg__fld">
+                <label for="@(id)-mobile">Mobile number <span class="sv-fld__opt">(test)</span></label>
+                <input type="tel" id="@(id)-mobile" name="MobileNumber" inputmode="numeric" autocomplete="off" maxlength="13"
+                       placeholder="0917-000-0000" data-pay-mobile disabled />
+            </div>
+
+            <div class="sv-fld sv-paydlg__fld">
+                <label for="@(id)-ref">Test reference code</label>
+                <div class="sv-paydlg__refrow">
+                    <input type="text" id="@(id)-ref" name="Reference" readonly placeholder="Not generated yet" data-pay-ref disabled />
+                    <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-pay-gen>@Icons.Svg("refresh", 14) New code</button>
+                </div>
+            </div>
+        </div>
+
+        <p class="sv-paydlg__err" role="alert" data-pay-error hidden></p>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-pay-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" data-pay-submit disabled>Choose a payment option</button>
+        </div>
+        <p class="sv-paydlg__demo">Demo payment — no real money is charged and no real GCash or Maya account is used.</p>
+    </form>
+</dialog>

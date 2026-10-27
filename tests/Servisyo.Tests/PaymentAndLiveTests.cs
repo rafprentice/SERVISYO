@@ -43,6 +43,12 @@ public class PaymentAndLiveTests
 
     private static readonly DateTime NowUtc = new(2026, 10, 26, 2, 0, 0);
 
+    /// "Mock E-Wallet" with a test GCash number: paid at once (the cash choice is tested in DualPaymentTests).
+    private static readonly PaymentChoiceForm TestWallet = new()
+    {
+        Method = PaymentMethods.MockEWallet, Wallet = MockWallets.GCash, MobileNumber = "0917-000-0000"
+    };
+
     private sealed class World
     {
         public ServisyoDbContext Db { get; } = new(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
@@ -90,7 +96,7 @@ public class PaymentAndLiveTests
         var w = await CreateAsync();
         var b = await BookAsync(w, w.Ana, BookingStatuses.Accepted);
 
-        var result = await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId);
+        var result = await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet);
 
         Assert.True(result.Succeeded);
         var saved = await w.Db.Bookings.AsNoTracking().SingleAsync();
@@ -116,7 +122,7 @@ public class PaymentAndLiveTests
         var b = await BookAsync(w, w.Ana, BookingStatuses.Accepted);
         Assert.Equal(DashboardState.QuotationReceived, DashboardStates.FromBooking(b.Status, b.PaymentStatus));
 
-        await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId);
+        await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet);
 
         var saved = await w.Db.Bookings.AsNoTracking().SingleAsync();
         var state = DashboardStates.FromBooking(saved.Status, saved.PaymentStatus);
@@ -134,7 +140,7 @@ public class PaymentAndLiveTests
         var w = await CreateAsync();
         var b = await BookAsync(w, w.Ana, status);
 
-        var result = await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId);
+        var result = await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet);
 
         Assert.Equal(PaymentOutcome.NotPayable, result.Outcome);
         Assert.Equal(PaymentStatuses.Unpaid, (await w.Db.Bookings.AsNoTracking().SingleAsync()).PaymentStatus);
@@ -148,8 +154,8 @@ public class PaymentAndLiveTests
         var w = await CreateAsync();
         var b = await BookAsync(w, w.Ana, BookingStatuses.Accepted);
 
-        Assert.True((await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId)).Succeeded);
-        Assert.Equal(PaymentOutcome.AlreadyPaid, (await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId)).Outcome);
+        Assert.True((await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet)).Succeeded);
+        Assert.Equal(PaymentOutcome.AlreadyPaid, (await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet)).Outcome);
         Assert.Single(w.Db.Notifications);
     }
 
@@ -159,8 +165,8 @@ public class PaymentAndLiveTests
         var w = await CreateAsync();
         var anas = await BookAsync(w, w.Ana, BookingStatuses.Accepted);
 
-        Assert.Equal(PaymentOutcome.NotFound, (await w.Payments.ApproveAndPayAsync(w.Ben.UserId, anas.BookingId)).Outcome);
-        Assert.Equal(PaymentOutcome.NotAllowed, (await w.Payments.ApproveAndPayAsync(w.Mary.UserId, anas.BookingId)).Outcome);   // a provider
+        Assert.Equal(PaymentOutcome.NotFound, (await w.Payments.ApproveAndPayAsync(w.Ben.UserId, anas.BookingId, TestWallet)).Outcome);
+        Assert.Equal(PaymentOutcome.NotAllowed, (await w.Payments.ApproveAndPayAsync(w.Mary.UserId, anas.BookingId, TestWallet)).Outcome);   // a provider
         Assert.Equal(PaymentStatuses.Unpaid, (await w.Db.Bookings.AsNoTracking().SingleAsync()).PaymentStatus);
     }
 
@@ -187,7 +193,7 @@ public class PaymentAndLiveTests
         var b = await BookAsync(w, w.Ana, BookingStatuses.Pending);
 
         Assert.True((await w.ProviderBookings.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Accept)).Succeeded);  // quotation
-        Assert.True((await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId)).Succeeded);                               // paid -> scheduled
+        Assert.True((await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet)).Succeeded);                               // paid -> scheduled
         Assert.Single(BookingActionInfo.ForBooking(BookingStatuses.Accepted, PaymentStatuses.Paid));                            // "Mark In Progress"
         Assert.True((await w.ProviderBookings.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Start)).Succeeded);   // in progress
         Assert.True((await w.ProviderBookings.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Complete)).Succeeded);// completed
