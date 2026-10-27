@@ -154,6 +154,12 @@ namespace Servisyo.Web.Migrations
 
                     b.HasIndex("CustomerId");
 
+                    b.HasIndex("BookingDate", "PaymentStatus")
+                        .HasDatabaseName("IX_BOOKINGS_DATE_PAYMENT");
+
+                    b.HasIndex("ProviderId", "Status")
+                        .HasDatabaseName("IX_BOOKINGS_PROVIDER_STATUS");
+
                     b.HasIndex("ProviderId", "BookingDate", "BookingTime")
                         .IsUnique()
                         .HasDatabaseName("UX_BOOKINGS_ACTIVE_SLOT")
@@ -163,7 +169,11 @@ namespace Servisyo.Web.Migrations
                         {
                             t.HasTrigger("trg_Bookings_Audit");
 
+                            t.HasTrigger("trg_Bookings_StatusFlow");
+
                             t.HasCheckConstraint("CK_BOOKINGS_DURATION", "[TOTAL_DURATION_MINUTES] > 0");
+
+                            t.HasCheckConstraint("CK_BOOKINGS_FEE", "[TOTAL_FEE] >= 0");
 
                             t.HasCheckConstraint("CK_BOOKINGS_PAYMENT", "[PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')");
 
@@ -416,9 +426,10 @@ namespace Servisyo.Web.Migrations
 
                     b.HasKey("MessageId");
 
-                    b.HasIndex("ReceiverId");
-
                     b.HasIndex("SenderId");
+
+                    b.HasIndex("ReceiverId", "IsRead")
+                        .HasDatabaseName("IX_MESSAGES_RECEIVER_UNREAD");
 
                     b.ToTable("MESSAGES", (string)null);
                 });
@@ -454,7 +465,8 @@ namespace Servisyo.Web.Migrations
 
                     b.HasKey("NotificationId");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "IsRead")
+                        .HasDatabaseName("IX_NOTIFICATIONS_USER_UNREAD");
 
                     b.ToTable("NOTIFICATIONS", (string)null);
                 });
@@ -515,6 +527,8 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("PAYMENTS", null, t =>
                         {
+                            t.HasTrigger("trg_Payments_Audit");
+
                             t.HasCheckConstraint("CK_PAYMENTS_AMOUNT", "[AMOUNT] >= 0");
 
                             t.HasCheckConstraint("CK_PAYMENTS_METHOD", "[PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')");
@@ -525,6 +539,8 @@ namespace Servisyo.Web.Migrations
 
                             t.HasCheckConstraint("CK_PAYMENTS_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Provider", b =>
@@ -612,6 +628,8 @@ namespace Servisyo.Web.Migrations
                     b.ToTable("SERVICE_PROVIDERS", null, t =>
                         {
                             t.HasCheckConstraint("CK_PROVIDERS_APPROVAL", "[APPROVAL_STATUS] IN ('Pending','Approved','Rejected')");
+
+                            t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");
 
                             t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0");
 
@@ -790,10 +808,14 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("REVIEWS", null, t =>
                         {
+                            t.HasTrigger("trg_Reviews_RatingSync");
+
                             t.HasCheckConstraint("CK_REVIEWS_RATING", "[RATING] BETWEEN 1 AND 5");
 
                             t.HasCheckConstraint("CK_REVIEWS_STATUS", "[STATUS] IN ('Visible','Flagged','Removed')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Service", b =>

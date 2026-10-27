@@ -1,4 +1,6 @@
+using System.Data;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Servisyo.Web.Data;
 using Servisyo.Web.Models;
@@ -50,6 +52,21 @@ public class AuthService : IAuthService
             return AuthResult.Fail(EmailTaken);
 
         var user = BuildUser(vm, email, Roles.Customer);
+
+        // On SQL Server: the stored procedure dbo.usp_RegisterCustomer (USERS + CUSTOMERS in one database call)
+        var viaProcedure = await RegisterWithProcedureAsync(
+            "EXEC dbo.usp_RegisterCustomer @FirstName = @FirstName, @MiddleName = @MiddleName, @LastName = @LastName, " +
+            "@Email = @Email, @PasswordHash = @PasswordHash, @PhoneNumber = @PhoneNumber, @Address = @Address, @City = @City, " +
+            "@NewUserId = @NewUserId OUTPUT, @NewCustomerId = @NewCustomerId OUTPUT",
+            UserParameters(user).Concat(new[]
+            {
+                Text("@Address", Clean(vm.Address)),
+                Text("@City", Clean(vm.City)),
+                Output("@NewCustomerId")
+            }).ToList());
+        if (viaProcedure is not null) return viaProcedure;
+
+        // In-memory test database (or the procedure is not installed yet): the same work through EF
         user.Customer = new Customer { Address = Clean(vm.Address), City = Clean(vm.City) };
 
         _db.Users.Add(user);
@@ -74,6 +91,29 @@ public class AuthService : IAuthService
             return AuthResult.Fail(EmailTaken);
 
         var user = BuildUser(vm, email, Roles.ServiceProvider);
+
+        // On SQL Server: the stored procedure dbo.usp_RegisterProvider
+        // (USERS + SERVICE_PROVIDERS as Pending + a notification for every active administrator, in one database call)
+        var viaProcedure = await RegisterWithProcedureAsync(
+            "EXEC dbo.usp_RegisterProvider @FirstName = @FirstName, @MiddleName = @MiddleName, @LastName = @LastName, " +
+            "@Email = @Email, @PasswordHash = @PasswordHash, @PhoneNumber = @PhoneNumber, @BusinessName = @BusinessName, " +
+            "@Description = @Description, @Address = @Address, @City = @City, @BaseFee = @BaseFee, " +
+            "@MinNoticeDays = @MinNoticeDays, @MaxJobsPerDay = @MaxJobsPerDay, " +
+            "@NewUserId = @NewUserId OUTPUT, @NewProviderId = @NewProviderId OUTPUT",
+            UserParameters(user).Concat(new[]
+            {
+                Text("@BusinessName", vm.BusinessName.Trim()),
+                Text("@Description", Clean(vm.Description)),
+                Text("@Address", Clean(vm.Address)),
+                Text("@City", Clean(vm.City)),
+                new SqlParameter("@BaseFee", SqlDbType.Decimal) { Precision = 12, Scale = 2, Value = (object?)vm.BaseFee ?? DBNull.Value },
+                new SqlParameter("@MinNoticeDays", SqlDbType.Int) { Value = vm.MinNoticeDays },
+                new SqlParameter("@MaxJobsPerDay", SqlDbType.Int) { Value = vm.MaxJobsPerDay },
+                Output("@NewProviderId")
+            }).ToList());
+        if (viaProcedure is not null) return viaProcedure;
+
+        // In-memory test database (or the procedure is not installed yet): the same work through EF
         user.Provider = new Provider
         {
             BusinessName = vm.BusinessName.Trim(),
@@ -180,6 +220,60 @@ public class AuthService : IAuthService
         user.PasswordHash = _hasher.HashPassword(user, vm.Password);
         return user;
     }
+
+    // ------------------------------------------------------------------ stored procedures (SQL Server)
+
+    /// Runs one of the registration procedures. Returns null when it could not be used (the in-memory test database,
+    /// or a database where the DatabaseV2 migration has not been applied yet), so the caller does the same work with EF.
+    /// The password is hashed HERE; the procedure only ever receives the hash.
+    private async Task<AuthResult?> RegisterWithProcedureAsync(string sql, List<SqlParameter> parameters)
+    {
+        if (!_db.Database.IsRelational()) return null;
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync(sql, parameters.Cast<object>().ToArray());
+        }
+        catch (SqlException ex) when (ex.Number == 2812)
+        {
+            // 2812 = "Could not find stored procedure": the database has not been updated yet
+            _logger.LogWarning("Registration procedure not found ({Message}); using EF instead. Run: dotnet ef database update", ex.Message);
+            return null;
+        }
+        catch (SqlException ex) when (ex.Number is 50101 or 2601 or 2627)
+        {
+            return AuthResult.Fail(EmailTaken);       // checked in the procedure + the unique index on USERS.EMAIL
+        }
+        catch (SqlException ex) when (ex.Number is >= 50100 and < 50200)
+        {
+            return AuthResult.Fail(ex.Message);       // a rule checked by the procedure (its message is written for users)
+        }
+
+        var newUserId = parameters.First(p => p.ParameterName == "@NewUserId").Value;
+        if (newUserId is not int id)
+            return AuthResult.Fail("Your account could not be created. Please try again.");
+
+        var created = await _db.Users.AsNoTracking().FirstAsync(u => u.UserId == id);
+        return AuthResult.Ok(created);
+    }
+
+    /// The USERS columns, from the user built (and password-hashed) by BuildUser.
+    private static IEnumerable<SqlParameter> UserParameters(User user) => new[]
+    {
+        Text("@FirstName", user.FirstName),
+        Text("@MiddleName", user.MiddleName),
+        Text("@LastName", user.LastName),
+        Text("@Email", user.Email),
+        Text("@PasswordHash", user.PasswordHash),
+        Text("@PhoneNumber", user.PhoneNumber),
+        Output("@NewUserId")
+    };
+
+    private static SqlParameter Text(string name, string? value) =>
+        new(name, SqlDbType.NVarChar, 400) { Value = (object?)value ?? DBNull.Value };
+
+    private static SqlParameter Output(string name) =>
+        new(name, SqlDbType.Int) { Direction = ParameterDirection.Output };
 
     private async Task<AuthResult> SaveAsync(User user)
     {

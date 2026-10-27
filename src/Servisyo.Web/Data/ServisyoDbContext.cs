@@ -79,6 +79,7 @@ public class ServisyoDbContext : DbContext
                 t.HasCheckConstraint("CK_PROVIDERS_RATING", "[AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5");
                 t.HasCheckConstraint("CK_PROVIDERS_APPROVAL", "[APPROVAL_STATUS] IN ('Pending','Approved','Rejected')");
                 t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0");
+                t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");   // database v2
             });
             e.Property(x => x.BusinessName).HasMaxLength(155);
             e.Property(x => x.City).HasMaxLength(50);
@@ -147,10 +148,12 @@ public class ServisyoDbContext : DbContext
             e.ToTable("BOOKINGS", t =>
             {
                 t.HasTrigger("trg_Bookings_Audit");
+                t.HasTrigger("trg_Bookings_StatusFlow");      // database v2: refuses status changes outside the booking life cycle
                 t.HasCheckConstraint("CK_BOOKINGS_STATUS",
                     "[STATUS] IN ('Pending','Accepted','Rejected','In Progress','Completed','Cancelled')");
                 t.HasCheckConstraint("CK_BOOKINGS_PAYMENT", "[PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')");
                 t.HasCheckConstraint("CK_BOOKINGS_DURATION", "[TOTAL_DURATION_MINUTES] > 0");
+                t.HasCheckConstraint("CK_BOOKINGS_FEE", "[TOTAL_FEE] >= 0");   // database v2
             });
             e.Property(x => x.Status).HasMaxLength(50);
             e.Property(x => x.PaymentStatus).HasMaxLength(50);
@@ -166,6 +169,9 @@ public class ServisyoDbContext : DbContext
                 .IsUnique()
                 .HasDatabaseName("UX_BOOKINGS_ACTIVE_SLOT")
                 .HasFilter("[STATUS] IN ('Pending','Accepted','In Progress')");
+            // database v2: faster "my bookings" lists (provider + status) and monthly reports (date + payment)
+            e.HasIndex(x => new { x.ProviderId, x.Status }).HasDatabaseName("IX_BOOKINGS_PROVIDER_STATUS");
+            e.HasIndex(x => new { x.BookingDate, x.PaymentStatus }).HasDatabaseName("IX_BOOKINGS_DATE_PAYMENT");
         });
 
         mb.Entity<BookingService>(e =>
@@ -180,6 +186,7 @@ public class ServisyoDbContext : DbContext
         {
             e.ToTable("REVIEWS", t =>
             {
+                t.HasTrigger("trg_Reviews_RatingSync");       // database v2: keeps AVG_RATING / REVIEW_COUNT right
                 t.HasCheckConstraint("CK_REVIEWS_RATING", "[RATING] BETWEEN 1 AND 5");
                 t.HasCheckConstraint("CK_REVIEWS_STATUS", "[STATUS] IN ('Visible','Flagged','Removed')");
             });
@@ -196,6 +203,7 @@ public class ServisyoDbContext : DbContext
             e.Property(x => x.SentAt).HasDefaultValueSql("SYSUTCDATETIME()");
             e.HasOne(x => x.Sender).WithMany().HasForeignKey(x => x.SenderId);
             e.HasOne(x => x.Receiver).WithMany().HasForeignKey(x => x.ReceiverId);
+            e.HasIndex(x => new { x.ReceiverId, x.IsRead }).HasDatabaseName("IX_MESSAGES_RECEIVER_UNREAD");   // database v2: unread badge
         });
 
         mb.Entity<EmailOtp>(e =>
@@ -222,6 +230,7 @@ public class ServisyoDbContext : DbContext
         {
             e.ToTable("PAYMENTS", t =>
             {
+                t.HasTrigger("trg_Payments_Audit");           // database v2: System Logs for payments
                 t.HasCheckConstraint("CK_PAYMENTS_METHOD", "[PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')");
                 t.HasCheckConstraint("CK_PAYMENTS_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
                 t.HasCheckConstraint("CK_PAYMENTS_AMOUNT", "[AMOUNT] >= 0");
@@ -253,6 +262,7 @@ public class ServisyoDbContext : DbContext
             e.ToTable("NOTIFICATIONS");
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
+            e.HasIndex(x => new { x.UserId, x.IsRead }).HasDatabaseName("IX_NOTIFICATIONS_USER_UNREAD");   // database v2: bell count
         });
 
         mb.Entity<AdminAction>(e =>

@@ -14,6 +14,10 @@
    ===================================================================== */
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+-- Database v2: the trigger trg_Bookings_StatusFlow only allows the real booking life cycle. This DEVELOPMENT script
+-- jumps the sample booking straight to the chosen stage, so it switches that check off for THIS connection only.
+EXEC sp_set_session_context @key = N'servisyo_dev_override', @value = 1;
 
 -- >>> EDIT THESE TWO LINES <<<
 DECLARE @CustomerEmail NVARCHAR(255) = N'you@email.com';   -- the customer you registered
