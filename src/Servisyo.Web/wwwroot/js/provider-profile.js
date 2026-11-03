@@ -5,6 +5,7 @@
 
     document.querySelectorAll("form[data-sv-once]").forEach(function (form) {
         form.addEventListener("submit", function (event) {
+            if (event.defaultPrevented) return;            // another check (e.g. base-fee.js) stopped this submit: stay editable
             if (form.getAttribute("data-busy")) { event.preventDefault(); return; }
             // not disabling the button here: a disabled submit button would not send its form values
             form.setAttribute("data-busy", "1");

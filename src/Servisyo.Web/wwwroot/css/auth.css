@@ -53,6 +53,15 @@
 .sv-input input::placeholder { color: #9AA5BD; }
 .sv-input input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(81,75,255,.18); }
 .sv-input input.input-validation-error { border-color: #D92D20; }
+/* the address dropdown on the registration page: looks like the text boxes, with the location icon on the left */
+.sv-input select {
+    width: 100%; height: 44px; padding: 0 12px 0 40px; font: 400 .875rem var(--font-body); color: var(--color-text);
+    background: #fff; border: 1px solid var(--color-border); border-radius: 6px; cursor: pointer;
+    transition: border-color .15s, box-shadow .15s;
+}
+.sv-input select:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(81,75,255,.18); }
+.sv-input select.input-validation-error { border-color: #D92D20; }
+.sv-note { display: block; margin-top: 4px; font-size: .75rem; color: #6B7690; }
 .sv-input__icon { position: absolute; left: 13px; top: 0; height: 44px; display: flex; align-items: center; color: #8A95AD; pointer-events: none; }
 
 .sv-eye {

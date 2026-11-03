@@ -60,7 +60,12 @@ public class AccountController : Controller
     [HttpPost]
     public async Task<IActionResult> RegisterProvider(RegisterProviderViewModel vm)
     {
-        if (!ModelState.IsValid) return View(vm);
+        // nothing is saved when a field is invalid (e.g. a base fee of 0 or below: [Range(1, 100000)] on BaseFee)
+        if (!ModelState.IsValid)
+        {
+            BaseFeeRules.FixModelStateMessage(ModelState, vm.BaseFee);
+            return View(vm);
+        }
 
         var result = await _auth.RegisterProviderAsync(vm);
         if (!result.Succeeded)

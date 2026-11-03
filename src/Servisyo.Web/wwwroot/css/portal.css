@@ -591,7 +591,13 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-fld textarea::placeholder { color: #9AA5BD; }
 .sv-fld textarea:focus, .sv-fld select:focus { outline: 2px solid var(--color-primary); outline-offset: 1px; }
 .sv-fld [aria-invalid="true"] { border-color: #FCA5A5; }
+/* Book this Provider, step 3: the service-address dropdown with the location icon */
+.sv-bp__hint.is-error { color: #B42318; font-weight: 500; }
+.sv-bp__select { position: relative; }
+.sv-bp__select select { padding-left: 34px; cursor: pointer; }
+.sv-bp__selecticon { position: absolute; left: 12px; top: 0; bottom: 0; display: flex; align-items: center; color: #8A95AD; pointer-events: none; }
 .sv-fld__err { margin: 4px 0 0; font-size: .6875rem; color: #B91C1C; }
+.sv-fld__err[hidden] { display: none; }
 
 @media (max-width: 520px) {
     .sv-svc { flex-direction: column; }

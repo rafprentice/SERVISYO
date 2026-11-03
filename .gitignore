@@ -484,3 +484,9 @@ $RECYCLE.BIN/
 appsettings.*.local.json
 
 src/Servisyo.Web/wwwroot/uploads/
+
+# never commit: secrets and deployment files
+src/Servisyo.Web/appsettings.Production.json
+servisyo-publish.zip
+deploy*.sql
+graphify-out/

@@ -22,6 +22,7 @@
     var emailError = Model.ErrorFor("Email");
     var addressError = Model.ErrorFor("Address");
     var bioError = Model.ErrorFor("Description");
+    var feeError = Model.ErrorFor("BaseFee");
 }
 
 <div class="sv-pf">
@@ -105,6 +106,17 @@
 
 
             <div class="sv-fld">
+                <label for="pf-basefee">Base Fee in PHP</label>
+                <input id="pf-basefee" name="BaseFee" type="number" min="1" max="100000" step="any" inputmode="decimal" required
+                       value="@BaseFeeRules.ForInput(form.BaseFee)" placeholder="e.g. 500"
+                       data-sv-basefee aria-describedby="pf-basefee-err"
+                       data-msg-required="@BaseFeeRules.RequiredMessage" data-msg-min="@BaseFeeRules.MinMessage"
+                       data-msg-max="@BaseFeeRules.MaxMessage" data-msg-nan="@BaseFeeRules.NotANumberMessage"
+                       aria-invalid="@(feeError is null ? null : "true")" />
+                <p class="sv-fld__err" id="pf-basefee-err" role="alert" hidden="@(feeError is null)">@feeError</p>
+            </div>
+
+            <div class="sv-fld">
                 <label for="pf-address">Address <span class="sv-fld__opt">(optional)</span></label>
                 <input id="pf-address" name="Address" type="text" value="@form.Address" maxlength="255" autocomplete="street-address" placeholder="Street, barangay (Cebu City)"
                        aria-invalid="@(addressError is null ? null : "true")" />
@@ -175,5 +187,6 @@
 </div>
 
 @section Scripts {
+    <script src="~/js/base-fee.js" asp-append-version="true"></script>
     <script src="~/js/provider-profile.js" asp-append-version="true"></script>
 }

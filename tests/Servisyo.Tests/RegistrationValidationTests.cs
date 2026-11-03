@@ -98,7 +98,7 @@ public class RegistrationValidationTests
     private static CustomerRegistrationViewModel GoodCustomer() => new()
     {
         FullName = "Ana Reyes", Email = "ana@test.com", PhoneNumber = "09175551234",
-        StreetAddress = "123 Rizal St.", Barangay = "Lahug",
+        Location = "Salinas Drive, Brgy. Lahug, Cebu City",
         Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", AcceptTerms = true
     };
 
@@ -111,13 +111,11 @@ public class RegistrationValidationTests
         var f = GoodCustomer();
         f.FullName = "213123123123";
         f.PhoneNumber = "qweqweeqw";
-        f.StreetAddress = "12345";
-        f.Barangay = "7";
+        f.Location = "12345";
         f.Email = "ana@gmail2.com";
         Assert.True(Fails(f, nameof(f.FullName)));
         Assert.True(Fails(f, nameof(f.PhoneNumber)));
-        Assert.True(Fails(f, nameof(f.StreetAddress)));
-        Assert.True(Fails(f, nameof(f.Barangay)));
+        Assert.True(Fails(f, nameof(f.Location)));                     // not one of the five addresses
         Assert.True(Fails(f, nameof(f.Email)));
     }
 
@@ -254,7 +252,7 @@ public class RegistrationValidationTests
     public void EveryField_IsRequired_OnBothForms()
     {
         var c = new CustomerRegistrationViewModel();
-        foreach (var field in new[] { "FullName", "Email", "PhoneNumber", "StreetAddress", "Barangay", "Password", "ConfirmPassword", "AcceptTerms" })
+        foreach (var field in new[] { "FullName", "Email", "PhoneNumber", "Location", "Password", "ConfirmPassword", "AcceptTerms" })
             Assert.True(Fails(c, field), "customer " + field + " should be required");
 
         var p = new RegisterProviderViewModel { MinNoticeDays = 1, MaxJobsPerDay = 5 };
@@ -262,12 +260,35 @@ public class RegistrationValidationTests
             Assert.True(Fails(p, field), "provider " + field + " should be required");
     }
 
+    [Theory]
+    [InlineData("Osmeña Blvd, Brgy. Capitol Site, Cebu City", true)]
+    [InlineData("C. Padilla St, Brgy. Duljo Fatima, Cebu City", true)]
+    [InlineData("Lahug", false)]                                      // typed, not chosen
+    [InlineData("<script>alert(1)</script>", false)]
+    public void ProviderForm_AcceptsOnlyAnAddressFromTheList(string address, bool ok)
+    {
+        var p = new RegisterProviderViewModel
+        {
+            FirstName = "Juan", MiddleName = "Reyes", LastName = "Dela Cruz", Email = "juan@email.com", PhoneNumber = "09171234567",
+            Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", BusinessName = "Juan Plumbing", Description = "Pipe repair.",
+            Address = address, BaseFee = 500m
+        };
+        Assert.Equal(!ok, Fails(p, nameof(p.Address)));
+        if (ok)
+        {
+            Assert.NotNull(p.StreetAddress);
+            Assert.NotNull(p.Barangay);
+            Assert.Equal("Cebu City", p.City);
+        }
+    }
+
     [Fact]
     public void TheFormsHaveNoCityField_SERVISYO_IsCebuCityOnly()
     {
-        Assert.Null(typeof(CustomerRegistrationViewModel).GetProperty("City"));
+        // the forms show "Cebu City" (read-only, never posted); the tables have no CITY column
+        Assert.False(typeof(CustomerRegistrationViewModel).GetProperty("City")!.CanWrite);
         Assert.Null(typeof(RegisterCustomerViewModel).GetProperty("City"));
-        Assert.Null(typeof(RegisterProviderViewModel).GetProperty("City"));
+        Assert.False(typeof(RegisterProviderViewModel).GetProperty("City")!.CanWrite);
         Assert.Null(typeof(Customer).GetProperty("City"));
         Assert.Null(typeof(Provider).GetProperty("City"));
     }

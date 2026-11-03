@@ -335,7 +335,99 @@ public class BookProviderServiceTests
         Assert.Equal("Marco Reyes", page.ProviderName);
         Assert.Equal(new DateOnly(2026, 10, 16), page.EarliestDate);              // today + 2 days of notice
         Assert.Equal(new DateOnly(2027, 1, 12), page.LatestDate);                 // today + 90 days
-        Assert.Equal("45 Mabini St, Quezon City", page.Form.Location);
+        Assert.Equal("45 Mabini St, Quezon City", page.Form.Location);             // the saved address is chosen already
+        Assert.Equal("45 Mabini St, Quezon City", page.SavedAddress);
+        Assert.Equal(new[] { "45 Mabini St, Quezon City" }.Concat(BookingAddresses.Preset), page.AddressOptions);   // saved one first
+    }
+
+    [Fact]
+    public void TheAddressDropdown_HasTheSixPresetAddresses()
+    {
+        Assert.Equal(new[]
+        {
+            "Osmeña Blvd, Brgy. Capitol Site, Cebu City",
+            "Gov. M. Cuenco Ave, Brgy. Banilad, Cebu City",
+            "N. Bacalso Ave, Brgy. Sambag I, Cebu City",
+            "Salinas Drive, Brgy. Lahug, Cebu City",
+            "C. Padilla St, Brgy. Duljo Fatima, Cebu City",
+            "Lower Pakigne, Minglanilla"
+        }, BookingAddresses.Preset);
+    }
+
+    [Fact]
+    public async Task Page_WhenTheSavedAddressIsAPresetOne_ItIsChosen_AndNotListedTwice()
+    {
+        var (svc, db) = Create();
+        var c = await AddCustomerAsync(db, address: "Salinas Drive, Brgy. Lahug, Cebu City");
+        var p = await AddProviderAsync(db);
+        await AddServiceAsync(db, p, "Pipe Repair", 600m, 60);
+
+        var page = (await svc.GetPageAsync(c.UserId, p.ProviderId)).Page!;
+
+        Assert.Equal("Salinas Drive, Brgy. Lahug, Cebu City", page.Form.Location);
+        Assert.Equal(BookingAddresses.Preset, page.AddressOptions);
+    }
+
+    [Fact]
+    public async Task Page_WithoutASavedAddress_ChoosesNothing()
+    {
+        var (svc, db) = Create();
+        var c = await AddCustomerAsync(db, address: null);
+        var p = await AddProviderAsync(db);
+        await AddServiceAsync(db, p, "Pipe Repair", 600m, 60);
+
+        var page = (await svc.GetPageAsync(c.UserId, p.ProviderId)).Page!;
+
+        Assert.Null(page.Form.Location);                                         // "Select a service address" is shown
+        Assert.Null(page.SavedAddress);
+        Assert.Equal(BookingAddresses.Preset, page.AddressOptions);
+    }
+
+    [Theory]
+    [InlineData("Lower Pakigne, Minglanilla")]
+    [InlineData("C. Padilla St, Brgy. Duljo Fatima, Cebu City")]
+    [InlineData("45 Mabini St, Quezon City")]                                   // the customer's own saved address
+    public async Task Create_SavesTheChosenAddress_AsItIs(string chosen)
+    {
+        var (svc, db) = Create();
+        var (c, p, s) = await StandardAsync(db);
+        var form = Form(s);
+        form.Location = chosen;
+
+        Assert.True((await svc.CreateAsync(c.UserId, p.ProviderId, form)).Succeeded);
+        Assert.Equal(chosen, (await db.Bookings.SingleAsync()).ServiceLocation);
+    }
+
+    [Theory]
+    [InlineData("100 Ortigas Ave")]                                             // typed by hand / changed in the browser
+    [InlineData("salinas drive, brgy. lahug, cebu city")]
+    public async Task Create_RefusesAnAddressThatIsNotInTheDropdown(string typed)
+    {
+        var (svc, db) = Create();
+        var (c, p, s) = await StandardAsync(db);
+        var form = Form(s);
+        form.Location = typed;
+
+        var result = await svc.CreateAsync(c.UserId, p.ProviderId, form);
+
+        Assert.Equal(BookOutcome.Invalid, result.Outcome);
+        Assert.Equal(BookingFormRules.AddressNotInListMessage, result.FieldErrors["Location"]);
+        Assert.Empty(db.Bookings);
+    }
+
+    [Fact]
+    public async Task Create_ANeighboursSavedAddress_IsNotAnOption()
+    {
+        var (svc, db) = Create();
+        var (ana, p, s) = await StandardAsync(db);                            // Ana's saved address: 45 Mabini St
+        var ben = await AddCustomerAsync(db, "Ben", "Cruz", address: "7 Gorordo Ave, Cebu City");
+        var form = Form(s);
+        form.Location = "7 Gorordo Ave, Cebu City";                            // Ben's address, sent by Ana
+
+        var result = await svc.CreateAsync(ana.UserId, p.ProviderId, form);
+
+        Assert.Equal(BookingFormRules.AddressNotInListMessage, result.FieldErrors["Location"]);
+        Assert.Empty(db.Bookings);
     }
 
     // ------------------------------------------------------------------ free times
@@ -499,13 +591,13 @@ public class BookProviderServiceTests
         var (c, p, s) = await StandardAsync(db);
         var form = Form(s);
         form.ServiceIds = new List<int> { s.ServiceId, s.ServiceId };
-        form.Location = "   100 Ortigas Ave   ";
+        form.Location = "   Salinas Drive, Brgy. Lahug, Cebu City   ";
         form.Description = "  Fix it  ";
 
         Assert.True((await svc.CreateAsync(c.UserId, p.ProviderId, form)).Succeeded);
 
         var b = await db.Bookings.Include(x => x.Services).SingleAsync();
-        Assert.Equal("100 Ortigas Ave", b.ServiceLocation);
+        Assert.Equal("Salinas Drive, Brgy. Lahug, Cebu City", b.ServiceLocation);
         Assert.Equal("Fix it", b.ServiceDescription);
         Assert.Single(b.Services);
         Assert.Equal(600m, b.TotalFee);
@@ -537,7 +629,7 @@ public class BookProviderServiceTests
         Assert.Equal("Choose at least one service.", result.FieldErrors["ServiceIds"]);
         Assert.Equal("Choose a date.", result.FieldErrors["Date"]);
         Assert.Equal("Choose a time.", result.FieldErrors["Time"]);
-        Assert.Equal("Enter the address where the service will be done.", result.FieldErrors["Location"]);
+        Assert.Equal("Please select a service address.", result.FieldErrors["Location"]);
         Assert.Equal("Describe what you need done.", result.FieldErrors["Description"]);
         Assert.Empty(db.Bookings);
         Assert.Empty(db.Notifications);

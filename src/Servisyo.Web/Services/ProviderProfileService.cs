@@ -56,7 +56,7 @@ public class ProviderProfileService : IProviderProfileService
                      && x.User.AccountStatus == AccountStatuses.Active)
             .Select(x => new
             {
-                x.ProviderId, x.ApprovalStatus, x.BusinessName, x.Address, x.Description, x.ProfilePhoto,
+                x.ProviderId, x.ApprovalStatus, x.BusinessName, x.Address, x.Description, x.ProfilePhoto, x.BaseFee,
                 x.User.FirstName, x.User.LastName, x.User.Email, x.User.PhoneNumber
             })
             .FirstOrDefaultAsync(ct);
@@ -119,7 +119,8 @@ public class ProviderProfileService : IProviderProfileService
                 PhoneNumber = p.PhoneNumber,
                 Email = p.Email,
                 Address = p.Address,
-                Description = p.Description
+                Description = p.Description,
+                BaseFee = p.BaseFee
             },
             FieldErrors = rejected?.FieldErrors ?? NoErrors,
             FormError = rejected is { Saved: false } && rejected.FieldErrors.Count == 0 ? rejected.Message : null,
@@ -212,6 +213,11 @@ public class ProviderProfileService : IProviderProfileService
         if (description is { Length: > ProfileRules.MaxDescriptionLength })
             errors["Description"] = $"The bio can be at most {ProfileRules.MaxDescriptionLength} characters.";
 
+        // ---- base fee (required, 1 to 100,000 PHP: a fee of 0 or below is never saved) ----
+        var feeError = BaseFeeRules.Check(form.BaseFee);
+        if (feeError is not null)
+            errors["BaseFee"] = feeError;
+
         if (errors.Count > 0)
         {
             _logger.LogInformation("Provider {ProviderId}: profile not saved, {Count} field(s) need attention.", provider.ProviderId, errors.Count);
@@ -231,6 +237,7 @@ public class ProviderProfileService : IProviderProfileService
         provider.BusinessName = businessName;
         provider.Address = address;
         provider.Description = description;
+        provider.BaseFee = BaseFeeRules.Round(form.BaseFee!.Value);   // checked above
 
         try
         {

@@ -39,6 +39,22 @@ public class ProviderProfileController : Controller
     {
         if (!TryGetUserId(out var userId)) return Forbid();
 
+        // [Required] / [Range(1, 100000)] on BaseFee: nothing is saved while ModelState is invalid (e.g. a base fee of 0 or below)
+        if (!ModelState.IsValid)
+        {
+            BaseFeeRules.FixModelStateMessage(ModelState, form.BaseFee);
+            var fieldErrors = ModelState
+                .Where(entry => entry.Value is { Errors.Count: > 0 })
+                .ToDictionary(entry => entry.Key,
+                              entry => entry.Value!.Errors[0].ErrorMessage is { Length: > 0 } text ? text : "Please check this field.");
+
+            var refused = new ProviderProfileSaveResult(ProviderDashboardAccess.Allowed, false, fieldErrors, "Please fix the highlighted fields.");
+            var shown = await _profile.GetAsync(userId, form, refused, ct);   // also checks the account is an approved, active provider
+            var deniedShown = Denied(shown.Access);
+            if (deniedShown is not null) return await deniedShown;
+            return View(nameof(Index), shown.Page!);
+        }
+
         var result = await _profile.SaveAsync(userId, form, ct);
         var denied = Denied(result.Access);
         if (denied is not null) return await denied;

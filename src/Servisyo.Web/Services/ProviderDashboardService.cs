@@ -248,7 +248,7 @@ public class ProviderDashboardService : IProviderDashboardService
     {
         var acceptedOrLater = r.Status is BookingStatuses.Accepted or BookingStatuses.InProgress or BookingStatuses.Completed;
         var text = acceptedOrLater && !string.IsNullOrWhiteSpace(r.ServiceLocation) ? r.ServiceLocation : ServiceArea.City;
-        return string.IsNullOrWhiteSpace(text) ? null : NameFormat.Truncate(text, 40);
+        return string.IsNullOrWhiteSpace(text) ? null : NameFormat.Truncate(text, 60);
     }
 
     private static string Time(TimeOnly t) => t.ToString("h:mm tt", CultureInfo.InvariantCulture);

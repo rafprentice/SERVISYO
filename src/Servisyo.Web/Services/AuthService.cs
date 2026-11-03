@@ -44,7 +44,7 @@ public class AuthService : IAuthService
     public async Task<AuthResult> RegisterCustomerAsync(RegisterCustomerViewModel vm)
     {
         var problem = CheckCommon(vm)
-            ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your street address and barangay." : null)
+            ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please choose your address." : null)
             ?? (InputRules.HasALetter(vm.Address!.Trim()) ? null : InputRules.AddressMessage);
         if (problem is not null) return AuthResult.Fail(problem);
 
@@ -81,10 +81,9 @@ public class AuthService : IAuthService
             ?? (string.IsNullOrWhiteSpace(vm.Description) ? "Please describe your services." : null)
             ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your business address." : null)
             ?? (InputRules.HasALetter(vm.Address!.Trim()) ? null : InputRules.AddressMessage)
-            ?? (vm.BaseFee is null ? "Please enter your base fee." : null)
+            ?? BaseFeeRules.Check(vm.BaseFee)                                           // required, 1 to 100,000 PHP (never 0 or below)
             ?? (vm.MinNoticeDays is < 0 or > 30 ? "Enter a whole number of days from 0 to 30." : null)
-            ?? (vm.MaxJobsPerDay is < 1 or > 50 ? "Enter a whole number of jobs from 1 to 50." : null)
-            ?? (vm.BaseFee is < 0 or > 1000000 ? "Enter a base fee from 0 to 1,000,000 (numbers only)." : null);
+            ?? (vm.MaxJobsPerDay is < 1 or > 50 ? "Enter a whole number of jobs from 1 to 50." : null);
         if (problem is not null) return AuthResult.Fail(problem);
 
         var email = NormalizeEmail(vm.Email);
@@ -92,6 +91,7 @@ public class AuthService : IAuthService
             return AuthResult.Fail(EmailTaken);
 
         var user = BuildUser(vm, email, Roles.ServiceProvider);
+        var baseFee = BaseFeeRules.Round(vm.BaseFee!.Value);   // checked above: 1 to 100,000
 
         // On SQL Server: the stored procedure dbo.usp_RegisterProvider
         // (USERS + SERVICE_PROVIDERS as Pending + a notification for every active administrator, in one database call)
@@ -103,10 +103,10 @@ public class AuthService : IAuthService
             "@NewUserId = @NewUserId OUTPUT, @NewProviderId = @NewProviderId OUTPUT",
             UserParameters(user).Concat(new[]
             {
-                Text("@BusinessName", vm.BusinessName.Trim()),
+                Text("@BusinessName", (vm.BusinessName ?? string.Empty).Trim()),   // checked above; ?? only keeps the compiler sure it is not null
                 Text("@Description", Clean(vm.Description)),
                 Text("@Address", Clean(vm.Address)),
-                new SqlParameter("@BaseFee", SqlDbType.Decimal) { Precision = 12, Scale = 2, Value = (object?)vm.BaseFee ?? DBNull.Value },
+                new SqlParameter("@BaseFee", SqlDbType.Decimal) { Precision = 12, Scale = 2, Value = baseFee },
                 new SqlParameter("@MinNoticeDays", SqlDbType.Int) { Value = vm.MinNoticeDays },
                 new SqlParameter("@MaxJobsPerDay", SqlDbType.Int) { Value = vm.MaxJobsPerDay },
                 Output("@NewProviderId")
@@ -116,10 +116,10 @@ public class AuthService : IAuthService
         // In-memory test database (or the procedure is not installed yet): the same work through EF
         user.Provider = new Provider
         {
-            BusinessName = vm.BusinessName.Trim(),
+            BusinessName = (vm.BusinessName ?? string.Empty).Trim(),
             Description = Clean(vm.Description),
             Address = Clean(vm.Address),
-            BaseFee = vm.BaseFee,
+            BaseFee = baseFee,
             MinNoticeDays = vm.MinNoticeDays,
             MaxJobsPerDay = vm.MaxJobsPerDay,
             ApprovalStatus = ApprovalStatuses.Pending,   // always Pending until an admin approves
@@ -193,7 +193,7 @@ public class AuthService : IAuthService
             return InputRules.NameMessage;
         // the customer page asks for one Full Name (no middle name box); the provider form requires it (checked below)
         if (!string.IsNullOrWhiteSpace(vm.MiddleName) && !InputRules.IsName(vm.MiddleName.Trim())) return InputRules.NameMessage;
-        if (vm.FirstName.Trim().Length > InputRules.MaxNameLength || vm.LastName.Trim().Length > InputRules.MaxNameLength
+        if ((vm.FirstName?.Trim().Length ?? 0) > InputRules.MaxNameLength || (vm.LastName?.Trim().Length ?? 0) > InputRules.MaxNameLength
             || (vm.MiddleName?.Trim().Length ?? 0) > InputRules.MaxNameLength)
             return $"Names can be at most {InputRules.MaxNameLength} characters.";
         if (string.IsNullOrWhiteSpace(vm.PhoneNumber)) return "Please enter your phone number.";

@@ -49,30 +49,20 @@
             </div>
 
             <div class="sv-field">
-                <label asp-for="StreetAddress" class="sv-label">Street Address <span class="sv-req">*</span></label>
-                <div class="sv-input">
+                <label asp-for="Location" class="sv-label">Address <span class="sv-req">*</span></label>
+                <div class="sv-input sv-input--select">
                     <span class="sv-input__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg></span>
-                    <input asp-for="StreetAddress" placeholder="123 Rizal St." autocomplete="street-address" />
+                    @* the full text is sent; the server splits it into street / barangay / city (see CebuLocations) *@
+                    <select asp-for="Location" autocomplete="street-address" aria-describedby="reg-location-note">
+                        <option value="">Choose your address</option>
+                        @foreach (var loc in Servisyo.Web.ViewModels.CebuLocations.All)
+                        {
+                            <option value="@loc.Full">@loc.Full</option>
+                        }
+                    </select>
                 </div>
-                <span asp-validation-for="StreetAddress" class="sv-error"></span>
-            </div>
-
-            <div class="sv-two">
-                <div class="sv-field">
-                    <label asp-for="Barangay" class="sv-label">Barangay <span class="sv-req">*</span></label>
-                    <div class="sv-input sv-input--plain">
-                        <input asp-for="Barangay" placeholder="Brgy. San Isidro" />
-                    </div>
-                    <span asp-validation-for="Barangay" class="sv-error"></span>
-                </div>
-                <div class="sv-field">
-                    <label for="reg-city" class="sv-label">City</label>
-                    <div class="sv-input sv-input--plain">
-                        @* not sent with the form: SERVISYO serves Cebu City only *@
-                        <input id="reg-city" type="text" value="Cebu City" disabled aria-describedby="reg-city-note" />
-                    </div>
-                    <span id="reg-city-note" class="sv-muted">SERVISYO is available in Cebu City only.</span>
-                </div>
+                <span asp-validation-for="Location" class="sv-error"></span>
+                <span id="reg-location-note" class="sv-note">SERVISYO is available in Cebu City only.</span>
             </div>
 
             <div class="sv-field">

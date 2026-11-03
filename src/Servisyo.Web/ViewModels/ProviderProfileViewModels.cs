@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 
 namespace Servisyo.Web.ViewModels;
@@ -59,6 +60,13 @@ public class ProviderProfileForm
     public string? Email { get; set; }
     public string? Address { get; set; }
     public string? Description { get; set; }
+
+    /// SERVICE_PROVIDERS.BASE_FEE: required, 1 to 100,000 PHP (BaseFeeRules). The controller does not save while
+    /// ModelState is invalid, and ProviderProfileService checks the same rule again.
+    [Required(ErrorMessage = "Please enter your base fee.")]
+    // 1.0 / 100000.0 (not 1 / 100000): with whole numbers [Range] rounds the fee to an int first, so 0.99 would pass as 1
+    [Range(1.0, 100000.0, ErrorMessage = "Base fee must be at least 1 PHP.")]
+    public decimal? BaseFee { get; set; }
 }
 
 public class ProviderProfilePageViewModel

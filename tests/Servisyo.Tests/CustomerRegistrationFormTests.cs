@@ -27,22 +27,54 @@ public class CustomerRegistrationFormTests
         Assert.Equal("Santos", m.LastName);
     }
 
-    [Fact]
-    public void StreetAndBarangay_AreCombinedIntoOneAddress()
+    [Theory]
+    [InlineData("Osmeña Blvd, Brgy. Capitol Site, Cebu City", "Osmeña Blvd", "Capitol Site")]
+    [InlineData("Gov. M. Cuenco Ave, Brgy. Banilad, Cebu City", "Gov. M. Cuenco Ave", "Banilad")]
+    [InlineData("N. Bacalso Ave, Brgy. Sambag I, Cebu City", "N. Bacalso Ave", "Sambag I")]
+    [InlineData("Salinas Drive, Brgy. Lahug, Cebu City", "Salinas Drive", "Lahug")]
+    [InlineData("C. Padilla St, Brgy. Duljo Fatima, Cebu City", "C. Padilla St", "Duljo Fatima")]
+    public void TheChosenAddress_IsSplitIntoStreetBarangayAndCity_AndSavedInFull(string chosen, string street, string barangay)
     {
         var f = Form();
-        f.StreetAddress = "123 Rizal St.";
-        f.Barangay = "Brgy. San Isidro";
-        var m = f.ToServiceModel();
-        Assert.Equal("123 Rizal St., Brgy. San Isidro", m.Address);   // no city: SERVISYO is Cebu City only
+        f.Location = chosen;
+
+        Assert.Equal(street, f.StreetAddress);
+        Assert.Equal(barangay, f.Barangay);
+        Assert.Equal("Cebu City", f.City);
+        Assert.Equal(chosen, f.ToServiceModel().Address);      // ADDRESS keeps the full text every page shows
+    }
+
+    [Fact]
+    public void ThereAreExactlyTheFiveCebuCityAddresses()
+    {
+        Assert.Equal(new[]
+        {
+            "Osmeña Blvd, Brgy. Capitol Site, Cebu City",
+            "Gov. M. Cuenco Ave, Brgy. Banilad, Cebu City",
+            "N. Bacalso Ave, Brgy. Sambag I, Cebu City",
+            "Salinas Drive, Brgy. Lahug, Cebu City",
+            "C. Padilla St, Brgy. Duljo Fatima, Cebu City"
+        }, CebuLocations.All.Select(l => l.Full));
+    }
+
+    [Theory]
+    [InlineData("123 Rizal St., Brgy. Lahug")]                       // typed instead of chosen
+    [InlineData("osmeña blvd, brgy. capitol site, cebu city")]       // changed in the browser
+    [InlineData("Salinas Drive, Brgy. Lahug, Mandaue City")]
+    public void AnAddressThatIsNotInTheList_IsNotSplit(string other)
+    {
+        var f = Form();
+        f.Location = other;
+        Assert.Null(f.StreetAddress);
+        Assert.Null(f.Barangay);
+        Assert.Null(CebuLocations.Find(other));
     }
 
     [Fact]
     public void EmptyOptionalFields_BecomeNull()
     {
         var f = Form();
-        f.StreetAddress = " ";
-        f.Barangay = null;
+        f.Location = null;
         f.PhoneNumber = "  ";
         var m = f.ToServiceModel();
         Assert.Null(m.Address);

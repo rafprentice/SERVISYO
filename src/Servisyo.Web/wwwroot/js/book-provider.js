@@ -59,10 +59,15 @@
         return checked ? checked.value : "";
     }
 
+    // why there are no times right now (the server's reason, e.g. "The provider does not work on that day of the week.")
+    var noTimesReason = "";
+
     function clearSlots(message) {
         slotBox.textContent = "";
         slotMsg.textContent = message;
+        slotMsg.classList.remove("is-error");
         slotMsg.hidden = false;
+        noTimesReason = message;
     }
 
     function drawSlots(slots, keep) {
@@ -81,7 +86,9 @@
             label.appendChild(span);
             slotBox.appendChild(label);
         });
+        slotMsg.classList.remove("is-error");
         slotMsg.hidden = true;
+        noTimesReason = "";
     }
 
     function loadSlots() {
@@ -127,6 +134,15 @@
     services.forEach(function (c) {
         c.addEventListener("change", function () { updateSummary(); scheduleLoad(); });
     });
+
+    // the service address: the browser's own "required" check, with SERVISYO's wording
+    var address = form.querySelector("[data-bp-address]");
+    if (address) {
+        var addressMsg = address.getAttribute("data-required-msg") || "Please select a service address.";
+        var checkAddress = function () { address.setCustomValidity(address.value ? "" : addressMsg); };
+        address.addEventListener("change", checkAddress);
+        checkAddress();
+    }
     dateInput.addEventListener("change", scheduleLoad);
 
     // send the form once; a missing time is caught here too (the server still checks)
@@ -134,8 +150,16 @@
         if (form.getAttribute("data-busy")) { event.preventDefault(); return; }
         if (!currentTime()) {
             event.preventDefault();
-            slotMsg.textContent = "Please choose a start time.";
+            var hasTimes = !!slotBox.querySelector("input[type=radio]");
+            // keep the reason when there are no times at all, so the customer knows to pick another date
+            slotMsg.textContent = hasTimes
+                ? "Please choose a start time."
+                : (noTimesReason ? noTimesReason + " " : "") + "There is no free start time for this date. Please choose another date.";
+            slotMsg.classList.add("is-error");
             slotMsg.hidden = false;
+            var target = hasTimes ? slotBox : dateInput;
+            if (target.scrollIntoView) target.scrollIntoView({ behavior: "smooth", block: "center" });
+            if (!hasTimes && dateInput.focus) dateInput.focus({ preventScroll: true });
             return;
         }
         form.setAttribute("data-busy", "1");

@@ -92,9 +92,20 @@
                 <h2 id="bp-where-title" class="sv-bp__title"><span class="sv-bp__step">3</span> Where and what?</h2>
                 <div class="sv-fld">
                     <label for="bp-location">Service address</label>
-                    <input id="bp-location" name="Location" type="text" value="@form.Location" maxlength="255" autocomplete="street-address"
-                           placeholder="House no., street, barangay, city"
-                           aria-invalid="@(locationError is null ? null : "true")" />
+                    <div class="sv-bp__select">
+                        <span class="sv-bp__selecticon" aria-hidden="true">@Icons.Svg("map-pin", 14)</span>
+                        @* only these options are accepted; the server checks the choice again (BookingAddresses) *@
+                        <select id="bp-location" name="Location" required data-bp-address
+                                data-required-msg="@BookingFormRules.AddressRequiredMessage"
+                                aria-invalid="@(locationError is null ? null : "true")">
+                            <option value="" selected="@(string.IsNullOrEmpty(form.Location))">Select a service address</option>
+                            @foreach (var address in Model.AddressOptions)
+                            {
+                                var label = address == Model.SavedAddress ? address + " (saved address)" : address;
+                                <option value="@address" selected="@(address == form.Location?.Trim())">@label</option>
+                            }
+                        </select>
+                    </div>
                     @if (locationError is not null) { <p class="sv-fld__err" role="alert">@locationError</p> }
                 </div>
                 <div class="sv-fld">

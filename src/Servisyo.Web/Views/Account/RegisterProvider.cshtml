@@ -20,23 +20,31 @@
                 <span asp-validation-for="Description" class="text-danger"></span>
             </div>
             <div class="row">
-                <div class="col-md-8 mb-3">
+                <div class="col-12 mb-3">
                     <label asp-for="Address" class="form-label"></label>
-                    <input asp-for="Address" class="form-control" />
+                    <div class="input-group">
+                        <span class="input-group-text" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg></span>
+                        @* the full text is sent; the server splits it into street / barangay / city (see CebuLocations) *@
+                        <select asp-for="Address" class="form-select" autocomplete="street-address">
+                            <option value="">Choose your business address</option>
+                            @foreach (var loc in Servisyo.Web.ViewModels.CebuLocations.All)
+                            {
+                                <option value="@loc.Full">@loc.Full</option>
+                            }
+                        </select>
+                    </div>
                     <span asp-validation-for="Address" class="text-danger"></span>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label for="rp-city" class="form-label">City</label>
-                    @* not sent with the form: SERVISYO serves Cebu City only *@
-                    <input id="rp-city" type="text" class="form-control" value="Cebu City" disabled />
                     <div class="form-text">SERVISYO is available in Cebu City only.</div>
                 </div>
             </div>
             <div class="row">
                 <div class="col-md-4 mb-3">
                     <label asp-for="BaseFee" class="form-label"></label>
-                    <input asp-for="BaseFee" class="form-control" type="number" min="0" max="1000000" step="0.01" inputmode="decimal" data-sv-number />
-                    <span asp-validation-for="BaseFee" class="text-danger"></span>
+                    <input asp-for="BaseFee" class="form-control" type="number" min="1" max="100000" step="any" inputmode="decimal" placeholder="e.g. 500"
+                           data-sv-number data-sv-basefee aria-describedby="BaseFee-error"
+                           data-msg-required="@Servisyo.Web.ViewModels.BaseFeeRules.RequiredMessage" data-msg-min="@Servisyo.Web.ViewModels.BaseFeeRules.MinMessage"
+                           data-msg-max="@Servisyo.Web.ViewModels.BaseFeeRules.MaxMessage" data-msg-nan="@Servisyo.Web.ViewModels.BaseFeeRules.NotANumberMessage" />
+                    <span asp-validation-for="BaseFee" id="BaseFee-error" class="text-danger" data-sv-basefee-msg></span>
                 </div>
                 <div class="col-md-4 mb-3">
                     <label asp-for="MinNoticeDays" class="form-label"></label>
@@ -57,6 +65,7 @@
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+    <script src="~/js/base-fee.js" asp-append-version="true"></script>
     <script>
         // Number boxes: browsers accept "1e5", "+" and "-" in type=number; block those keys and anything pasted that is not a plain number.
         (function () {

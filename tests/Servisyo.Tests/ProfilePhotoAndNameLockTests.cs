@@ -197,7 +197,8 @@ public class NameLockTests
     {
         var db = NewDb();
         var ana = new Customer { User = NewUser("Ana", "Cruz", Roles.Customer), Address = "Lahug" };
-        var vince = new Provider { BusinessName = "Vincent Valencia", ApprovalStatus = ApprovalStatuses.Approved, User = NewUser("Vincent", "Valencia", Roles.ServiceProvider) };
+        var vince = new Provider { BusinessName = "Vincent Valencia", ApprovalStatus = ApprovalStatuses.Approved, BaseFee = 500m,   // My Profile needs a base fee of 1+ PHP to save
+                                   User = NewUser("Vincent", "Valencia", Roles.ServiceProvider) };
         db.AddRange(ana, vince);
         await db.SaveChangesAsync();
         return (db, ana, vince);

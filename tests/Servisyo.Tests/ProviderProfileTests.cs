@@ -100,11 +100,11 @@ public class ProviderProfileServiceTests
         string account = AccountStatuses.Active, string first = "Marco", string last = "Reyes", string? middle = null,
         string business = "Marco's Plumbing Works", string? email = null, string? phone = "+639175551234",
         string? address = "12 Mango St", string? description = "Licensed master plumber.",
-        string? photo = null)
+        string? photo = null, decimal? baseFee = 500m)
     {
         var p = new Provider
         {
-            BusinessName = business, Address = address, Description = description, ProfilePhoto = photo,
+            BusinessName = business, Address = address, Description = description, ProfilePhoto = photo, BaseFee = baseFee,
             ApprovalStatus = approval,
             User = NewUser(first, last, Roles.ServiceProvider, account, email, phone, middle)
         };
@@ -152,7 +152,8 @@ public class ProviderProfileServiceTests
         PhoneNumber = p.User.PhoneNumber,
         Email = p.User.Email,
         Address = p.Address,
-        Description = p.Description
+        Description = p.Description,
+        BaseFee = p.BaseFee
     };
 
     private static Task<Provider> ReloadAsync(ServisyoDbContext db, int providerId)
@@ -192,7 +193,7 @@ public class ProviderProfileServiceTests
 
             var save = await svc.SaveAsync(userId, new ProviderProfileForm
             {
-                FullName = "Hacked Name", BusinessName = "Hacked Business", Email = "hacked@test.com"
+                FullName = "Hacked Name", BusinessName = "Hacked Business", Email = "hacked@test.com", BaseFee = 750m
             });
             Assert.Equal(access, save.Access);
             Assert.Equal(access == ProviderDashboardAccess.Allowed, save.Saved);
@@ -348,7 +349,8 @@ public class ProviderProfileServiceTests
             PhoneNumber = " +639175559999 ",
             Email = "  Marco.New@MarcoPlumbing.PH ",
             Address = " 5 Colon St ",
-            Description = "  Fast and reliable.  "
+            Description = "  Fast and reliable.  ",
+            BaseFee = 1500.50m
         });
 
         Assert.True(result.Saved);
@@ -365,6 +367,95 @@ public class ProviderProfileServiceTests
         Assert.Equal("Reyes Plumbing & Co.", saved.BusinessName);
         Assert.Equal("5 Colon St", saved.Address);
         Assert.Equal("Fast and reliable.", saved.Description);
+        Assert.Equal(1500.50m, saved.BaseFee);
+    }
+
+    // ---------------------------------------------------------------- base fee (never 0 or below)
+
+    [Fact]
+    public async Task ThePage_ShowsTheSavedBaseFee()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db, baseFee: 1250m);
+
+        var page = (await svc.GetAsync(p.UserId)).Page!;
+
+        Assert.Equal(1250m, page.Form.BaseFee);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("-0.01")]
+    [InlineData("0.99")]
+    [InlineData("100000.01")]
+    [InlineData("999999")]
+    public async Task Save_RefusesABaseFeeOf0OrBelow_OrAbove100000_AndSavesNothing(string typed)
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = FormFrom(p);
+        form.BaseFee = decimal.Parse(typed, System.Globalization.CultureInfo.InvariantCulture);
+        form.BusinessName = "A Perfectly Good New Name";        // valid, but nothing may be saved while the fee is wrong
+
+        var result = await svc.SaveAsync(p.UserId, form);
+
+        Assert.False(result.Saved);
+        Assert.Equal(form.BaseFee > BaseFeeRules.Max ? BaseFeeRules.MaxMessage : BaseFeeRules.MinMessage, result.FieldErrors["BaseFee"]);
+        var saved = await ReloadAsync(db, p.ProviderId);
+        Assert.Equal(500m, saved.BaseFee);
+        Assert.Equal("Marco's Plumbing Works", saved.BusinessName);
+    }
+
+    [Fact]
+    public async Task Save_RequiresABaseFee()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = FormFrom(p);
+        form.BaseFee = null;
+
+        var result = await svc.SaveAsync(p.UserId, form);
+
+        Assert.False(result.Saved);
+        Assert.Equal(BaseFeeRules.RequiredMessage, result.FieldErrors["BaseFee"]);
+        Assert.Equal(500m, (await ReloadAsync(db, p.ProviderId)).BaseFee);
+    }
+
+    [Theory]
+    [InlineData("1", "1")]
+    [InlineData("1500.5", "1500.5")]
+    [InlineData("250.555", "250.56")]           // BASE_FEE is DECIMAL(12,2)
+    [InlineData("100000", "100000")]
+    public async Task Save_AcceptsABaseFeeFrom1To100000(string typed, string expected)
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = FormFrom(p);
+        form.BaseFee = decimal.Parse(typed, System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = await svc.SaveAsync(p.UserId, form);
+
+        Assert.True(result.Saved);
+        Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), (await ReloadAsync(db, p.ProviderId)).BaseFee);
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("0")]
+    public async Task AnOlderProvider_WithNoOrAZeroBaseFee_MustSetOne_BeforeTheProfileSaves(string old)
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db, baseFee: old == "none" ? null : decimal.Parse(old, System.Globalization.CultureInfo.InvariantCulture));
+
+        var refused = await svc.SaveAsync(p.UserId, FormFrom(p));
+        Assert.False(refused.Saved);
+        Assert.True(refused.FieldErrors.ContainsKey("BaseFee"));
+
+        var form = FormFrom(p);
+        form.BaseFee = 300m;
+        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
+        Assert.Equal(300m, (await ReloadAsync(db, p.ProviderId)).BaseFee);
     }
 
     [Fact]
@@ -441,7 +532,7 @@ public class ProviderProfileServiceTests
         var result = await svc.SaveAsync(p.UserId, new ProviderProfileForm { FullName = "  ", BusinessName = "", Email = null });
 
         Assert.False(result.Saved);
-        Assert.Equal(new[] { "BusinessName", "Email", "FullName" }, result.FieldErrors.Keys.OrderBy(k => k));
+        Assert.Equal(new[] { "BaseFee", "BusinessName", "Email", "FullName" }, result.FieldErrors.Keys.OrderBy(k => k));
     }
 
     [Fact]

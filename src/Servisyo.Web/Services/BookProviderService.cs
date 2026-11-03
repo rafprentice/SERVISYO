@@ -189,15 +189,24 @@ public class BookProviderService : IBookProviderService
             }).ToList(),
             EarliestDate = today.AddDays(Math.Max(0, provider.MinNoticeDays)),
             LatestDate = today.AddDays(BookingSlotRules.MaxAdvanceDays),
-            // the saved address of the profile is offered as the place of service (the customer can change it)
+            // the service address is chosen from a list; the saved address of the profile is chosen already
+            AddressOptions = BookingAddresses.For(who.Address),
+            SavedAddress = SavedAddressOf(who),
             Form = new BookProviderForm
             {
-                Location = string.IsNullOrWhiteSpace(who.Address) ? null : who.Address.Trim(),
+                Location = SavedAddressOf(who),
                 ServiceIds = PickOffered(preselectedServiceIds, services.Select(s => s.ServiceId))
             }
         };
 
         return new(BookPageOutcome.Ok, vm, shell);
+    }
+
+    /// The customer's saved profile address when it can be offered in the dropdown, otherwise null (nothing pre-selected).
+    private static string? SavedAddressOf(Who who)
+    {
+        var saved = who.Address?.Trim();
+        return string.IsNullOrEmpty(saved) || !BookingAddresses.IsAllowed(saved, who.Address) ? null : saved;
     }
 
     /// Keeps only ids of services that are on this provider's page right now, at most MaxServices, in the given order.
@@ -272,10 +281,10 @@ public class BookProviderService : IBookProviderService
                 errors["ServiceIds"] = "One of the selected services is no longer available. Please review your choices.";
         }
 
+        // the service address must be one of THIS customer's dropdown options (their saved address comes from the database)
         var location = ProfileRules.NormalizeText(form.Location);
-        if (location is null) errors["Location"] = "Enter the address where the service will be done.";
-        else if (location.Length > BookingFormRules.MaxLocationLength)
-            errors["Location"] = $"The address can be at most {BookingFormRules.MaxLocationLength} characters.";
+        if (location is null) errors["Location"] = BookingFormRules.AddressRequiredMessage;
+        else if (!BookingAddresses.IsAllowed(location, who.Address)) errors["Location"] = BookingFormRules.AddressNotInListMessage;
 
         var description = ProfileRules.NormalizeText(form.Description);
         if (description is null) errors["Description"] = "Describe what you need done.";

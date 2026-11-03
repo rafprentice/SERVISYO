@@ -5,6 +5,33 @@ public static class BookingFormRules
     public const int MaxServices = 10;
     public const int MaxLocationLength = 255;      // BOOKINGS.SERVICE_LOCATION
     public const int MaxDescriptionLength = 255;   // BOOKINGS.SERVICE_DESCRIPTION
+
+    public const string AddressRequiredMessage = "Please select a service address.";
+    public const string AddressNotInListMessage = "Please choose one of the addresses in the list.";
+}
+
+/// The addresses a customer can choose in step 3 ("Where and what?") of the booking form.
+/// The chosen text is saved as it is in BOOKINGS.SERVICE_LOCATION, so every bookings page shows it unchanged.
+public static class BookingAddresses
+{
+    public const string Minglanilla = "Lower Pakigne, Minglanilla";
+
+    /// The 5 Cebu City addresses of the registration forms (CebuLocations), then Minglanilla.
+    public static readonly IReadOnlyList<string> Preset = CebuLocations.All.Select(l => l.Full).Append(Minglanilla).ToList();
+
+    /// The options for ONE customer: their saved profile address first when it is not already one of the preset ones
+    /// (older accounts typed their address), then the preset ones. The saved address always comes from the database.
+    public static IReadOnlyList<string> For(string? savedAddress)
+    {
+        var saved = savedAddress?.Trim();
+        if (string.IsNullOrEmpty(saved) || saved.Length > BookingFormRules.MaxLocationLength || Preset.Contains(saved, StringComparer.Ordinal))
+            return Preset;
+        return new[] { saved }.Concat(Preset).ToList();
+    }
+
+    /// True when the posted value is exactly one of this customer's options (a value typed or changed in the browser is refused).
+    public static bool IsAllowed(string? value, string? savedAddress)
+        => value is not null && For(savedAddress).Contains(value.Trim(), StringComparer.Ordinal);
 }
 
 /// What the browser posts with "Send Booking Request". Nothing here says WHO the customer is (that comes from the
@@ -50,6 +77,11 @@ public class BookProviderPageViewModel
     public DateOnly LatestDate { get; set; }
 
     public BookProviderForm Form { get; set; } = new();
+
+    /// The service-address dropdown (BookingAddresses.For this customer) and the customer's saved profile address.
+    public IReadOnlyList<string> AddressOptions { get; set; } = BookingAddresses.Preset;
+    public string? SavedAddress { get; set; }
+
     public IReadOnlyDictionary<string, string> FieldErrors { get; set; } = new Dictionary<string, string>();
     public string? FormError { get; set; }
 

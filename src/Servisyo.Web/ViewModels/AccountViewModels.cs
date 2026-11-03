@@ -29,10 +29,10 @@ public static class InputRules
     public const string Email = "^[A-Za-z0-9._%+-]+@(?:[A-Za-z][A-Za-z-]*[A-Za-z]\\.)+[A-Za-z]{2,}$";
     public const string EmailMessage = "Please enter a valid email address, for example juan@gmail.com.";
 
-    /// Street address / barangay: free text, but not numbers only ("123" is refused, "123 Gorordo Ave" is fine).
+    /// A typed address (the profile pages): free text, but not numbers only ("123" is refused, "123 Gorordo Ave" is fine).
+    /// The registration pages use the CebuLocations dropdown instead.
     public const string Address = HasLetter;
     public const string AddressMessage = "Please enter a real address (it cannot be numbers only).";
-    public const string BarangayMessage = "Please enter a real barangay name (it cannot be numbers only).";
 
     /// Column sizes in the database (USERS).
     public const int MaxNameLength = 100;
@@ -116,12 +116,20 @@ public class RegisterProviderViewModel : RegisterBaseViewModel
     [Required(ErrorMessage = "Please describe your services."), StringLength(255), Display(Name = "Description")]
     public string? Description { get; set; }
 
-    [Required(ErrorMessage = "Please enter your business address."), StringLength(255), Display(Name = "Address")]
-    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.AddressMessage)]
+    /// One of CebuLocations.All, chosen from the dropdown (the full text, e.g. "Salinas Drive, Brgy. Lahug, Cebu City").
+    [Required(ErrorMessage = "Please choose your business address."), StringLength(255), Display(Name = "Business address")]
+    [CebuLocation]
     public string? Address { get; set; }
 
+    /// The chosen address split into its parts ("Salinas Drive" / "Lahug" / "Cebu City"); null until one is chosen.
+    public string? StreetAddress => CebuLocations.Find(Address)?.Street;
+    public string? Barangay => CebuLocations.Find(Address)?.Barangay;
+    public string City => ServiceArea.City;
+
+    /// At least 1 PHP, at most 100,000 PHP (BaseFeeRules). Zero and negative fees are refused here, in the browser and in AuthService.
     [Required(ErrorMessage = "Please enter your base fee.")]
-    [Range(0, 1000000, ErrorMessage = "Enter a base fee from 0 to 1,000,000 (numbers only).")]
+    // 1.0 / 100000.0 (not 1 / 100000): with whole numbers [Range] rounds the fee to an int first, so 0.99 would pass as 1
+    [Range(1.0, 100000.0, ErrorMessage = "Base fee must be at least 1 PHP.")]
     [Display(Name = "Base fee in PHP")]
     public decimal? BaseFee { get; set; }
 
@@ -159,14 +167,17 @@ public class CustomerRegistrationViewModel
     [Display(Name = "Phone Number")]
     public string? PhoneNumber { get; set; }
 
-    [Required(ErrorMessage = "Please enter your street address."), StringLength(150)]
-    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.AddressMessage)]
-    [Display(Name = "Street Address")]
-    public string? StreetAddress { get; set; }
+    /// One of CebuLocations.All, chosen from the address dropdown (the full text is what the browser sends).
+    [Required(ErrorMessage = "Please choose your address."), StringLength(255)]
+    [CebuLocation]
+    [Display(Name = "Address")]
+    public string? Location { get; set; }
 
-    [Required(ErrorMessage = "Please enter your barangay."), StringLength(100)]
-    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.BarangayMessage)]
-    public string? Barangay { get; set; }
+    /// The chosen address split into its parts ("Osmeña Blvd" / "Capitol Site" / "Cebu City"); null until one is chosen.
+    /// They are worked out on the server from the list, never taken from the browser.
+    public string? StreetAddress => CebuLocations.Find(Location)?.Street;
+    public string? Barangay => CebuLocations.Find(Location)?.Barangay;
+    public string City => ServiceArea.City;
 
     [Required(ErrorMessage = "Please enter a password."), DataType(DataType.Password)]
     [StringLength(100, MinimumLength = 8, ErrorMessage = "Password must be at least 8 characters.")]
@@ -182,13 +193,13 @@ public class CustomerRegistrationViewModel
     public bool AcceptTerms { get; set; }
 
     /// Converts the page form into the model the service layer expects.
-    /// The database stores first / last name separately and has no Barangay or City column (SERVISYO is Cebu City only),
-    /// so: first word = first name, the rest = last name; barangay is appended to the address.
+    /// The database stores first / last name separately and keeps the address in ONE column (ADDRESS),
+    /// so: first word = first name, the rest = last name; the address is the chosen option's full text
+    /// ("Osmeña Blvd, Brgy. Capitol Site, Cebu City"), which every page that shows an address displays as it is.
     public RegisterCustomerViewModel ToServiceModel()
     {
         var words = Regex.Split(FullName.Trim(), @"\s+");
-        var address = string.Join(", ",
-            new[] { StreetAddress, Barangay }.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()));
+        var address = CebuLocations.Find(Location)?.Full ?? string.Empty;
 
         return new RegisterCustomerViewModel
         {
