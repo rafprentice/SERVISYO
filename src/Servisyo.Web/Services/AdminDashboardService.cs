@@ -67,7 +67,6 @@ public class AdminDashboardService : IAdminDashboardService
             {
                 p.ProviderId,
                 p.BusinessName,
-                p.City,
                 First = p.User.FirstName,
                 Last = p.User.LastName,
                 Category = p.ProviderCategories
@@ -109,9 +108,8 @@ public class AdminDashboardService : IAdminDashboardService
             PendingApplications = applicationRows.Select(a =>
             {
                 var name = $"{a.First} {a.Last}".Trim();
-                // "Plumbing · Mandaue". Until categories exist for the applicant, the business name stands in.
-                var what = string.IsNullOrWhiteSpace(a.Category) ? a.BusinessName : a.Category;
-                var details = string.IsNullOrWhiteSpace(a.City) ? what : $"{what} · {a.City}";
+                // "Plumbing". Until categories exist for the applicant, the business name stands in.
+                var details = string.IsNullOrWhiteSpace(a.Category) ? a.BusinessName : a.Category;
                 return new PendingApplicationViewModel
                 {
                     ProviderId = a.ProviderId,

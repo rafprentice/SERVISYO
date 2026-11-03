@@ -314,15 +314,18 @@ namespace Servisyo.Web.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("CustomerId"));
 
+                    b.Property<string>("AccountStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasDefaultValue("Active")
+                        .HasColumnName("ACCOUNT_STATUS");
+
                     b.Property<string>("Address")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)")
                         .HasColumnName("ADDRESS");
-
-                    b.Property<string>("City")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("CITY");
 
                     b.Property<string>("ProfilePhoto")
                         .HasMaxLength(255)
@@ -338,7 +341,14 @@ namespace Servisyo.Web.Migrations
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("CUSTOMERS", (string)null);
+                    b.ToTable("CUSTOMERS", null, t =>
+                        {
+                            t.HasTrigger("trg_Customers_StatusCopy");
+
+                            t.HasCheckConstraint("CK_CUSTOMERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.EmailOtp", b =>
@@ -552,6 +562,14 @@ namespace Servisyo.Web.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ProviderId"));
 
+                    b.Property<string>("AccountStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasDefaultValue("Active")
+                        .HasColumnName("ACCOUNT_STATUS");
+
                     b.Property<string>("Address")
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)")
@@ -578,11 +596,6 @@ namespace Servisyo.Web.Migrations
                         .HasMaxLength(155)
                         .HasColumnType("nvarchar(155)")
                         .HasColumnName("BUSINESS_NAME");
-
-                    b.Property<string>("City")
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)")
-                        .HasColumnName("CITY");
 
                     b.Property<DateTime>("DateApplied")
                         .ValueGeneratedOnAdd()
@@ -627,6 +640,8 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("SERVICE_PROVIDERS", null, t =>
                         {
+                            t.HasTrigger("trg_Providers_StatusCopy");
+
                             t.HasCheckConstraint("CK_PROVIDERS_APPROVAL", "[APPROVAL_STATUS] IN ('Pending','Approved','Rejected')");
 
                             t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");
@@ -634,7 +649,11 @@ namespace Servisyo.Web.Migrations
                             t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0");
 
                             t.HasCheckConstraint("CK_PROVIDERS_RATING", "[AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5");
+
+                            t.HasCheckConstraint("CK_PROVIDERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.ProviderAvailability", b =>
@@ -988,8 +1007,8 @@ namespace Servisyo.Web.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasMaxLength(155)
-                        .HasColumnType("nvarchar(155)")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)")
                         .HasColumnName("EMAIL");
 
                     b.Property<bool>("EmailVerificationPending")
@@ -998,19 +1017,19 @@ namespace Servisyo.Web.Migrations
 
                     b.Property<string>("FirstName")
                         .IsRequired()
-                        .HasMaxLength(155)
-                        .HasColumnType("nvarchar(155)")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
                         .HasColumnName("FIRST_NAME");
 
                     b.Property<string>("LastName")
                         .IsRequired()
-                        .HasMaxLength(155)
-                        .HasColumnType("nvarchar(155)")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
                         .HasColumnName("LAST_NAME");
 
                     b.Property<string>("MiddleName")
-                        .HasMaxLength(155)
-                        .HasColumnType("nvarchar(155)")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
                         .HasColumnName("MIDDLE_NAME");
 
                     b.Property<string>("PasswordHash")
@@ -1020,8 +1039,8 @@ namespace Servisyo.Web.Migrations
                         .HasColumnName("PASSWORD_HASH");
 
                     b.Property<string>("PhoneNumber")
-                        .HasMaxLength(15)
-                        .HasColumnType("nvarchar(15)")
+                        .HasMaxLength(11)
+                        .HasColumnType("nvarchar(11)")
                         .HasColumnName("PHONE_NUMBER");
 
                     b.Property<string>("Role")
@@ -1038,6 +1057,8 @@ namespace Servisyo.Web.Migrations
                     b.ToTable("USERS", null, t =>
                         {
                             t.HasTrigger("trg_Users_Audit");
+
+                            t.HasTrigger("trg_Users_StatusSync");
 
                             t.HasCheckConstraint("CK_USERS_ROLE", "[ROLE] IN ('Customer','Service Provider','Administrator')");
 

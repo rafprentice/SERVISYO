@@ -4,14 +4,14 @@ namespace Servisyo.Web.ViewModels;
 
 public class ForgotPasswordViewModel
 {
-    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(155)]
+    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(InputRules.MaxEmailLength)]
     [Display(Name = "Email Address")]
     public string Email { get; set; } = string.Empty;
 }
 
 public class ResetPasswordViewModel
 {
-    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(155)]
+    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(InputRules.MaxEmailLength)]
     [Display(Name = "Email Address")]
     public string Email { get; set; } = string.Empty;
 

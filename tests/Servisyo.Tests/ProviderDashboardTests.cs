@@ -82,7 +82,7 @@ public class ProviderDashboardServiceTests
         string approval = ApprovalStatuses.Approved, string account = AccountStatuses.Active)
         => new()
         {
-            BusinessName = business, City = "Cebu City", ApprovalStatus = approval,
+            BusinessName = business, ApprovalStatus = approval,
             User = new User
             {
                 FirstName = "Marco", LastName = "Reyes", Email = $"{Guid.NewGuid():N}@test.com", PasswordHash = "x",
@@ -93,7 +93,6 @@ public class ProviderDashboardServiceTests
     private static Customer NewCustomer(string first = "Elena", string last = "Cruz")
         => new()
         {
-            City = "Metro Cebu",
             User = new User
             {
                 FirstName = first, LastName = last, Email = $"{Guid.NewGuid():N}@test.com", PasswordHash = "x",
@@ -238,7 +237,7 @@ public class ProviderDashboardServiceTests
 
         var pending = vm.RecentRequests.Single(r => r.Status == BookingStatuses.Pending);
         var accepted = vm.RecentRequests.Single(r => r.Status == BookingStatuses.Accepted);
-        Assert.Equal("Metro Cebu", pending.Location);   // only the customer's city
+        Assert.Equal("Cebu City", pending.Location);    // before accepting: only the city, never the address
         Assert.Equal("99 Secret St", accepted.Location);
     }
 

@@ -58,7 +58,8 @@ Everything else in the website keeps its tested C# code, and the database proced
 
 ## Testing in SSMS
 Open `docs/sql/DatabaseDesign-v2.sql`, connect to `(localdb)\MSSQLLocalDB`, choose the SERVISYO database, then press **Execute**.
-- PART 6 runs 21 tests: registration, double email, booking rules (overlap, break, hours, free slots), start-before-payment, cash on completion, e-wallet, double payment, the rating trigger, cancel rules, ownership, the status trigger, search and a suspended account.
+- PART 6 runs 28 tests: registration, double email, booking rules (overlap, break, hours, free slots), start-before-payment, cash on completion, e-wallet, double payment, the rating trigger, cancel rules, ownership, the status trigger, search and a suspended account.
+- Tests 22-28 (v2.1): +63 phone saved as 09..., bad phone / email domain / numbers-only address refused, the status copies follow USERS, and suspending a provider cancels their Pending bookings but keeps Accepted ones.
 - **Every test is rolled back**, so no data is kept. The IDENTITY numbers do move on a little.
 - The last grid shows PASS/FAIL per test, and the Messages tab gives the total.
 
@@ -73,3 +74,40 @@ This lets the status trigger allow the jump.
 `docs/dev-sample-providers-data.sql` writes made-up ratings without real reviews.
 - The rating trigger does not change existing values.
 - The first real review change for such a provider recalculates their rating from their actual reviews. That is correct behaviour, but the made-up number will disappear for that provider.
+
+## Database v2.1: profile clean-up and status copies (migration ProfileCleanup)
+**What changes**
+- **No more CITY.** SERVISYO is Cebu City only, so `CUSTOMERS.CITY` and `SERVICE_PROVIDERS.CITY` are removed, together with every City box, column and search.
+  - The sign-up pages show a fixed "Cebu City" (not saved).
+  - Before a provider accepts a job, its location shows as "Cebu City" instead of the customer's city.
+- **Column sizes:**
+  - `EMAIL` `NVARCHAR(256)`;
+  - `FIRST_NAME` / `MIDDLE_NAME` / `LAST_NAME` `NVARCHAR(100)`;
+  - `PHONE_NUMBER` `NVARCHAR(11)`, always a Philippine mobile number `09XXXXXXXXX`.
+- **Stored-procedure parameters stay larger on purpose** (`NVARCHAR(400)`). SQL Server silently cuts a too-long value down to the parameter size, so a bigger parameter lets the procedure see the real length and refuse it with a clear message.
+- **Status copies.** `CUSTOMERS.ACCOUNT_STATUS` and `SERVICE_PROVIDERS.ACCOUNT_STATUS` are copies of `USERS.ACCOUNT_STATUS`, which stays the real status. Three triggers keep them equal:
+  - `trg_Users_StatusSync` copies a changed status to the customer / provider row;
+  - `trg_Customers_StatusCopy` and `trg_Providers_StatusCopy` set the copy back if anything writes a different value.
+  - The app also sets both in the same save.
+  - `SERVICE_PROVIDERS.APPROVAL_STATUS` (Pending / Approved / Rejected) is a different thing and is not touched.
+- **Suspending or deactivating a provider** (admin Providers page, and `usp_UpdateAccountStatus`):
+  - their **Pending** bookings are cancelled and each customer gets a notification;
+  - **Accepted / In Progress** bookings are not changed, because they may already be paid. The admin sees them listed in the message (the procedure returns them as a second result).
+- **Foreign keys** stay `ON DELETE NO ACTION` (Restrict): deleting a user that still has a customer / provider / booking / admin-action row is refused. Accounts are suspended or deactivated, never deleted. The only cascade is a weekly schedule taking its breaks with it.
+
+**Input rules (browser and server)**
+| Field | Rule |
+|---|---|
+| Names | letters (including ñ and accents), spaces, `.`, `'`, `-`; no numbers or symbols; 100 characters |
+| Email | `[username]@[domain].[tld]`; domain and TLD letters only (no numbers), each part at least 2 letters (`juan@a.c` and `juan@gmail2.com` are refused); 256 characters |
+| Phone | `09XXXXXXXXX` (11 digits) or `+639XXXXXXXXX`; digits and one leading `+` only; saved as `09XXXXXXXXX` |
+| Street address / barangay | free text but not numbers only |
+
+The sign-in and forgot-password pages keep the basic email check, so an account made earlier with an address the new sign-up rule would refuse can still sign in.
+
+**Before updating a database**
+1. Run `docs/sql/check-before-profile-cleanup.sql`. It only reads.
+   - It lists any phone number that cannot become `09XXXXXXXXX` and any name longer than 100 characters.
+   - It also shows the CITY values that will be removed.
+2. The migration first turns phone numbers like `0917-123-4567` / `+63 917 123 4567` / `9171234567` into `09171234567`.
+3. It then **stops without changing anything** if a row still does not fit. Fix those rows first.

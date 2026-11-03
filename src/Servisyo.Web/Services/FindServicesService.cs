@@ -35,7 +35,6 @@ public class FindServicesService : IFindServicesService
         public string FirstName { get; set; } = string.Empty;
         public string LastName { get; set; } = string.Empty;
         public string BusinessName { get; set; } = string.Empty;
-        public string? City { get; set; }
         public string? Description { get; set; }
         public decimal? AvgRating { get; set; }
         public int ReviewCount { get; set; }
@@ -79,8 +78,7 @@ public class FindServicesService : IFindServicesService
         {
             matching = matching.Where(p =>
                 (p.User.FirstName + " " + p.User.LastName).ToLower().Contains(lowered)
-                || p.BusinessName.ToLower().Contains(lowered)
-                || (p.City != null && p.City.ToLower().Contains(lowered)));
+                || p.BusinessName.ToLower().Contains(lowered));
         }
 
         // ---- category chips: how many of the providers matching the search offer each category ----
@@ -124,7 +122,6 @@ public class FindServicesService : IFindServicesService
             FirstName = p.User.FirstName,
             LastName = p.User.LastName,
             BusinessName = p.BusinessName,
-            City = p.City,
             Description = p.Description,
             AvgRating = p.AvgRating,
             ReviewCount = p.ReviewCount,
@@ -189,7 +186,6 @@ public class FindServicesService : IFindServicesService
                 Name = fullName,
                 Initials = NameFormat.Initials(fullName),
                 BusinessName = r.BusinessName,
-                City = string.IsNullOrWhiteSpace(r.City) ? null : r.City.Trim(),
                 // when a category is chosen the badge says so; otherwise it shows the provider's first category (A–Z)
                 CategoryName = activeCategoryName ?? services.Select(s => s.CategoryName).OrderBy(n => n).FirstOrDefault(),
                 AvailabilityText = availabilityText,

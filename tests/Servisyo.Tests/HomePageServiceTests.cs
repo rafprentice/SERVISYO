@@ -25,7 +25,7 @@ public class HomePageServiceTests
             FirstName = name, LastName = "Owner", Email = $"{Guid.NewGuid():N}@test.com",
             PasswordHash = "x", Role = Roles.ServiceProvider, AccountStatus = accountStatus
         };
-        var provider = new Provider { User = user, BusinessName = name, ApprovalStatus = approval, City = "Cebu City" };
+        var provider = new Provider { User = user, BusinessName = name, ApprovalStatus = approval };
         db.Providers.Add(provider);
 
         if (category != null && price != null)

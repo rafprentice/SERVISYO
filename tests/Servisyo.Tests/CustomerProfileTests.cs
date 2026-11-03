@@ -49,7 +49,7 @@ public class CustomerProfileServiceTests
 
     private static async Task<Customer> AddCustomerAsync(ServisyoDbContext db, PasswordHasher<User> hasher,
         string first = "Ana", string last = "Reyes", string? email = null, string status = AccountStatuses.Active,
-        string? phone = "09171112222", string? city = "Quezon City", string? address = "45 Mabini St, Quezon City",
+        string? phone = "09171112222", string? address = "45 Mabini St, Quezon City",
         string password = "OldPass1", DateTime? createdUtc = null)
     {
         var user = new User
@@ -59,7 +59,7 @@ public class CustomerProfileServiceTests
             CreatedAt = createdUtc ?? new DateTime(2024, 1, 12, 4, 0, 0)
         };
         user.PasswordHash = hasher.HashPassword(user, password);
-        var c = new Customer { User = user, City = city, Address = address };
+        var c = new Customer { User = user, Address = address };
         db.Customers.Add(c);
         await db.SaveChangesAsync();
         return c;
@@ -82,7 +82,7 @@ public class CustomerProfileServiceTests
         var f = new CustomerProfileForm
         {
             FullName = $"{c.User.FirstName} {c.User.LastName}", Email = c.User.Email,
-            PhoneNumber = c.User.PhoneNumber, City = c.City
+            PhoneNumber = c.User.PhoneNumber
         };
         change?.Invoke(f);
         return f;
@@ -143,7 +143,6 @@ public class CustomerProfileServiceTests
         Assert.Equal(3, page.TotalBookings);
         Assert.Equal("45 Mabini St, Quezon City", page.SavedAddress);
         Assert.Equal("09171112222", page.Form.PhoneNumber);
-        Assert.Equal("Quezon City", page.Form.City);
         Assert.Equal("Customer", page.Shell.Role);
         Assert.Equal("Customer Account", page.Shell.Subtitle);
     }
@@ -168,14 +167,14 @@ public class CustomerProfileServiceTests
     // ------------------------------------------------------------------ personal information
 
     [Fact]
-    public async Task Save_ChangesNameEmailPhoneAndCity()
+    public async Task Save_ChangesNameEmailAndPhone_AndSavesThePhoneAs09()
     {
         var (svc, db, hasher) = Create();
         var c = await AddCustomerAsync(db, hasher);
 
         var result = await svc.SaveAsync(c.UserId, new CustomerProfileForm
         {
-            FullName = "  Ana   Maria Reyes ", Email = "  ANA.New@Test.com ", PhoneNumber = "+63 917 555 1234", City = " Cebu City "
+            FullName = "  Ana   Maria Reyes ", Email = "  ANA.New@Test.com ", PhoneNumber = " +639175551234 "
         });
 
         Assert.True(result.Saved);
@@ -186,8 +185,7 @@ public class CustomerProfileServiceTests
         Assert.Equal("Ana", user.FirstName);
         Assert.Equal("Maria Reyes", user.LastName);
         Assert.Equal("ana.new@test.com", user.Email);
-        Assert.Equal("+639175551234", user.PhoneNumber);
-        Assert.Equal("Cebu City", (await db.Customers.SingleAsync()).City);
+        Assert.Equal("09175551234", user.PhoneNumber);          // +639... is always saved as 09...
     }
 
     [Fact]
@@ -206,16 +204,15 @@ public class CustomerProfileServiceTests
     }
 
     [Fact]
-    public async Task Save_BlankPhoneAndCity_ClearThem()
+    public async Task Save_BlankPhone_ClearsIt()
     {
         var (svc, db, hasher) = Create();
         var c = await AddCustomerAsync(db, hasher);
 
-        var result = await svc.SaveAsync(c.UserId, FormFrom(c, f => { f.PhoneNumber = "  "; f.City = ""; }));
+        var result = await svc.SaveAsync(c.UserId, FormFrom(c, f => f.PhoneNumber = "  "));
 
         Assert.True(result.Saved);
         Assert.Null((await db.Users.SingleAsync()).PhoneNumber);
-        Assert.Null((await db.Customers.SingleAsync()).City);
     }
 
     [Fact]
@@ -237,9 +234,17 @@ public class CustomerProfileServiceTests
     [InlineData("FullName", "", "Enter your full name.")]
     [InlineData("FullName", "Ana", "Enter your first and last name.")]
     [InlineData("Email", "", "Enter your email address.")]
-    [InlineData("Email", "not-an-email", "Enter a valid email address.")]
-    [InlineData("Email", "two words@test.com", "Enter a valid email address.")]
-    [InlineData("PhoneNumber", "abc123", "Enter a valid phone number, for example +63 917 555 1234.")]
+    [InlineData("FullName", "Ana R3yes", InputRules.FullNameMessage)]
+    [InlineData("FullName", "Ana Reyes!", InputRules.FullNameMessage)]
+    [InlineData("Email", "not-an-email", InputRules.EmailMessage)]
+    [InlineData("Email", "two words@test.com", InputRules.EmailMessage)]
+    [InlineData("Email", "ana@gmail2.com", InputRules.EmailMessage)]      // no numbers in the domain
+    [InlineData("Email", "ana@a.c", InputRules.EmailMessage)]             // domain and TLD need 2+ letters
+    [InlineData("PhoneNumber", "abc123", InputRules.PhoneMessage)]
+    [InlineData("PhoneNumber", "0917 555 1234", InputRules.PhoneMessage)] // no spaces
+    [InlineData("PhoneNumber", "0917-555-1234", InputRules.PhoneMessage)] // no dashes
+    [InlineData("PhoneNumber", "0917555123", InputRules.PhoneMessage)]    // 10 digits
+    [InlineData("PhoneNumber", "08175551234", InputRules.PhoneMessage)]   // not a mobile number
     public async Task Save_RefusesBadInput_AndSavesNothing(string field, string value, string message)
     {
         var (svc, db, hasher) = Create();
@@ -253,7 +258,6 @@ public class CustomerProfileServiceTests
                 case "Email": f.Email = value; break;
                 case "PhoneNumber": f.PhoneNumber = value; break;
             }
-            f.City = "Somewhere Else";                      // would be saved if anything were
         });
 
         var result = await svc.SaveAsync(c.UserId, form);
@@ -262,8 +266,10 @@ public class CustomerProfileServiceTests
         Assert.False(result.Saved);
         Assert.Equal(message, result.FieldErrors[field]);
         Assert.Equal("Please fix the highlighted fields.", result.Message);
-        Assert.Equal("Quezon City", (await db.Customers.SingleAsync()).City);       // nothing at all was saved
-        Assert.Equal("ana@test.com", (await db.Users.SingleAsync()).Email);
+        var user = await db.Users.SingleAsync();                                   // nothing at all was saved
+        Assert.Equal("ana@test.com", user.Email);
+        Assert.Equal("09171112222", user.PhoneNumber);
+        Assert.Equal("Ana", user.FirstName);
     }
 
     [Fact]
@@ -274,13 +280,13 @@ public class CustomerProfileServiceTests
 
         var result = await svc.SaveAsync(c.UserId, FormFrom(c, f =>
         {
-            f.FullName = new string('a', 100) + " " + new string('b', 100);
-            f.City = new string('c', ProfileRules.MaxCityLength + 1);
+            f.FullName = new string('a', 50) + " " + new string('b', 50);   // 101 characters: the columns hold 100
+            f.Email = new string('e', 250) + "@test.com";
         }));
 
         Assert.False(result.Saved);
         Assert.True(result.FieldErrors.ContainsKey("FullName"));
-        Assert.True(result.FieldErrors.ContainsKey("City"));
+        Assert.True(result.FieldErrors.ContainsKey("Email"));
     }
 
     [Fact]
@@ -303,13 +309,13 @@ public class CustomerProfileServiceTests
     {
         var (svc, db, hasher) = Create();
         var ana = await AddCustomerAsync(db, hasher, email: "ana@test.com");
-        var ben = await AddCustomerAsync(db, hasher, "Ben", "Cruz", email: "ben@test.com", city: "Pasig City");
+        var ben = await AddCustomerAsync(db, hasher, "Ben", "Cruz", email: "ben@test.com", phone: "09179998888");
 
-        await svc.SaveAsync(ana.UserId, FormFrom(ana, f => { f.FullName = "Anna Reyes"; f.City = "Cebu City"; }));
+        await svc.SaveAsync(ana.UserId, FormFrom(ana, f => { f.FullName = "Anna Reyes"; f.PhoneNumber = "09170001111"; }));
 
         var benUser = await db.Users.SingleAsync(u => u.UserId == ben.UserId);
         Assert.Equal("Ben", benUser.FirstName);
-        Assert.Equal("Pasig City", (await db.Customers.SingleAsync(x => x.CustomerId == ben.CustomerId)).City);
+        Assert.Equal("09179998888", benUser.PhoneNumber);
     }
 
     // ------------------------------------------------------------------ saved address
@@ -341,6 +347,21 @@ public class CustomerProfileServiceTests
         Assert.True(result.Saved);
         Assert.Equal("Your saved address was removed.", result.Message);
         Assert.Null((await db.Customers.SingleAsync()).Address);
+    }
+
+    [Theory]
+    [InlineData("12345")]
+    [InlineData("  42 - 7 ")]
+    public async Task SaveAddress_NumbersOnly_IsRefused_AndKeepsTheOldAddress(string numbers)
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher);
+
+        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = numbers });
+
+        Assert.False(result.Saved);
+        Assert.Equal(InputRules.AddressMessage, result.FieldErrors["Address"]);
+        Assert.Equal("45 Mabini St, Quezon City", (await db.Customers.SingleAsync()).Address);
     }
 
     [Fact]

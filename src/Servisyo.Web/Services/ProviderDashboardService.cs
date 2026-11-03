@@ -35,7 +35,6 @@ public class ProviderDashboardService : IProviderDashboardService
         public TimeOnly BookingTime { get; set; }
         public DateTime CreatedAt { get; set; }
         public string CustomerName { get; set; } = string.Empty;
-        public string? CustomerCity { get; set; }
         public string? ServiceLocation { get; set; }
     }
 
@@ -47,7 +46,6 @@ public class ProviderDashboardService : IProviderDashboardService
         BookingTime = b.BookingTime,
         CreatedAt = b.CreatedAt,
         CustomerName = b.Customer.User.FirstName + " " + b.Customer.User.LastName,
-        CustomerCity = b.Customer.City,
         ServiceLocation = b.ServiceLocation
     };
 
@@ -64,7 +62,7 @@ public class ProviderDashboardService : IProviderDashboardService
                      && x.User.AccountStatus == AccountStatuses.Active)
             .Select(x => new
             {
-                x.ProviderId, x.BusinessName, x.City, x.Description, x.ProfilePhoto, x.Address,
+                x.ProviderId, x.BusinessName, x.Description, x.ProfilePhoto, x.Address,
                 x.AvgRating, x.ReviewCount, x.ApprovalStatus,
                 x.User.FirstName, x.User.LastName, x.User.PhoneNumber
             })
@@ -176,7 +174,7 @@ public class ProviderDashboardService : IProviderDashboardService
             hasService, hasAvailability,
             !string.IsNullOrWhiteSpace(p.Description),
             !string.IsNullOrWhiteSpace(p.ProfilePhoto),
-            !string.IsNullOrWhiteSpace(p.Address) && !string.IsNullOrWhiteSpace(p.City),
+            !string.IsNullOrWhiteSpace(p.Address),
             !string.IsNullOrWhiteSpace(p.PhoneNumber));
 
         // ---- Latest visible reviews of THIS provider ----
@@ -205,7 +203,6 @@ public class ProviderDashboardService : IProviderDashboardService
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             BusinessName = p.BusinessName,
-            City = p.City,
             NewRequests = newRequests,
             Upcoming = upcoming,
             InProgress = inProgress,
@@ -246,11 +243,11 @@ public class ProviderDashboardService : IProviderDashboardService
     }
 
     /// The full service address is only shown once the provider has accepted the job;
-    /// before that, only the customer's city.
+    /// before that, only the city (SERVISYO is Cebu City only, so every customer is in Cebu City).
     private static string? LocationFor(JobRow r)
     {
         var acceptedOrLater = r.Status is BookingStatuses.Accepted or BookingStatuses.InProgress or BookingStatuses.Completed;
-        var text = acceptedOrLater && !string.IsNullOrWhiteSpace(r.ServiceLocation) ? r.ServiceLocation : r.CustomerCity;
+        var text = acceptedOrLater && !string.IsNullOrWhiteSpace(r.ServiceLocation) ? r.ServiceLocation : ServiceArea.City;
         return string.IsNullOrWhiteSpace(text) ? null : NameFormat.Truncate(text, 40);
     }
 

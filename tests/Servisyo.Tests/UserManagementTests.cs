@@ -61,9 +61,8 @@ public class UserManagementServiceTests
             Email = email ?? $"{first}.{last}.{Guid.NewGuid():N}@test.com".ToLowerInvariant()
         };
 
-    private static Customer NewCustomer(string first, string last, string status = AccountStatuses.Active,
-                                        string? city = null, string? email = null)
-        => new() { City = city, User = NewUser(first, last, Roles.Customer, status, email) };
+    private static Customer NewCustomer(string first, string last, string status = AccountStatuses.Active, string? email = null)
+        => new() { AccountStatus = status, User = NewUser(first, last, Roles.Customer, status, email) };
 
     private static async Task<User> AddAdminAsync(ServisyoDbContext db, string status = AccountStatuses.Active)
     {
@@ -169,12 +168,12 @@ public class UserManagementServiceTests
     }
 
     [Fact]
-    public async Task Rows_OfferTheRightButtons_AndShowCity()
+    public async Task Rows_OfferTheRightButtons()
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
         db.Customers.AddRange(
-            NewCustomer("Ana", "Reyes", city: "Mandaue City"),
+            NewCustomer("Ana", "Reyes"),
             NewCustomer("Carla", "Tan", AccountStatuses.Suspended),
             NewCustomer("Rey", "Aquino", AccountStatuses.Deactivated));
         await db.SaveChangesAsync();
@@ -182,12 +181,10 @@ public class UserManagementServiceTests
         var vm = (await svc.GetCustomersAsync(admin.UserId, new UserListQuery()))!;
 
         var ana = vm.Rows.Single(r => r.Name == "Ana Reyes");
-        Assert.Equal("Mandaue City", ana.City);
         Assert.Equal(new[] { "Suspend", "Deactivate" }, ana.Actions.Select(a => a.Label));
         Assert.Equal("completed", ana.StatusTone);
 
         var carla = vm.Rows.Single(r => r.Name == "Carla Tan");
-        Assert.Null(carla.City);
         Assert.Equal(new[] { "Reactivate", "Deactivate" }, carla.Actions.Select(a => a.Label));
 
         var rey = vm.Rows.Single(r => r.Name == "Rey Aquino");
@@ -234,6 +231,7 @@ public class UserManagementServiceTests
 
         var user = await db.Users.AsNoTracking().SingleAsync(u => u.UserId == ana.UserId);
         Assert.Equal(AccountStatuses.Suspended, user.AccountStatus);
+        Assert.Equal(AccountStatuses.Suspended, (await db.Customers.AsNoTracking().SingleAsync()).AccountStatus);   // the copy on CUSTOMERS
 
         var log = await db.AdminActions.AsNoTracking().SingleAsync();
         Assert.Equal(admin.UserId, log.AdminUserId);

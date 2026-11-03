@@ -20,7 +20,6 @@
     string? lockId = Model.NameLocked ? "pf-lock" : null;
     var phoneError = Model.ErrorFor("PhoneNumber");
     var emailError = Model.ErrorFor("Email");
-    var cityError = Model.ErrorFor("City");
     var addressError = Model.ErrorFor("Address");
     var bioError = Model.ErrorFor("Description");
 }
@@ -68,7 +67,7 @@
 
             <div class="sv-fld">
                 <label for="pf-name">Full Name</label>
-                <input id="pf-name" name="FullName" type="text" value="@form.FullName" required maxlength="155" autocomplete="name"
+                <input id="pf-name" name="FullName" type="text" value="@form.FullName" required maxlength="100" autocomplete="name"
                        class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
                        aria-invalid="@(nameError is null ? null : "true")" />
                 @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
@@ -92,28 +91,22 @@
 
             <div class="sv-fld">
                 <label for="pf-phone">Phone Number</label>
-                <input id="pf-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="20" autocomplete="tel" placeholder="e.g. +63 917 555 1234"
+                <input id="pf-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="13" inputmode="tel" pattern="(09[0-9]{9}|\+639[0-9]{9})" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" autocomplete="tel" placeholder="e.g. 09171234567"
                        aria-invalid="@(phoneError is null ? null : "true")" />
                 @if (phoneError is not null) { <p class="sv-fld__err" role="alert">@phoneError</p> }
             </div>
 
             <div class="sv-fld">
                 <label for="pf-email">Email Address</label>
-                <input id="pf-email" name="Email" type="email" value="@form.Email" required maxlength="155" autocomplete="email"
+                <input id="pf-email" name="Email" type="email" value="@form.Email" required maxlength="256" autocomplete="email"
                        aria-invalid="@(emailError is null ? null : "true")" />
                 @if (emailError is not null) { <p class="sv-fld__err" role="alert">@emailError</p> }
             </div>
 
-            <div class="sv-fld">
-                <label for="pf-city">City / Location</label>
-                <input id="pf-city" name="City" type="text" value="@form.City" maxlength="50" autocomplete="address-level2" placeholder="e.g. Cebu City"
-                       aria-invalid="@(cityError is null ? null : "true")" />
-                @if (cityError is not null) { <p class="sv-fld__err" role="alert">@cityError</p> }
-            </div>
 
             <div class="sv-fld">
                 <label for="pf-address">Address <span class="sv-fld__opt">(optional)</span></label>
-                <input id="pf-address" name="Address" type="text" value="@form.Address" maxlength="255" autocomplete="street-address" placeholder="Street, barangay"
+                <input id="pf-address" name="Address" type="text" value="@form.Address" maxlength="255" autocomplete="street-address" placeholder="Street, barangay (Cebu City)"
                        aria-invalid="@(addressError is null ? null : "true")" />
                 @if (addressError is not null) { <p class="sv-fld__err" role="alert">@addressError</p> }
             </div>

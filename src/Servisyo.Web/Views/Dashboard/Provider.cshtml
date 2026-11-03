@@ -26,7 +26,7 @@
 }
 
 <h1 class="sv-dash__title">Welcome back, @Model.Shell.FirstName</h1>
-<p class="sv-dash__sub">@(Model.BusinessName + (string.IsNullOrWhiteSpace(Model.City) ? "" : " · " + Model.City))</p>
+<p class="sv-dash__sub">@(Model.BusinessName + " · " + ServiceArea.City)</p>
 
 <!-- Key numbers -->
 <div class="sv-metrics">

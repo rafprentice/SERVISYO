@@ -39,7 +39,6 @@ public class BookProviderPageViewModel
     public string ProviderName { get; set; } = string.Empty;
     public string Initials { get; set; } = string.Empty;
     public string BusinessName { get; set; } = string.Empty;
-    public string? City { get; set; }
     public decimal? AvgRating { get; set; }
     public int ReviewCount { get; set; }
     public int MinNoticeDays { get; set; }

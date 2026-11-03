@@ -196,7 +196,7 @@ public class NameLockTests
     private static async Task<(ServisyoDbContext Db, Customer Ana, Provider Vince)> WorldAsync()
     {
         var db = NewDb();
-        var ana = new Customer { User = NewUser("Ana", "Cruz", Roles.Customer), City = "Cebu" };
+        var ana = new Customer { User = NewUser("Ana", "Cruz", Roles.Customer), Address = "Lahug" };
         var vince = new Provider { BusinessName = "Vincent Valencia", ApprovalStatus = ApprovalStatuses.Approved, User = NewUser("Vincent", "Valencia", Roles.ServiceProvider) };
         db.AddRange(ana, vince);
         await db.SaveChangesAsync();
@@ -214,7 +214,7 @@ public class NameLockTests
     }
 
     private static CustomerProfileForm AnaForm(Customer ana, string name) =>
-        new() { FullName = name, Email = ana.User.Email, PhoneNumber = null, City = "Cebu" };
+        new() { FullName = name, Email = ana.User.Email, PhoneNumber = null };
 
     [Theory]
     [InlineData(BookingStatuses.Pending)]
@@ -257,7 +257,7 @@ public class NameLockTests
         var svc = new CustomerProfileService(db, new PasswordHasher<User>());
 
         var form = AnaForm(ana, "Ana Cruz");        // same name as now
-        form.City = "Mandaue";
+        form.PhoneNumber = "09170001111";           // another field may still change
         Assert.True((await svc.SaveAsync(ana.UserId, form)).Saved);
     }
 

@@ -63,7 +63,7 @@ public class CustomerProfileService : ICustomerProfileService
                      && x.User.AccountStatus == AccountStatuses.Active)
             .Select(x => new
             {
-                x.CustomerId, x.City, x.Address, x.ProfilePhoto,
+                x.CustomerId, x.Address, x.ProfilePhoto,
                 x.User.FirstName, x.User.LastName, x.User.Email, x.User.PhoneNumber, x.User.CreatedAt
             })
             .FirstOrDefaultAsync(ct);
@@ -92,7 +92,7 @@ public class CustomerProfileService : ICustomerProfileService
             // stored in UTC, shown in Philippine time
             MemberSince = c.CreatedAt.AddHours(ManilaOffsetHours).ToString("MMM d, yyyy", CultureInfo.InvariantCulture),
             TotalBookings = await _db.Bookings.CountAsync(b => b.CustomerId == c.CustomerId, ct),
-            Form = new CustomerProfileForm { FullName = fullName, Email = c.Email, PhoneNumber = c.PhoneNumber, City = c.City },
+            Form = new CustomerProfileForm { FullName = fullName, Email = c.Email, PhoneNumber = c.PhoneNumber },
             SavedAddress = address,
             AddressForm = new CustomerAddressForm { Address = address }
         };
@@ -120,15 +120,17 @@ public class CustomerProfileService : ICustomerProfileService
             errors["FullName"] = $"The name can be at most {ProfileRules.MaxFullNameLength} characters.";
         else if (nameChanged && !fullName.Contains(' '))
             errors["FullName"] = "Enter your first and last name.";
+        else if (nameChanged && !InputRules.IsFullName(fullName))
+            errors["FullName"] = InputRules.FullNameMessage;                    // letters only, no numbers or symbols
         else if (nameChanged && await _db.Bookings.AnyAsync(b => b.CustomerId == customer.CustomerId && ActiveBookingRules.Statuses.Contains(b.Status), ct))
             errors["FullName"] = ActiveBookingRules.NameLockedMessage;       // the provider must keep seeing the name they were booked by
 
         // ---- phone (optional; a number saved earlier in another style is left alone unless it is edited) ----
         var typedPhone = (form.PhoneNumber ?? string.Empty).Trim();
         var phoneChanged = typedPhone != (user.PhoneNumber ?? string.Empty).Trim();
-        var phone = ProfileRules.NormalizePhone(typedPhone);
-        if (phoneChanged && phone is not null && !ProfileRules.IsValidPhone(phone))
-            errors["PhoneNumber"] = "Enter a valid phone number, for example +63 917 555 1234.";
+        var phone = ProfileRules.NormalizePhone(typedPhone);                     // +639171234567 is saved as 09171234567
+        if (phoneChanged && typedPhone.Length > 0 && !InputRules.IsPhone(typedPhone))
+            errors["PhoneNumber"] = InputRules.PhoneMessage;                     // digits only: 09XXXXXXXXX or +639XXXXXXXXX
 
         // ---- email (it is also the sign-in name, so it must stay unique) ----
         var email = (form.Email ?? string.Empty).Trim().ToLowerInvariant();
@@ -137,15 +139,10 @@ public class CustomerProfileService : ICustomerProfileService
             errors["Email"] = "Enter your email address.";
         else if (emailChanged && email.Length > ProfileRules.MaxEmailLength)
             errors["Email"] = $"The email can be at most {ProfileRules.MaxEmailLength} characters.";
-        else if (emailChanged && (email.Any(char.IsWhiteSpace) || !new EmailAddressAttribute().IsValid(email)))
-            errors["Email"] = "Enter a valid email address.";
+        else if (emailChanged && !InputRules.IsEmail(email))
+            errors["Email"] = InputRules.EmailMessage;                           // no numbers after the @, parts of 2+ letters
         else if (emailChanged && await EmailUsedByAnotherAsync(email, user.UserId, ct))
             errors["Email"] = EmailTaken;
-
-        // ---- city (optional) ----
-        var city = ProfileRules.NormalizeText(form.City);
-        if (city is { Length: > ProfileRules.MaxCityLength })
-            errors["City"] = $"The city can be at most {ProfileRules.MaxCityLength} characters.";
 
         if (errors.Count > 0)
         {
@@ -162,7 +159,6 @@ public class CustomerProfileService : ICustomerProfileService
         }
         if (emailChanged) user.Email = email;
         if (phoneChanged) user.PhoneNumber = phone;
-        customer.City = city;
 
         try
         {
@@ -196,6 +192,8 @@ public class CustomerProfileService : ICustomerProfileService
             return new(true, false,
                 new Dictionary<string, string> { ["Address"] = $"The address can be at most {ProfileRules.MaxAddressLength} characters." },
                 FixFields);
+        if (address is not null && !InputRules.HasALetter(address))
+            return new(true, false, new Dictionary<string, string> { ["Address"] = InputRules.AddressMessage }, FixFields);
 
         var removing = address is null;
         customer.Address = address;

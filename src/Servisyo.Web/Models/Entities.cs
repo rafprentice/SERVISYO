@@ -26,8 +26,10 @@ public class Customer
     public int CustomerId { get; set; }
     public int UserId { get; set; }
     public string? Address { get; set; }
-    public string? City { get; set; }
     public string? ProfilePhoto { get; set; }
+    /// Copy of User.AccountStatus (the real status). The database keeps it equal with triggers
+    /// (trg_Users_StatusSync / trg_Customers_StatusCopy); the app also sets both together.
+    public string AccountStatus { get; set; } = AccountStatuses.Active;
 
     public User User { get; set; } = null!;
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
@@ -41,13 +43,15 @@ public class Provider
     public string? Description { get; set; }
     public string? ProfilePhoto { get; set; }
     public string? Address { get; set; }
-    public string? City { get; set; }
     public decimal? BaseFee { get; set; }
     public decimal? AvgRating { get; set; }
     public int ReviewCount { get; set; }
     public int MinNoticeDays { get; set; } = 1;
     public int MaxJobsPerDay { get; set; } = 5;
     public string ApprovalStatus { get; set; } = ApprovalStatuses.Pending;
+    /// Copy of User.AccountStatus (Active / Suspended / Deactivated), kept equal by trg_Users_StatusSync /
+    /// trg_Providers_StatusCopy. Not the same as ApprovalStatus (Pending / Approved / Rejected).
+    public string AccountStatus { get; set; } = AccountStatuses.Active;
     public DateTime DateApplied { get; set; } = DateTime.UtcNow;
     public DateTime? DateApproved { get; set; }
 

@@ -24,7 +24,7 @@
                 <label asp-for="FullName" class="sv-label">Full Name <span class="sv-req">*</span></label>
                 <div class="sv-input">
                     <span class="sv-input__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg></span>
-                    <input asp-for="FullName" placeholder="Juan dela Cruz" autocomplete="name" autofocus />
+                    <input asp-for="FullName" placeholder="Juan dela Cruz" autocomplete="name" maxlength="100" autofocus />
                 </div>
                 <span asp-validation-for="FullName" class="sv-error"></span>
             </div>
@@ -33,7 +33,7 @@
                 <label asp-for="Email" class="sv-label">Email Address <span class="sv-req">*</span></label>
                 <div class="sv-input">
                     <span class="sv-input__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg></span>
-                    <input asp-for="Email" placeholder="you@email.com" autocomplete="email" />
+                    <input asp-for="Email" placeholder="you@gmail.com" autocomplete="email" maxlength="256" />
                 </div>
                 <span asp-validation-for="Email" class="sv-error"></span>
             </div>
@@ -42,8 +42,8 @@
                 <label asp-for="PhoneNumber" class="sv-label">Phone Number <span class="sv-req">*</span></label>
                 <div class="sv-input">
                     <span class="sv-input__icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
-                    <input asp-for="PhoneNumber" type="tel" placeholder="09XX-XXX-XXXX" autocomplete="tel" inputmode="tel"
-                           pattern="\+?[0-9\s\-]{7,15}" maxlength="16" title="Digits, spaces and hyphens only, e.g. 0917-555-1234" />
+                    <input asp-for="PhoneNumber" type="tel" placeholder="09171234567" autocomplete="tel" inputmode="tel"
+                           pattern="(09[0-9]{9}|\+639[0-9]{9})" maxlength="13" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" />
                 </div>
                 <span asp-validation-for="PhoneNumber" class="sv-error"></span>
             </div>
@@ -66,11 +66,12 @@
                     <span asp-validation-for="Barangay" class="sv-error"></span>
                 </div>
                 <div class="sv-field">
-                    <label asp-for="City" class="sv-label">City <span class="sv-muted">(optional)</span></label>
+                    <label for="reg-city" class="sv-label">City</label>
                     <div class="sv-input sv-input--plain">
-                        <input asp-for="City" placeholder="Cebu City" autocomplete="address-level2" />
+                        @* not sent with the form: SERVISYO serves Cebu City only *@
+                        <input id="reg-city" type="text" value="Cebu City" disabled aria-describedby="reg-city-note" />
                     </div>
-                    <span asp-validation-for="City" class="sv-error"></span>
+                    <span id="reg-city-note" class="sv-muted">SERVISYO is available in Cebu City only.</span>
                 </div>
             </div>
 

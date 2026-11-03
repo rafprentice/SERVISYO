@@ -82,10 +82,10 @@ public class ProviderManagementServiceTests
 
     private static Provider NewProvider(string first, string last, string business,
         string approval = ApprovalStatuses.Approved, string account = AccountStatuses.Active,
-        string? city = null, decimal? rating = null, int reviews = 0, int appliedDaysAgo = 0)
+        decimal? rating = null, int reviews = 0, int appliedDaysAgo = 0)
         => new()
         {
-            BusinessName = business, City = city, ApprovalStatus = approval, AvgRating = rating, ReviewCount = reviews,
+            BusinessName = business, ApprovalStatus = approval, AvgRating = rating, ReviewCount = reviews,
             DateApplied = DateTime.UtcNow.AddDays(-appliedDaysAgo),
             User = NewUser(first, last, Roles.ServiceProvider, account)
         };
@@ -105,12 +105,12 @@ public class ProviderManagementServiceTests
     private static async Task SeedDesignAsync(ServisyoDbContext db)
     {
         db.Providers.AddRange(
-            NewProvider("Marco", "Reyes", "Marco's Plumbing Works", city: "Cebu City", rating: 4.9m, reviews: 112, appliedDaysAgo: 60),
-            NewProvider("Liza", "Santos", "Liza Clean Services", city: "Mandaue", rating: 4.8m, reviews: 87, appliedDaysAgo: 50),
-            NewProvider("Danilo", "Cruz", "Cruz General Repairs", city: "Lapu-Lapu", rating: 4.7m, reviews: 95, appliedDaysAgo: 40),
-            NewProvider("Rhea", "Villanueva", "Rhea's Home Care", account: AccountStatuses.Suspended, city: "Talisay", rating: 5.0m, reviews: 43, appliedDaysAgo: 30),
-            NewProvider("Felix", "Torres", "Torres Plumbing Co.", ApprovalStatuses.Pending, city: "Mandaue", appliedDaysAgo: 2),
-            NewProvider("Maricel", "Bautista", "MB Cleaning Solutions", ApprovalStatuses.Pending, city: "Poblacion", appliedDaysAgo: 1));
+            NewProvider("Marco", "Reyes", "Marco's Plumbing Works", rating: 4.9m, reviews: 112, appliedDaysAgo: 60),
+            NewProvider("Liza", "Santos", "Liza Clean Services", rating: 4.8m, reviews: 87, appliedDaysAgo: 50),
+            NewProvider("Danilo", "Cruz", "Cruz General Repairs", rating: 4.7m, reviews: 95, appliedDaysAgo: 40),
+            NewProvider("Rhea", "Villanueva", "Rhea's Home Care", account: AccountStatuses.Suspended, rating: 5.0m, reviews: 43, appliedDaysAgo: 30),
+            NewProvider("Felix", "Torres", "Torres Plumbing Co.", ApprovalStatuses.Pending, appliedDaysAgo: 2),
+            NewProvider("Maricel", "Bautista", "MB Cleaning Solutions", ApprovalStatuses.Pending, appliedDaysAgo: 1));
         await db.SaveChangesAsync();
     }
 
@@ -250,7 +250,7 @@ public class ProviderManagementServiceTests
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
-        var marco = NewProvider("Marco", "Reyes", "Marco's", city: "Cebu City");
+        var marco = NewProvider("Marco", "Reyes", "Marco's");
         var cat = new ServiceCategory { CategoryName = "Plumbing" };
         db.Services.AddRange(
             NewService(marco, cat, "Pipe Repair"),
@@ -267,27 +267,27 @@ public class ProviderManagementServiceTests
     }
 
     [Fact]
-    public async Task Details_AreCategoryThenCity_WithSensibleFallbacks()
+    public async Task Details_AreTheCategory_WithSensibleFallbacks()
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
 
-        var declared = NewProvider("A", "Declared", "A Co", city: "Mandaue", appliedDaysAgo: 5);
+        var declared = NewProvider("A", "Declared", "A Co", appliedDaysAgo: 5);
         declared.ProviderCategories.Add(new ProviderCategory { Category = new ServiceCategory { CategoryName = "Plumbing" } });
 
-        var fromService = NewProvider("B", "FromService", "B Co", city: "Talisay", appliedDaysAgo: 4);
+        var fromService = NewProvider("B", "FromService", "B Co", appliedDaysAgo: 4);
         db.Services.Add(NewService(fromService, new ServiceCategory { CategoryName = "Cleaning" }, "House Cleaning"));
 
-        var cityOnly = NewProvider("C", "CityOnly", "C Co", ApprovalStatuses.Pending, city: "Poblacion", appliedDaysAgo: 3);
+        var noCategory = NewProvider("C", "NoCategory", "C Co", ApprovalStatuses.Pending, appliedDaysAgo: 3);
         var nothing = NewProvider("D", "Nothing", "D Co", ApprovalStatuses.Pending, appliedDaysAgo: 2);
-        db.Providers.AddRange(declared, cityOnly, nothing);
+        db.Providers.AddRange(declared, noCategory, nothing);
         await db.SaveChangesAsync();
 
         var cards = (await svc.GetProvidersAsync(admin.UserId, new ProviderListQuery()))!.Cards;
 
-        Assert.Equal("Plumbing · Mandaue", cards.Single(c => c.Name == "A Declared").Details);
-        Assert.Equal("Cleaning · Talisay", cards.Single(c => c.Name == "B FromService").Details);
-        Assert.Equal("Poblacion", cards.Single(c => c.Name == "C CityOnly").Details);
+        Assert.Equal("Plumbing", cards.Single(c => c.Name == "A Declared").Details);
+        Assert.Equal("Cleaning", cards.Single(c => c.Name == "B FromService").Details);
+        Assert.Null(cards.Single(c => c.Name == "C NoCategory").Details);
         Assert.Null(cards.Single(c => c.Name == "D Nothing").Details);
     }
 

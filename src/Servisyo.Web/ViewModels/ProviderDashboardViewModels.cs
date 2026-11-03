@@ -27,6 +27,12 @@ public sealed record ProviderBookingDisplay(string Badge, string Tone, string? A
     };
 }
 
+/// SERVISYO serves Cebu City only, so the city is not stored per customer or provider any more.
+public static class ServiceArea
+{
+    public const string City = "Cebu City";
+}
+
 public static class ProfileStrength
 {
     /// 6 equal checks. Returns the percentage and what to do next (null when 100%).
@@ -40,7 +46,7 @@ public static class ProfileStrength
             (hasAvailability, "Set your weekly availability"),
             (hasDescription, "Add a business description"),
             (hasPhoto, "Add a profile photo"),
-            (hasAddress, "Add your service address and city"),
+            (hasAddress, "Add your service address"),
             (hasPhone, "Add a phone number")
         };
         var done = checks.Count(c => c.Done);
@@ -89,7 +95,6 @@ public class ProviderDashboardViewModel
 {
     public PortalShellViewModel Shell { get; set; } = new() { Role = "Provider" };
     public string BusinessName { get; set; } = string.Empty;
-    public string? City { get; set; }
 
     public int NewRequests { get; set; }
     public int Upcoming { get; set; }

@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.1  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -8,12 +8,12 @@
      PART 2  Functions (8)
      PART 3  Views (2)
      PART 4  Stored procedures (19)
-     PART 5  Triggers (3 new; the 3 audit triggers trg_Users_Audit / trg_Bookings_Audit / trg_Services_Audit are unchanged)
+     PART 5  Triggers (6 new; the 3 audit triggers trg_Users_Audit / trg_Bookings_Audit / trg_Services_Audit are unchanged)
      PART 6  Self-test: runs every procedure, function and trigger with sample data and ROLLS IT ALL BACK
      PART 7  Examples and subqueries for the defense
 
    HOW THIS FILE IS USED
-     - The web app applies PARTS 2-5 itself with the EF migration "DatabaseV2" (dotnet ef database update):
+     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2" and "ProfileCleanup" (dotnet ef database update):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -33,6 +33,20 @@
      - A trigger keeps AVG_RATING and REVIEW_COUNT right after every review change (v1 forgot REVIEW_COUNT on
        moderation); a trigger enforces the booking life cycle; a trigger logs payments into SYSTEM_LOGS.
      - Times are stored in UTC (SYSUTCDATETIME) and compared in Cebu time (fn_ManilaNow), like the app.
+
+   WHAT CHANGED IN v2.1 (EF migration "ProfileCleanup")
+     - SERVISYO is Cebu City only, so the CITY columns of CUSTOMERS and SERVICE_PROVIDERS were removed.
+     - Column sizes: EMAIL NVARCHAR(256); FIRST_NAME / MIDDLE_NAME / LAST_NAME NVARCHAR(100);
+       PHONE_NUMBER NVARCHAR(11), always a Philippine mobile number 09XXXXXXXXX (+639... is turned into 09...).
+     - The sign-up procedures refuse names with numbers, emails whose domain has numbers or one-letter parts
+       (juan@gmail2.com, juan@a.c) and addresses made of numbers only.
+     - Procedure parameters stay larger than the columns ON PURPOSE: SQL Server silently cuts a too-long value
+       to the parameter size, so a bigger parameter lets the procedure see the real length and refuse it
+       with a clear message instead of saving a cut-off value.
+     - CUSTOMERS.ACCOUNT_STATUS and SERVICE_PROVIDERS.ACCOUNT_STATUS are copies of USERS.ACCOUNT_STATUS, kept equal
+       by trg_Users_StatusSync / trg_Customers_StatusCopy / trg_Providers_StatusCopy. USERS stays the real status.
+     - usp_UpdateAccountStatus: suspending or deactivating a provider cancels their Pending bookings (the customers
+       are notified) and lists their Accepted / In Progress bookings for the administrator to follow up.
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -52,7 +66,7 @@ END
 GO
 -- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), so the EF migration comes first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]DatabaseV2')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]ProfileCleanup')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -63,7 +77,7 @@ DECLARE @clash NVARCHAR(MAX) = STUFF((
     SELECT N', ' + o.name
     FROM sys.objects o
     WHERE o.schema_id = SCHEMA_ID(N'dbo')
-      AND o.name IN (N'fn_DayOfWeek', N'fn_ManilaNow', N'fn_GetFullName', N'fn_GetProviderAvgRating', N'fn_CountProviderJobsOnDate', N'fn_IsProviderAvailable', N'fn_HasBookingConflict', N'fn_GetAvailableSlots', N'vw_BookingOverview', N'vw_ProviderDirectory', N'usp_RegisterCustomer', N'usp_RegisterProvider', N'usp_GetUserForLogin', N'usp_ApproveProvider', N'usp_UpdateAccountStatus', N'usp_ModerateReview', N'usp_AddService', N'usp_SearchServices', N'usp_GetProviderAvailability', N'usp_AddAvailability', N'usp_UpdateAvailability', N'usp_DeleteAvailability', N'usp_CreateBooking', N'usp_CancelBooking', N'usp_UpdateBookingStatus', N'usp_ApproveAndPay', N'usp_ConfirmCashReceived', N'usp_AddReview', N'usp_GetMonthlyReport', N'trg_Reviews_RatingSync', N'trg_Bookings_StatusFlow', N'trg_Payments_Audit')
+      AND o.name IN (N'fn_DayOfWeek', N'fn_ManilaNow', N'fn_GetFullName', N'fn_GetProviderAvgRating', N'fn_CountProviderJobsOnDate', N'fn_IsProviderAvailable', N'fn_HasBookingConflict', N'fn_GetAvailableSlots', N'vw_BookingOverview', N'vw_ProviderDirectory', N'usp_RegisterCustomer', N'usp_RegisterProvider', N'usp_GetUserForLogin', N'usp_ApproveProvider', N'usp_UpdateAccountStatus', N'usp_ModerateReview', N'usp_AddService', N'usp_SearchServices', N'usp_GetProviderAvailability', N'usp_AddAvailability', N'usp_UpdateAvailability', N'usp_DeleteAvailability', N'usp_CreateBooking', N'usp_CancelBooking', N'usp_UpdateBookingStatus', N'usp_ApproveAndPay', N'usp_ConfirmCashReceived', N'usp_AddReview', N'usp_GetMonthlyReport', N'trg_Reviews_RatingSync', N'trg_Bookings_StatusFlow', N'trg_Payments_Audit', N'trg_Users_StatusSync', N'trg_Customers_StatusCopy', N'trg_Providers_StatusCopy')
       AND ISNULL(OBJECT_DEFINITION(o.object_id), N'') NOT LIKE N'%SERVISYO-DB-V2%'
     ORDER BY o.name
     FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'');
@@ -85,40 +99,42 @@ CREATE TABLE USERS (
     USER_ID                      INT             IDENTITY(1,1) NOT NULL,
     ACCOUNT_STATUS               NVARCHAR(50)    NOT NULL,
     CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-    EMAIL                        NVARCHAR(155)   NOT NULL,
+    EMAIL                        NVARCHAR(256)   NOT NULL,
     EMAIL_VERIFICATION_PENDING   BIT             NOT NULL,
-    FIRST_NAME                   NVARCHAR(155)   NOT NULL,
-    LAST_NAME                    NVARCHAR(155)   NOT NULL,
-    MIDDLE_NAME                  NVARCHAR(155)   NULL,
+    FIRST_NAME                   NVARCHAR(100)   NOT NULL,
+    LAST_NAME                    NVARCHAR(100)   NOT NULL,
+    MIDDLE_NAME                  NVARCHAR(100)   NULL,
     PASSWORD_HASH                NVARCHAR(255)   NOT NULL,
-    PHONE_NUMBER                 NVARCHAR(15)    NULL,
+    PHONE_NUMBER                 NVARCHAR(11)    NULL,      -- Philippine mobile, 09XXXXXXXXX
     ROLE                         NVARCHAR(50)    NOT NULL,
     CONSTRAINT PK_USERS PRIMARY KEY (USER_ID),
     CONSTRAINT CK_USERS_ROLE CHECK ([ROLE] IN ('Customer','Service Provider','Administrator')),
     CONSTRAINT CK_USERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
 CREATE UNIQUE INDEX IX_USERS_EMAIL ON USERS (EMAIL);
--- triggers on USERS: trg_Users_Audit
+-- triggers on USERS: trg_Users_Audit, trg_Users_StatusSync
 
 CREATE TABLE CUSTOMERS (
     CUSTOMER_ID                  INT             IDENTITY(1,1) NOT NULL,
+    ACCOUNT_STATUS               NVARCHAR(50)    NOT NULL DEFAULT N'Active',   -- copy of USERS.ACCOUNT_STATUS
     ADDRESS                      NVARCHAR(255)   NULL,
-    CITY                         NVARCHAR(255)   NULL,
     PROFILE_PHOTO                NVARCHAR(255)   NULL,
     USER_ID                      INT             NOT NULL,
     CONSTRAINT PK_CUSTOMERS PRIMARY KEY (CUSTOMER_ID),
-    CONSTRAINT FK_CUSTOMERS_USERS_USER_ID FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID)
+    CONSTRAINT FK_CUSTOMERS_USERS_USER_ID FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID),
+    CONSTRAINT CK_CUSTOMERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
 CREATE UNIQUE INDEX IX_CUSTOMERS_USER_ID ON CUSTOMERS (USER_ID);
+-- triggers on CUSTOMERS: trg_Customers_StatusCopy
 
 CREATE TABLE SERVICE_PROVIDERS (
     PROVIDER_ID                  INT             IDENTITY(1,1) NOT NULL,
+    ACCOUNT_STATUS               NVARCHAR(50)    NOT NULL DEFAULT N'Active',   -- copy of USERS.ACCOUNT_STATUS
     ADDRESS                      NVARCHAR(255)   NULL,
     APPROVAL_STATUS              NVARCHAR(50)    NOT NULL,
     AVG_RATING                   DECIMAL(2,1)    NULL,
     BASE_FEE                     DECIMAL(10,2)   NULL,
     BUSINESS_NAME                NVARCHAR(155)   NOT NULL,
-    CITY                         NVARCHAR(50)    NULL,
     DATE_APPLIED                 DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     DATE_APPROVED                DATETIME2       NULL,
     DESCRIPTION                  NVARCHAR(255)   NULL,
@@ -131,9 +147,11 @@ CREATE TABLE SERVICE_PROVIDERS (
     CONSTRAINT FK_SERVICE_PROVIDERS_USERS_USER_ID FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID),
     CONSTRAINT CK_PROVIDERS_APPROVAL CHECK ([APPROVAL_STATUS] IN ('Pending','Approved','Rejected')),
     CONSTRAINT CK_PROVIDERS_LIMITS CHECK ([MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0),
-    CONSTRAINT CK_PROVIDERS_RATING CHECK ([AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5)
+    CONSTRAINT CK_PROVIDERS_RATING CHECK ([AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5),
+    CONSTRAINT CK_PROVIDERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
 CREATE UNIQUE INDEX IX_SERVICE_PROVIDERS_USER_ID ON SERVICE_PROVIDERS (USER_ID);
+-- triggers on SERVICE_PROVIDERS: trg_Reviews_RatingSync (writes AVG_RATING / REVIEW_COUNT), trg_Providers_StatusCopy
 
 CREATE TABLE PROVIDER_AVAILABILITY (
     AVAILABILITY_ID              INT             IDENTITY(1,1) NOT NULL,
@@ -609,7 +627,6 @@ AS
 SELECT p.PROVIDER_ID,
        p.BUSINESS_NAME,
        u.FIRST_NAME + N' ' + u.LAST_NAME AS OWNER_NAME,
-       p.CITY,
        p.BASE_FEE,
        p.AVG_RATING,
        p.REVIEW_COUNT,
@@ -641,7 +658,6 @@ CREATE OR ALTER PROCEDURE dbo.usp_RegisterCustomer
     @PasswordHash  NVARCHAR(400),
     @PhoneNumber   NVARCHAR(50),
     @Address       NVARCHAR(400),
-    @City          NVARCHAR(400) = NULL,
     @NewUserId     INT = NULL OUTPUT,
     @NewCustomerId INT = NULL OUTPUT
 AS
@@ -654,23 +670,34 @@ BEGIN
     SET XACT_ABORT ON;
 
     -- clean the text: trimmed, blank = NULL, email in lower case, phone without spaces / dashes / dots / brackets
+    -- (the parameters are larger than the columns on purpose: too-long text is refused with a message below
+    --  instead of being cut off silently)
     SET @FirstName    = NULLIF(LTRIM(RTRIM(@FirstName)), N'');
     SET @MiddleName   = NULLIF(LTRIM(RTRIM(@MiddleName)), N'');
     SET @LastName     = NULLIF(LTRIM(RTRIM(@LastName)), N'');
     SET @Email        = LOWER(NULLIF(LTRIM(RTRIM(@Email)), N''));
     SET @PasswordHash = NULLIF(LTRIM(RTRIM(@PasswordHash)), N'');
     SET @PhoneNumber  = NULLIF(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(@PhoneNumber, N' ', N''), N'-', N''), N'.', N''), N'(', N''), N')', N''), CHAR(9), N''), N'');
+    -- Philippine mobile number, saved as 09XXXXXXXXX: +639XXXXXXXXX and 639XXXXXXXXX are turned into 09XXXXXXXXX
+    IF LEFT(@PhoneNumber, 3) = N'+63' SET @PhoneNumber = N'0' + SUBSTRING(@PhoneNumber, 4, 50);
+    ELSE IF LEFT(@PhoneNumber, 2) = N'63' AND LEN(@PhoneNumber) = 12 SET @PhoneNumber = N'0' + SUBSTRING(@PhoneNumber, 3, 50);
     SET @Address      = NULLIF(LTRIM(RTRIM(@Address)), N'');
-    SET @City         = NULLIF(LTRIM(RTRIM(@City)), N'');
 
     IF @FirstName IS NULL OR @LastName IS NULL THROW 50102, N'Please enter your first and last name.', 1;
-    IF LEN(@FirstName) > 155 OR LEN(@LastName) > 155 OR LEN(ISNULL(@MiddleName, N'')) > 155 THROW 50102, N'Names can be at most 155 characters.', 1;
-    IF @Email IS NULL OR LEN(@Email) > 155 OR @Email NOT LIKE N'_%@_%' OR @Email LIKE N'%@%@%' THROW 50103, N'Please enter a valid email address.', 1;
+    IF LEN(@FirstName) > 100 OR LEN(@LastName) > 100 OR LEN(ISNULL(@MiddleName, N'')) > 100 THROW 50102, N'Names can be at most 100 characters.', 1;
+    IF @FirstName LIKE N'%[0-9]%' OR @LastName LIKE N'%[0-9]%' OR ISNULL(@MiddleName, N'') LIKE N'%[0-9]%' THROW 50102, N'Please enter a valid name containing letters only.', 1;
+    IF @Email IS NULL OR LEN(@Email) > 256 OR @Email NOT LIKE N'_%@_%._%' OR @Email LIKE N'%@%@%' THROW 50103, N'Please enter a valid email address.', 1;
+    -- the part after @ must be letters, dots and hyphens only (no numbers), and every part at least 2 letters (not a.c)
+    DECLARE @Domain NVARCHAR(400) = N'.' + SUBSTRING(@Email, CHARINDEX(N'@', @Email) + 1, 400) + N'.';
+    IF @Domain LIKE N'%[^a-z.-]%' OR @Domain LIKE N'%..%' OR @Domain LIKE N'%.[a-z].%' OR @Domain LIKE N'%.-%' OR @Domain LIKE N'%-.%'
+       OR LEFT(@Email, CHARINDEX(N'@', @Email) - 1) LIKE N'%[^a-z0-9._%+-]%'
+        THROW 50103, N'Please enter a valid email address (for example juan@gmail.com).', 1;
     IF @PasswordHash IS NULL OR LEN(@PasswordHash) < 20 OR LEN(@PasswordHash) > 255 THROW 50104, N'The password could not be saved. Please try again.', 1;
     IF @PhoneNumber IS NULL THROW 50105, N'Please enter your phone number.', 1;
-    IF LEN(@PhoneNumber) > 15 OR @PhoneNumber LIKE N'_%[^0-9]%' OR @PhoneNumber LIKE N'[^+0-9]%' THROW 50105, N'Please enter a valid phone number.', 1;
+    IF LEN(@PhoneNumber) <> 11 OR @PhoneNumber NOT LIKE N'09[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' THROW 50105, N'Please enter an 11-digit mobile number, for example 09171234567.', 1;
     IF @Address IS NULL THROW 50106, N'Please enter your street address and barangay.', 1;
-    IF LEN(@Address) > 255 OR LEN(ISNULL(@City, N'')) > 255 THROW 50106, N'The address or city is too long.', 1;
+    IF LEN(@Address) > 255 THROW 50106, N'The address can be at most 255 characters.', 1;
+    IF @Address NOT LIKE N'%[a-z]%' THROW 50106, N'Please enter a real address (it cannot be numbers only).', 1;
 
     DECLARE @tc INT = @@TRANCOUNT;
     BEGIN TRY
@@ -687,8 +714,8 @@ BEGIN
                 N'Customer', N'Active', SYSUTCDATETIME(), 0);
         SET @NewUserId = CAST(SCOPE_IDENTITY() AS INT);
 
-        INSERT INTO dbo.CUSTOMERS (USER_ID, ADDRESS, CITY)
-        VALUES (@NewUserId, @Address, @City);
+        INSERT INTO dbo.CUSTOMERS (USER_ID, ADDRESS, ACCOUNT_STATUS)
+        VALUES (@NewUserId, @Address, N'Active');
         SET @NewCustomerId = CAST(SCOPE_IDENTITY() AS INT);
 
         IF @tc = 0 COMMIT TRANSACTION;
@@ -711,7 +738,6 @@ CREATE OR ALTER PROCEDURE dbo.usp_RegisterProvider
     @BusinessName  NVARCHAR(400),
     @Description   NVARCHAR(400),
     @Address       NVARCHAR(400),
-    @City          NVARCHAR(400) = NULL,
     @BaseFee       DECIMAL(12,2),
     @MinNoticeDays INT = 1,
     @MaxJobsPerDay INT = 5,
@@ -732,24 +758,33 @@ BEGIN
     SET @Email        = LOWER(NULLIF(LTRIM(RTRIM(@Email)), N''));
     SET @PasswordHash = NULLIF(LTRIM(RTRIM(@PasswordHash)), N'');
     SET @PhoneNumber  = NULLIF(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(@PhoneNumber, N' ', N''), N'-', N''), N'.', N''), N'(', N''), N')', N''), CHAR(9), N''), N'');
+    -- Philippine mobile number, saved as 09XXXXXXXXX: +639XXXXXXXXX and 639XXXXXXXXX are turned into 09XXXXXXXXX
+    IF LEFT(@PhoneNumber, 3) = N'+63' SET @PhoneNumber = N'0' + SUBSTRING(@PhoneNumber, 4, 50);
+    ELSE IF LEFT(@PhoneNumber, 2) = N'63' AND LEN(@PhoneNumber) = 12 SET @PhoneNumber = N'0' + SUBSTRING(@PhoneNumber, 3, 50);
     SET @BusinessName = NULLIF(LTRIM(RTRIM(@BusinessName)), N'');
     SET @Description  = NULLIF(LTRIM(RTRIM(@Description)), N'');
     SET @Address      = NULLIF(LTRIM(RTRIM(@Address)), N'');
-    SET @City         = NULLIF(LTRIM(RTRIM(@City)), N'');
 
     IF @FirstName IS NULL OR @LastName IS NULL THROW 50102, N'Please enter your first and last name.', 1;
     IF @MiddleName IS NULL THROW 50102, N'Please enter your middle name.', 1;
-    IF LEN(@FirstName) > 155 OR LEN(@LastName) > 155 OR LEN(@MiddleName) > 155 THROW 50102, N'Names can be at most 155 characters.', 1;
-    IF @Email IS NULL OR LEN(@Email) > 155 OR @Email NOT LIKE N'_%@_%' OR @Email LIKE N'%@%@%' THROW 50103, N'Please enter a valid email address.', 1;
+    IF LEN(@FirstName) > 100 OR LEN(@LastName) > 100 OR LEN(@MiddleName) > 100 THROW 50102, N'Names can be at most 100 characters.', 1;
+    IF @FirstName LIKE N'%[0-9]%' OR @LastName LIKE N'%[0-9]%' OR @MiddleName LIKE N'%[0-9]%' THROW 50102, N'Please enter a valid name containing letters only.', 1;
+    IF @Email IS NULL OR LEN(@Email) > 256 OR @Email NOT LIKE N'_%@_%._%' OR @Email LIKE N'%@%@%' THROW 50103, N'Please enter a valid email address.', 1;
+    -- the part after @ must be letters, dots and hyphens only (no numbers), and every part at least 2 letters (not a.c)
+    DECLARE @Domain NVARCHAR(400) = N'.' + SUBSTRING(@Email, CHARINDEX(N'@', @Email) + 1, 400) + N'.';
+    IF @Domain LIKE N'%[^a-z.-]%' OR @Domain LIKE N'%..%' OR @Domain LIKE N'%.[a-z].%' OR @Domain LIKE N'%.-%' OR @Domain LIKE N'%-.%'
+       OR LEFT(@Email, CHARINDEX(N'@', @Email) - 1) LIKE N'%[^a-z0-9._%+-]%'
+        THROW 50103, N'Please enter a valid email address (for example juan@gmail.com).', 1;
     IF @PasswordHash IS NULL OR LEN(@PasswordHash) < 20 OR LEN(@PasswordHash) > 255 THROW 50104, N'The password could not be saved. Please try again.', 1;
     IF @PhoneNumber IS NULL THROW 50105, N'Please enter your phone number.', 1;
-    IF LEN(@PhoneNumber) > 15 OR @PhoneNumber LIKE N'_%[^0-9]%' OR @PhoneNumber LIKE N'[^+0-9]%' THROW 50105, N'Please enter a valid phone number.', 1;
+    IF LEN(@PhoneNumber) <> 11 OR @PhoneNumber NOT LIKE N'09[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' THROW 50105, N'Please enter an 11-digit mobile number, for example 09171234567.', 1;
     IF @BusinessName IS NULL THROW 50107, N'Please enter your business name.', 1;
     IF LEN(@BusinessName) > 155 THROW 50107, N'The business name can be at most 155 characters.', 1;
     IF @Description IS NULL THROW 50108, N'Please describe your services.', 1;
     IF LEN(@Description) > 255 THROW 50108, N'The description can be at most 255 characters.', 1;
     IF @Address IS NULL THROW 50106, N'Please enter your business address.', 1;
-    IF LEN(@Address) > 255 OR LEN(ISNULL(@City, N'')) > 50 THROW 50106, N'The address (255) or city (50 characters) is too long.', 1;
+    IF LEN(@Address) > 255 THROW 50106, N'The address can be at most 255 characters.', 1;
+    IF @Address NOT LIKE N'%[a-z]%' THROW 50106, N'Please enter a real address (it cannot be numbers only).', 1;
     IF @BaseFee IS NULL THROW 50109, N'Please enter your base fee.', 1;
     IF @BaseFee < 0 OR @BaseFee > 1000000 THROW 50109, N'Enter a base fee from 0 to 1,000,000.', 1;
     IF @MinNoticeDays IS NULL OR @MinNoticeDays < 0 OR @MinNoticeDays > 30 THROW 50110, N'Enter a whole number of notice days from 0 to 30.', 1;
@@ -768,12 +803,12 @@ BEGIN
                 N'Service Provider', N'Active', SYSUTCDATETIME(), 0);
         SET @NewUserId = CAST(SCOPE_IDENTITY() AS INT);
 
-        INSERT INTO dbo.SERVICE_PROVIDERS (USER_ID, BUSINESS_NAME, DESCRIPTION, ADDRESS, CITY, BASE_FEE,
+        INSERT INTO dbo.SERVICE_PROVIDERS (USER_ID, BUSINESS_NAME, DESCRIPTION, ADDRESS, BASE_FEE,
                                            AVG_RATING, REVIEW_COUNT, MIN_NOTICE_DAYS, MAX_JOBS_PER_DAY,
-                                           APPROVAL_STATUS, DATE_APPLIED, DATE_APPROVED)
-        VALUES (@NewUserId, @BusinessName, @Description, @Address, @City, @BaseFee,
+                                           APPROVAL_STATUS, DATE_APPLIED, DATE_APPROVED, ACCOUNT_STATUS)
+        VALUES (@NewUserId, @BusinessName, @Description, @Address, @BaseFee,
                 NULL, 0, @MinNoticeDays, @MaxJobsPerDay,
-                N'Pending', SYSUTCDATETIME(), NULL);
+                N'Pending', SYSUTCDATETIME(), NULL, N'Active');
         SET @NewProviderId = CAST(SCOPE_IDENTITY() AS INT);
 
         -- tell every active administrator (their bell)
@@ -884,7 +919,11 @@ BEGIN
     /* SERVISYO-DB-V2
        An ACTIVE administrator suspends, deactivates or re-activates a customer or provider account.
        Allowed changes (same as the website): Active -> Suspended | Deactivated, Suspended -> Active | Deactivated,
-       Deactivated -> Active. Administrators cannot be changed here (and nobody can change their own account). */
+       Deactivated -> Active. Administrators cannot be changed here (and nobody can change their own account).
+       The copies CUSTOMERS.ACCOUNT_STATUS / SERVICE_PROVIDERS.ACCOUNT_STATUS follow automatically (trg_Users_StatusSync).
+       When a SERVICE PROVIDER is suspended or deactivated, their Pending bookings are cancelled and those customers are
+       told; Accepted / In Progress bookings are NOT changed (they may already be paid) but are returned as the result
+       so the administrator can follow them up. */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
@@ -920,7 +959,35 @@ BEGIN
         INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_ID, REASON, CREATED_AT)
         VALUES (@AdminUserId, N'Account ' + @NewStatus, N'USER', @TargetUserId, @Reason, SYSUTCDATETIME());
 
+        -- a provider who can no longer work: cancel their Pending bookings and tell those customers
+        DECLARE @Cancelled TABLE (BOOKING_ID INT PRIMARY KEY, CUSTOMER_USER_ID INT, BOOKING_DATE DATE);
+        DECLARE @ProviderId INT = (SELECT PROVIDER_ID FROM dbo.SERVICE_PROVIDERS WHERE USER_ID = @TargetUserId);
+        IF @Role = N'Service Provider' AND @NewStatus IN (N'Suspended', N'Deactivated') AND @ProviderId IS NOT NULL
+        BEGIN
+            UPDATE b
+            SET b.STATUS = N'Cancelled', b.UPDATED_AT = SYSUTCDATETIME()
+            OUTPUT inserted.BOOKING_ID, c.USER_ID, inserted.BOOKING_DATE INTO @Cancelled (BOOKING_ID, CUSTOMER_USER_ID, BOOKING_DATE)
+            FROM dbo.BOOKINGS b
+            JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
+            WHERE b.PROVIDER_ID = @ProviderId AND b.STATUS = N'Pending';
+
+            INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
+            SELECT x.CUSTOMER_USER_ID,
+                   CONCAT(N'Your booking #', x.BOOKING_ID, N' on ', CONVERT(NVARCHAR(10), x.BOOKING_DATE, 23),
+                          N' was cancelled because the service provider is no longer available. Please book another provider.'),
+                   0, SYSUTCDATETIME()
+            FROM @Cancelled x;
+        END
+
         IF @tc = 0 COMMIT TRANSACTION;
+
+        -- result 1: what happened; result 2: bookings the administrator still has to follow up (empty for customers)
+        SELECT @TargetUserId AS USER_ID, @NewStatus AS ACCOUNT_STATUS, (SELECT COUNT(*) FROM @Cancelled) AS CANCELLED_PENDING_BOOKINGS;
+        SELECT b.BOOKING_ID, b.STATUS, b.BOOKING_DATE, b.BOOKING_TIME, b.PAYMENT_STATUS
+        FROM dbo.BOOKINGS b
+        WHERE @Role = N'Service Provider' AND @NewStatus IN (N'Suspended', N'Deactivated')
+          AND b.PROVIDER_ID = @ProviderId AND b.STATUS IN (N'Accepted', N'In Progress')
+        ORDER BY b.BOOKING_DATE, b.BOOKING_TIME;
     END TRY
     BEGIN CATCH
         IF @tc = 0 AND @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
@@ -1073,7 +1140,6 @@ BEGIN
            c.CATEGORY_NAME,
            p.PROVIDER_ID,
            p.BUSINESS_NAME,
-           p.CITY,
            p.AVG_RATING,
            p.REVIEW_COUNT
     FROM dbo.SERVICES s
@@ -1938,6 +2004,65 @@ BEGIN
 END
 GO
 
+-- trg_Users_StatusSync
+CREATE OR ALTER TRIGGER dbo.trg_Users_StatusSync ON dbo.USERS
+AFTER UPDATE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.1)
+       USERS.ACCOUNT_STATUS is the real account status. CUSTOMERS and SERVICE_PROVIDERS keep a copy of it
+       (ACCOUNT_STATUS) so a suspended customer / provider can be seen in those tables too.
+       When an account status changes, this copies the new value to the customer / provider row. */
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.USER_ID = i.USER_ID WHERE i.ACCOUNT_STATUS <> d.ACCOUNT_STATUS)
+        RETURN;
+
+    UPDATE c SET c.ACCOUNT_STATUS = i.ACCOUNT_STATUS
+    FROM dbo.CUSTOMERS c
+    JOIN inserted i ON i.USER_ID = c.USER_ID
+    WHERE c.ACCOUNT_STATUS <> i.ACCOUNT_STATUS;
+
+    UPDATE p SET p.ACCOUNT_STATUS = i.ACCOUNT_STATUS
+    FROM dbo.SERVICE_PROVIDERS p
+    JOIN inserted i ON i.USER_ID = p.USER_ID
+    WHERE p.ACCOUNT_STATUS <> i.ACCOUNT_STATUS;
+END
+GO
+
+-- trg_Customers_StatusCopy
+CREATE OR ALTER TRIGGER dbo.trg_Customers_StatusCopy ON dbo.CUSTOMERS
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.1)
+       CUSTOMERS.ACCOUNT_STATUS is only a copy of USERS.ACCOUNT_STATUS: whoever inserts or changes a customer row,
+       the copy is set back to the user's real status, so the two can never differ. */
+    SET NOCOUNT ON;
+    UPDATE c SET c.ACCOUNT_STATUS = u.ACCOUNT_STATUS
+    FROM dbo.CUSTOMERS c
+    JOIN inserted i ON i.CUSTOMER_ID = c.CUSTOMER_ID
+    JOIN dbo.USERS u ON u.USER_ID = c.USER_ID
+    WHERE c.ACCOUNT_STATUS <> u.ACCOUNT_STATUS;
+END
+GO
+
+-- trg_Providers_StatusCopy
+CREATE OR ALTER TRIGGER dbo.trg_Providers_StatusCopy ON dbo.SERVICE_PROVIDERS
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.1)
+       SERVICE_PROVIDERS.ACCOUNT_STATUS is only a copy of USERS.ACCOUNT_STATUS (see trg_Customers_StatusCopy).
+       It is not the same as APPROVAL_STATUS (Pending / Approved / Rejected), which this trigger never touches. */
+    SET NOCOUNT ON;
+    UPDATE p SET p.ACCOUNT_STATUS = u.ACCOUNT_STATUS
+    FROM dbo.SERVICE_PROVIDERS p
+    JOIN inserted i ON i.PROVIDER_ID = p.PROVIDER_ID
+    JOIN dbo.USERS u ON u.USER_ID = p.USER_ID
+    WHERE p.ACCOUNT_STATUS <> u.ACCOUNT_STATUS;
+END
+GO
+
 /* =====================================================================================================
    PART 6 - SELF-TEST
    Every test runs inside its own transaction and is ROLLED BACK: nothing is saved. (SQL Server does not reuse
@@ -1971,18 +2096,18 @@ BEGIN
 
     SET @email = N'ana-' + @tag + N'@selftest.local';
     EXEC dbo.usp_RegisterCustomer @FirstName = N'Ana', @LastName = N'Selftest', @Email = @email, @PasswordHash = @hash,
-         @PhoneNumber = N'0917-000-0000', @Address = N'Lahug', @City = N'Cebu City',
+         @PhoneNumber = N'0917-000-0000', @Address = N'Lahug',
          @NewUserId = @CustomerUserId OUTPUT, @NewCustomerId = @cid OUTPUT;
 
     SET @email = N'ben-' + @tag + N'@selftest.local';
     EXEC dbo.usp_RegisterCustomer @FirstName = N'Ben', @LastName = N'Selftest', @Email = @email, @PasswordHash = @hash,
-         @PhoneNumber = N'09170000001', @Address = N'Mabolo', @City = N'Cebu City',
+         @PhoneNumber = N'09170000001', @Address = N'Mabolo',
          @NewUserId = @Customer2UserId OUTPUT, @NewCustomerId = @cid OUTPUT;
 
     SET @email = N'mary-' + @tag + N'@selftest.local';
     EXEC dbo.usp_RegisterProvider @FirstName = N'Mary', @MiddleName = N'Cruz', @LastName = N'Selftest', @Email = @email,
          @PasswordHash = @hash, @PhoneNumber = N'09181234567', @BusinessName = @biz, @Description = N'Pipes and leaks',
-         @Address = N'Banilad', @City = N'Cebu City', @BaseFee = 300, @MinNoticeDays = 1, @MaxJobsPerDay = 3,
+         @Address = N'Banilad', @BaseFee = 300, @MinNoticeDays = 1, @MaxJobsPerDay = 3,
          @NewUserId = @ProviderUserId OUTPUT, @NewProviderId = @ProviderId OUTPUT;
 
     EXEC dbo.usp_ApproveProvider @AdminUserId = @AdminUserId, @ProviderId = @ProviderId, @Decision = N'Approved', @Reason = N'Self-test';
@@ -2007,7 +2132,7 @@ DECLARE @R TABLE (N INT IDENTITY(1,1), TEST NVARCHAR(200), RESULT NVARCHAR(4), D
 DECLARE @A INT, @C INT, @C2 INT, @PU INT, @P INT, @S INT, @D DATE, @B INT, @B2 INT, @RevId INT, @n INT,
         @ref NVARCHAR(50), @ids NVARCHAR(20), @t NVARCHAR(200), @email NVARCHAR(155), @kw NVARCHAR(100);
 DECLARE @Found TABLE (SERVICE_ID INT, SERVICE_NAME NVARCHAR(100), DESCRIPTION NVARCHAR(255), PRICE DECIMAL(10,2), DURATION_MINUTES INT,
-                      CATEGORY_ID INT, CATEGORY_NAME NVARCHAR(100), PROVIDER_ID INT, BUSINESS_NAME NVARCHAR(155), CITY NVARCHAR(50),
+                      CATEGORY_ID INT, CATEGORY_NAME NVARCHAR(100), PROVIDER_ID INT, BUSINESS_NAME NVARCHAR(155),
                       AVG_RATING DECIMAL(2,1), REVIEW_COUNT INT);
 
 ------------------------------------------------------------------ 1
@@ -2432,6 +2557,127 @@ END TRY
 BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
     INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50132, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 22
+SET @t = N'22 Phone +63 917 000 0003 is saved as 09170000003';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    SET @email = N'plus-' + LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''), 12) + N'@selftest.local';
+    EXEC dbo.usp_RegisterCustomer @FirstName = N'Phone', @LastName = N'Test', @Email = @email,
+         @PasswordHash = N'SELFTEST-NOT-A-REAL-PASSWORD-HASH-000000', @PhoneNumber = N'+63 917 000 0003', @Address = N'Talamban', @NewUserId = @n OUTPUT;
+    IF EXISTS (SELECT 1 FROM dbo.USERS WHERE USER_ID = @n AND PHONE_NUMBER = N'09170000003')
+        INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The phone number was not changed to 09XXXXXXXXX.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 23
+SET @t = N'23 A phone number that is not 11 digits is refused (50105)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    SET @email = N'short-' + LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''), 12) + N'@selftest.local';
+    EXEC dbo.usp_RegisterCustomer @FirstName = N'Phone', @LastName = N'Test', @Email = @email,
+         @PasswordHash = N'SELFTEST-NOT-A-REAL-PASSWORD-HASH-000000', @PhoneNumber = N'12345', @Address = N'Talamban', @NewUserId = @n OUTPUT;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50105, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 24
+SET @t = N'24 An email with a number in the domain is refused (50103)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC dbo.usp_RegisterCustomer @FirstName = N'Mail', @LastName = N'Test', @Email = N'juan@gmail2.com',
+         @PasswordHash = N'SELFTEST-NOT-A-REAL-PASSWORD-HASH-000000', @PhoneNumber = N'09170000004', @Address = N'Talamban', @NewUserId = @n OUTPUT;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50103, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 25
+SET @t = N'25 A one-letter domain like a.c is refused (50103)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC dbo.usp_RegisterCustomer @FirstName = N'Mail', @LastName = N'Test', @Email = N'juan@a.c',
+         @PasswordHash = N'SELFTEST-NOT-A-REAL-PASSWORD-HASH-000000', @PhoneNumber = N'09170000005', @Address = N'Talamban', @NewUserId = @n OUTPUT;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50103, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 26
+SET @t = N'26 An address of numbers only is refused (50106)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    SET @email = N'addr-' + LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''), 12) + N'@selftest.local';
+    EXEC dbo.usp_RegisterCustomer @FirstName = N'Phone', @LastName = N'Test', @Email = @email,
+         @PasswordHash = N'SELFTEST-NOT-A-REAL-PASSWORD-HASH-000000', @PhoneNumber = N'09170000006', @Address = N'12345', @NewUserId = @n OUTPUT;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50106, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 27
+SET @t = N'27 The status copies follow USERS (trg_Users_StatusSync, trg_Customers_StatusCopy)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    EXEC dbo.usp_UpdateAccountStatus @AdminUserId = @A, @TargetUserId = @C, @NewStatus = N'Suspended', @Reason = N'Self-test';
+    SET @n = IIF(EXISTS (SELECT 1 FROM dbo.CUSTOMERS WHERE USER_ID = @C AND ACCOUNT_STATUS = N'Suspended'), 1, 0);
+    UPDATE dbo.CUSTOMERS SET ACCOUNT_STATUS = N'Deactivated' WHERE USER_ID = @C;   -- a wrong direct change is put back
+    IF @n = 1 AND EXISTS (SELECT 1 FROM dbo.CUSTOMERS WHERE USER_ID = @C AND ACCOUNT_STATUS = N'Suspended')
+        INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'CUSTOMERS.ACCOUNT_STATUS does not match USERS.ACCOUNT_STATUS.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 28
+SET @t = N'28 Suspending a provider cancels Pending bookings, keeps Accepted ones and tells the customer';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Stays pending', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C2, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '14:00',
+         @ServiceLocation = N'Mabolo', @ServiceDescription = N'Gets accepted', @NewBookingId = @B2 OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B2, @NewStatus = N'Accepted';
+    EXEC dbo.usp_UpdateAccountStatus @AdminUserId = @A, @TargetUserId = @PU, @NewStatus = N'Suspended', @Reason = N'Self-test';
+    IF EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'Cancelled')
+       AND EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B2 AND STATUS = N'Accepted')
+       AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @C AND MESSAGE LIKE CONCAT(N'Your booking #', @B, N' on % was cancelled because%'))
+       AND EXISTS (SELECT 1 FROM dbo.SERVICE_PROVIDERS WHERE PROVIDER_ID = @P AND ACCOUNT_STATUS = N'Suspended' AND APPROVAL_STATUS = N'Approved')
+        INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The bookings, the notification or the provider copy are not as expected.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
 END CATCH;
 
 ------------------------------------------------------------------ results

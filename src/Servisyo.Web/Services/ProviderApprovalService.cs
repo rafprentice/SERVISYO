@@ -53,7 +53,7 @@ public class ProviderApprovalService : IProviderApprovalService
             .Where(p => p.ProviderId == providerId)
             .Select(p => new
             {
-                p.ProviderId, p.BusinessName, p.Description, p.Address, p.City, p.BaseFee,
+                p.ProviderId, p.BusinessName, p.Description, p.Address, p.BaseFee,
                 p.ApprovalStatus, p.DateApplied,
                 First = p.User.FirstName, Last = p.User.LastName,
                 Mail = p.User.Email, Phone = p.User.PhoneNumber, Account = p.User.AccountStatus
@@ -78,7 +78,8 @@ public class ProviderApprovalService : IProviderApprovalService
         }
 
         var name = $"{row.First} {row.Last}".Trim();
-        var location = string.Join(", ", new[] { row.Address, row.City }
+        // SERVISYO is Cebu City only: "Street, Barangay, Cebu City", or just "Cebu City" without an address
+        var location = string.Join(", ", new[] { row.Address, ServiceArea.City }
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x!.Trim()));
 

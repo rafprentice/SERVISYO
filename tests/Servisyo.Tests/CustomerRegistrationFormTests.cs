@@ -33,10 +33,8 @@ public class CustomerRegistrationFormTests
         var f = Form();
         f.StreetAddress = "123 Rizal St.";
         f.Barangay = "Brgy. San Isidro";
-        f.City = "Cebu City";
         var m = f.ToServiceModel();
-        Assert.Equal("123 Rizal St., Brgy. San Isidro", m.Address);
-        Assert.Equal("Cebu City", m.City);
+        Assert.Equal("123 Rizal St., Brgy. San Isidro", m.Address);   // no city: SERVISYO is Cebu City only
     }
 
     [Fact]
@@ -45,11 +43,9 @@ public class CustomerRegistrationFormTests
         var f = Form();
         f.StreetAddress = " ";
         f.Barangay = null;
-        f.City = "";
         f.PhoneNumber = "  ";
         var m = f.ToServiceModel();
         Assert.Null(m.Address);
-        Assert.Null(m.City);
         Assert.Null(m.PhoneNumber);
     }
 

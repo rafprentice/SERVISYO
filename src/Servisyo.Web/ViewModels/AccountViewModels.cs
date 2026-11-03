@@ -18,9 +18,25 @@ public static class InputRules
     public const string FullName = "^\\s*[" + L + ".'-]*[" + L + "][" + L + ".'-]*(\\s+[" + L + ".'-]*[" + L + "][" + L + ".'-]*)+\\s*$";
     public const string FullNameMessage = "Please enter your first and last name using letters only.";
 
-    /// digits, spaces and hyphens, optional leading +, 7 to 15 characters ("0917 555 1234", "+63-917-555-1234")
-    public const string Phone = "^\\+?[0-9\\s-]{7,15}$";
-    public const string PhoneMessage = "Phone number can only contain digits and valid phone symbols.";
+    /// A Philippine mobile number: 11 digits starting with 09 ("09171234567"), or the same number as +639171234567.
+    /// Digits and one leading + only: no spaces, dashes, letters or other symbols. It is always saved as 09XXXXXXXXX.
+    /// ([0-9], not \d: in .NET \d also matches digits of other alphabets.)
+    public const string Phone = "^(09[0-9]{9}|\\+639[0-9]{9})$";
+    public const string PhoneMessage = "Enter an 11-digit mobile number like 09171234567 (or +639171234567), digits only.";
+
+    /// [username]@[domain].[tld]: the domain and the TLD are letters only (no numbers) and every part has at least
+    /// 2 letters, so "juan@gmail.com" and "ana@usc.edu.ph" pass but "juan@gmail2.com" and "juan@a.c" do not.
+    public const string Email = "^[A-Za-z0-9._%+-]+@(?:[A-Za-z][A-Za-z-]*[A-Za-z]\\.)+[A-Za-z]{2,}$";
+    public const string EmailMessage = "Please enter a valid email address, for example juan@gmail.com.";
+
+    /// Street address / barangay: free text, but not numbers only ("123" is refused, "123 Gorordo Ave" is fine).
+    public const string Address = HasLetter;
+    public const string AddressMessage = "Please enter a real address (it cannot be numbers only).";
+    public const string BarangayMessage = "Please enter a real barangay name (it cannot be numbers only).";
+
+    /// Column sizes in the database (USERS).
+    public const int MaxNameLength = 100;
+    public const int MaxEmailLength = 256;
 
     /// a business name may have numbers ("A1 Plumbing") but must have at least one letter
     public const string HasLetter = "^(?=.*[" + L + "]).+$";
@@ -32,12 +48,14 @@ public static class InputRules
     public static bool IsName(string? v) => v is not null && System.Text.RegularExpressions.Regex.IsMatch(v, Name);
     public static bool IsFullName(string? v) => v is not null && System.Text.RegularExpressions.Regex.IsMatch(v, FullName);
     public static bool IsPhone(string? v) => v is not null && System.Text.RegularExpressions.Regex.IsMatch(v, Phone);
+    public static bool IsEmail(string? v) => v is not null && System.Text.RegularExpressions.Regex.IsMatch(v, Email);
     public static bool HasALetter(string? v) => v is not null && System.Text.RegularExpressions.Regex.IsMatch(v, HasLetter);
 }
 
 public class LoginViewModel
 {
-    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(155)]
+    // only the basic email check here: an account made before v2.1 may use an address the stricter sign-up rule refuses
+    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(InputRules.MaxEmailLength)]
     [Display(Name = "Email Address")]
     public string Email { get; set; } = string.Empty;
 
@@ -50,22 +68,23 @@ public class LoginViewModel
 
 public abstract class RegisterBaseViewModel
 {
-    [Required(ErrorMessage = "Please enter your first name."), StringLength(155), Display(Name = "First name")]
+    [Required(ErrorMessage = "Please enter your first name."), StringLength(InputRules.MaxNameLength), Display(Name = "First name")]
     [RegularExpression(InputRules.Name, ErrorMessage = InputRules.NameMessage)]
     public string FirstName { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Please enter your middle name."), StringLength(155), Display(Name = "Middle name")]
+    [Required(ErrorMessage = "Please enter your middle name."), StringLength(InputRules.MaxNameLength), Display(Name = "Middle name")]
     [RegularExpression(InputRules.Name, ErrorMessage = InputRules.NameMessage)]
     public string? MiddleName { get; set; }
 
-    [Required(ErrorMessage = "Please enter your last name."), StringLength(155), Display(Name = "Last name")]
+    [Required(ErrorMessage = "Please enter your last name."), StringLength(InputRules.MaxNameLength), Display(Name = "Last name")]
     [RegularExpression(InputRules.Name, ErrorMessage = InputRules.NameMessage)]
     public string LastName { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(155)]
+    [Required(ErrorMessage = "Please enter your email address."), StringLength(InputRules.MaxEmailLength)]
+    [RegularExpression(InputRules.Email, ErrorMessage = InputRules.EmailMessage)]
     public string Email { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Please enter your phone number."), StringLength(16), Display(Name = "Phone number")]
+    [Required(ErrorMessage = "Please enter your phone number."), StringLength(13), Display(Name = "Phone number")]
     [RegularExpression(InputRules.Phone, ErrorMessage = InputRules.PhoneMessage)]
     public string? PhoneNumber { get; set; }
 
@@ -84,10 +103,8 @@ public abstract class RegisterBaseViewModel
 public class RegisterCustomerViewModel : RegisterBaseViewModel
 {
     [StringLength(255), Display(Name = "Address (optional)")]
+    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.AddressMessage)]
     public string? Address { get; set; }
-
-    [StringLength(255), Display(Name = "City (optional)")]
-    public string? City { get; set; }
 }
 
 public class RegisterProviderViewModel : RegisterBaseViewModel
@@ -100,11 +117,8 @@ public class RegisterProviderViewModel : RegisterBaseViewModel
     public string? Description { get; set; }
 
     [Required(ErrorMessage = "Please enter your business address."), StringLength(255), Display(Name = "Address")]
+    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.AddressMessage)]
     public string? Address { get; set; }
-
-    [StringLength(50), Display(Name = "City (optional)")]
-    [RegularExpression(InputRules.Name, ErrorMessage = "Please enter a valid city name containing letters only.")]
-    public string? City { get; set; }
 
     [Required(ErrorMessage = "Please enter your base fee.")]
     [Range(0, 1000000, ErrorMessage = "Enter a base fee from 0 to 1,000,000 (numbers only).")]
@@ -129,31 +143,30 @@ public sealed class MustBeTrueAttribute : ValidationAttribute
 /// The form on the customer registration page (matches the design).
 public class CustomerRegistrationViewModel
 {
-    [Required(ErrorMessage = "Please enter your full name."), StringLength(155)]
+    [Required(ErrorMessage = "Please enter your full name."), StringLength(InputRules.MaxNameLength)]
     [RegularExpression(InputRules.FullName, ErrorMessage = InputRules.FullNameMessage)]
     [Display(Name = "Full Name")]
     public string FullName { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Please enter your email address."), EmailAddress(ErrorMessage = "Please enter a valid email address."), StringLength(155)]
+    [Required(ErrorMessage = "Please enter your email address."), StringLength(InputRules.MaxEmailLength)]
+    [RegularExpression(InputRules.Email, ErrorMessage = InputRules.EmailMessage)]
     [Display(Name = "Email Address")]
     public string Email { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Please enter your phone number.")]
-    [StringLength(16, ErrorMessage = "Phone number is too long.")]
+    [StringLength(13, ErrorMessage = "Phone number is too long.")]
     [RegularExpression(InputRules.Phone, ErrorMessage = InputRules.PhoneMessage)]
     [Display(Name = "Phone Number")]
     public string? PhoneNumber { get; set; }
 
     [Required(ErrorMessage = "Please enter your street address."), StringLength(150)]
+    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.AddressMessage)]
     [Display(Name = "Street Address")]
     public string? StreetAddress { get; set; }
 
     [Required(ErrorMessage = "Please enter your barangay."), StringLength(100)]
+    [RegularExpression(InputRules.Address, ErrorMessage = InputRules.BarangayMessage)]
     public string? Barangay { get; set; }
-
-    [StringLength(100)]
-    [RegularExpression(InputRules.Name, ErrorMessage = "Please enter a valid city name containing letters only.")]
-    public string? City { get; set; }
 
     [Required(ErrorMessage = "Please enter a password."), DataType(DataType.Password)]
     [StringLength(100, MinimumLength = 8, ErrorMessage = "Password must be at least 8 characters.")]
@@ -169,7 +182,7 @@ public class CustomerRegistrationViewModel
     public bool AcceptTerms { get; set; }
 
     /// Converts the page form into the model the service layer expects.
-    /// The database stores first / last name separately and has no Barangay column,
+    /// The database stores first / last name separately and has no Barangay or City column (SERVISYO is Cebu City only),
     /// so: first word = first name, the rest = last name; barangay is appended to the address.
     public RegisterCustomerViewModel ToServiceModel()
     {
@@ -184,7 +197,6 @@ public class CustomerRegistrationViewModel
             Email = Email,
             PhoneNumber = string.IsNullOrWhiteSpace(PhoneNumber) ? null : PhoneNumber.Trim(),
             Address = address.Length == 0 ? null : address,
-            City = string.IsNullOrWhiteSpace(City) ? null : City.Trim(),
             Password = Password,
             ConfirmPassword = ConfirmPassword
         };

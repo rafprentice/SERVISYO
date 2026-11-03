@@ -68,8 +68,7 @@ public class UserManagementService : IUserManagementService
             .Skip((page - 1) * PageSize).Take(PageSize)
             .Select(u => new
             {
-                u.UserId, u.FirstName, u.LastName, u.Email, u.AccountStatus,
-                City = u.Customer != null ? u.Customer.City : null
+                u.UserId, u.FirstName, u.LastName, u.Email, u.AccountStatus
             })
             .ToListAsync(ct);
 
@@ -102,7 +101,6 @@ public class UserManagementService : IUserManagementService
                     Name = name,
                     Initials = NameFormat.Initials(name),
                     Email = r.Email,
-                    City = string.IsNullOrWhiteSpace(r.City) ? null : r.City,
                     Status = r.AccountStatus,
                     Actions = AccountTransitions.AvailableFor(r.AccountStatus).Select(UserActionInfo.For).ToList()
                 };
@@ -127,7 +125,8 @@ public class UserManagementService : IUserManagementService
             return new(ChangeStatusOutcome.ReasonTooLong, $"The reason can be at most {MaxReasonLength} characters.");
 
         // 2. The target must be a CUSTOMER account (never an administrator or a provider from this page).
-        var target = await _db.Users.FirstOrDefaultAsync(u => u.UserId == targetUserId && u.Role == Roles.Customer, ct);
+        var target = await _db.Users.Include(u => u.Customer)
+            .FirstOrDefaultAsync(u => u.UserId == targetUserId && u.Role == Roles.Customer, ct);
         if (target is null)
             return new(ChangeStatusOutcome.NotFound, "That customer account was not found.");
 
@@ -142,6 +141,7 @@ public class UserManagementService : IUserManagementService
         // 4. Save the new status and the log entry together (one SaveChanges = one database transaction).
         //    Same log format as usp_UpdateAccountStatus in the PDF: 'Account <status>', 'USER'.
         target.AccountStatus = newStatus;
+        if (target.Customer is not null) target.Customer.AccountStatus = newStatus;   // the copy on CUSTOMERS
         _db.AdminActions.Add(new AdminAction
         {
             AdminUserId = adminUserId,

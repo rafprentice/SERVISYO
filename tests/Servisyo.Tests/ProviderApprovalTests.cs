@@ -112,10 +112,10 @@ public class ProviderApprovalServiceTests
         };
 
     private static Provider NewProvider(string first = "Vincent", string last = "Valencia", string business = "Valencia Plumbing",
-        string approval = ApprovalStatuses.Pending, string? city = "Cebu City", string? address = null)
+        string approval = ApprovalStatuses.Pending, string? address = null)
         => new()
         {
-            BusinessName = business, City = city, Address = address, ApprovalStatus = approval,
+            BusinessName = business, Address = address, ApprovalStatus = approval,
             DateApplied = new DateTime(2026, 10, 12, 3, 0, 0),
             User = NewUser(first, last, Roles.ServiceProvider)
         };
@@ -159,7 +159,7 @@ public class ProviderApprovalServiceTests
         Assert.Equal("Vincent Valencia", vm.Name);
         Assert.Equal("VV", vm.Initials);
         Assert.Equal("Valencia Plumbing", vm.BusinessName);
-        Assert.Equal("12 Colon St., Cebu City", vm.Location);
+        Assert.Equal("12 Colon St., Cebu City", vm.Location);   // the address, then the one city SERVISYO serves
         Assert.Equal(new[] { "Plumbing", "Repair" }, vm.Services);
         Assert.Equal("Fast, clean plumbing.", vm.Description);
         Assert.Equal(1500m, vm.BaseFee!.Value);
@@ -175,7 +175,7 @@ public class ProviderApprovalServiceTests
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
-        var p = NewProvider(city: null);
+        var p = NewProvider();
         var cat = new ServiceCategory { CategoryName = "Plumbing" };
         p.Services.Add(new Service { Category = cat, ServiceName = "Pipe Repair", Price = 500m });
         p.Services.Add(new Service { Category = cat, ServiceName = "Old Hidden Service", Price = 500m, IsActive = false });
@@ -184,7 +184,7 @@ public class ProviderApprovalServiceTests
         var vm = (await svc.GetApplicationAsync(admin.UserId, p.ProviderId)).Application!;
 
         Assert.Equal(new[] { "Pipe Repair" }, vm.Services);
-        Assert.Null(vm.Location);
+        Assert.Equal("Cebu City", vm.Location);       // no address: just the city
         Assert.Null(vm.Description);
         Assert.Null(vm.Phone);
         Assert.Null(vm.BaseFee);

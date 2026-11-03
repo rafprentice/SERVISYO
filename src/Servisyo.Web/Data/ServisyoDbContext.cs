@@ -50,15 +50,16 @@ public class ServisyoDbContext : DbContext
             e.ToTable("USERS", t =>
             {
                 t.HasTrigger("trg_Users_Audit");
+                t.HasTrigger("trg_Users_StatusSync");      // database v2.1: copies ACCOUNT_STATUS to CUSTOMERS / SERVICE_PROVIDERS
                 t.HasCheckConstraint("CK_USERS_ROLE", "[ROLE] IN ('Customer','Service Provider','Administrator')");
                 t.HasCheckConstraint("CK_USERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
             });
             e.HasKey(x => x.UserId);
-            e.Property(x => x.FirstName).HasMaxLength(155);
-            e.Property(x => x.MiddleName).HasMaxLength(155);
-            e.Property(x => x.LastName).HasMaxLength(155);
-            e.Property(x => x.Email).HasMaxLength(155);
-            e.Property(x => x.PhoneNumber).HasMaxLength(15);
+            e.Property(x => x.FirstName).HasMaxLength(100);
+            e.Property(x => x.MiddleName).HasMaxLength(100);
+            e.Property(x => x.LastName).HasMaxLength(100);
+            e.Property(x => x.Email).HasMaxLength(256);
+            e.Property(x => x.PhoneNumber).HasMaxLength(11);    // Philippine mobile number, always 09XXXXXXXXX
             e.Property(x => x.Role).HasMaxLength(50);
             e.Property(x => x.AccountStatus).HasMaxLength(50);
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
@@ -67,7 +68,12 @@ public class ServisyoDbContext : DbContext
 
         mb.Entity<Customer>(e =>
         {
-            e.ToTable("CUSTOMERS");
+            e.ToTable("CUSTOMERS", t =>
+            {
+                t.HasTrigger("trg_Customers_StatusCopy");  // database v2.1
+                t.HasCheckConstraint("CK_CUSTOMERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
+            });
+            e.Property(x => x.AccountStatus).HasMaxLength(50).HasDefaultValue(AccountStatuses.Active);
             e.HasOne(x => x.User).WithOne(u => u.Customer).HasForeignKey<Customer>(x => x.UserId);
             e.HasIndex(x => x.UserId).IsUnique();
         });
@@ -80,9 +86,11 @@ public class ServisyoDbContext : DbContext
                 t.HasCheckConstraint("CK_PROVIDERS_APPROVAL", "[APPROVAL_STATUS] IN ('Pending','Approved','Rejected')");
                 t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0");
                 t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");   // database v2
+                t.HasCheckConstraint("CK_PROVIDERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");          // database v2.1
+                t.HasTrigger("trg_Providers_StatusCopy");  // database v2.1
             });
             e.Property(x => x.BusinessName).HasMaxLength(155);
-            e.Property(x => x.City).HasMaxLength(50);
+            e.Property(x => x.AccountStatus).HasMaxLength(50).HasDefaultValue(AccountStatuses.Active);
             e.Property(x => x.AvgRating).HasPrecision(2, 1);
             e.Property(x => x.ApprovalStatus).HasMaxLength(50);
             e.Property(x => x.DateApplied).HasDefaultValueSql("SYSUTCDATETIME()");

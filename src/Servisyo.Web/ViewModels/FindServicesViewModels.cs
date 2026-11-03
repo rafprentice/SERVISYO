@@ -48,7 +48,6 @@ public class FindProviderCardViewModel
     public string Name { get; set; } = string.Empty;            // the person: "Marco Reyes"
     public string Initials { get; set; } = string.Empty;
     public string BusinessName { get; set; } = string.Empty;
-    public string? City { get; set; }
     public string? CategoryName { get; set; }                   // the badge in the corner
     public string? AvailabilityText { get; set; }               // "Available Today" | "Next: Tomorrow" | "Next: This Week" | null
     public string AvailabilityTone { get; set; } = "completed"; // the .sv-tag--{tone} colour
@@ -73,9 +72,6 @@ public class FindProviderCardViewModel
     public string? PriceText => Price is { } p ? ServiceFormat.Peso(p) : null;
 
     public string? MoreText => MoreServices > 0 ? $"+{MoreServices} more" : null;
-
-    /// "Rhea's Home Care" and, below it, "Mandaluyong"
-    public string? LocationText => string.IsNullOrWhiteSpace(City) ? null : City;
 }
 
 public class FindServicesPageViewModel

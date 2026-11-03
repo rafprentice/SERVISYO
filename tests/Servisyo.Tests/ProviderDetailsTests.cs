@@ -32,7 +32,7 @@ public class ProviderDetailsTests
     {
         var p = new Provider
         {
-            BusinessName = "Vincent Plumbing", City = "Cebu City", Address = "12 Colon St", Description = "Good in Plumbing and Electrical",
+            BusinessName = "Vincent Plumbing", Address = "12 Colon St", Description = "Good in Plumbing and Electrical",
             ApprovalStatus = approval, User = NewUser("Vincent", "Valencia", Roles.ServiceProvider, account, "+639178889999")
         };
         db.Providers.Add(p);
@@ -69,7 +69,7 @@ public class ProviderDetailsTests
         var d = lookup.Details!;
         Assert.Equal("Vincent Valencia", d.Name);
         Assert.Equal("Vincent Plumbing", d.BusinessName);
-        Assert.Equal("Plumbing · Cebu City", d.Location);
+        Assert.Equal("Plumbing", d.Location);
         Assert.Equal("+639178889999", d.Phone);
         Assert.Equal("12 Colon St", d.Address);
         Assert.Equal("Good in Plumbing and Electrical", d.Description);
@@ -141,6 +141,7 @@ public class ProviderDetailsTests
         Assert.Equal(ChangeStatusOutcome.Success, result.Outcome);
         Assert.Equal("Vincent Valencia was suspended.", result.Message);
         Assert.Equal(AccountStatuses.Suspended, (await db.Users.FindAsync(p.UserId))!.AccountStatus);
+        Assert.Equal(AccountStatuses.Suspended, (await db.Providers.FindAsync(p.ProviderId))!.AccountStatus);   // the copy
 
         var log = await db.AdminActions.SingleAsync();
         Assert.Equal(admin.UserId, log.AdminUserId);
@@ -239,6 +240,88 @@ public class ProviderDetailsTests
         Assert.Equal(ChangeStatusOutcome.ReasonTooLong, result.Outcome);
         Assert.Equal(AccountStatuses.Active, (await db.Users.FindAsync(p.UserId))!.AccountStatus);
         Assert.Empty(db.AdminActions);
+    }
+
+    // ------------------------------------------------------------------ what suspending does to the provider's bookings
+
+    private static async Task<Booking> AddBookingAsync(ServisyoDbContext db, Customer c, Provider p, string status, int day, int hour = 9)
+    {
+        var b = new Booking
+        {
+            CustomerId = c.CustomerId, ProviderId = p.ProviderId, BookingDate = new DateOnly(2026, 11, day), BookingTime = new TimeOnly(hour, 0),
+            TotalDurationMinutes = 60, TotalFee = 500m, Status = status, PaymentStatus = PaymentStatuses.Unpaid, RowVersion = new byte[] { 1 }
+        };
+        db.Bookings.Add(b);
+        await db.SaveChangesAsync();
+        return b;
+    }
+
+    private static async Task<Customer> AddCustomerAsync(ServisyoDbContext db, string first)
+    {
+        var c = new Customer { User = NewUser(first, "Cruz", Roles.Customer) };
+        db.Customers.Add(c);
+        await db.SaveChangesAsync();
+        return c;
+    }
+
+    [Theory]
+    [InlineData(AccountAction.Suspend)]
+    [InlineData(AccountAction.Deactivate)]
+    public async Task StoppingAProvider_CancelsTheirPendingBookings_TellsTheCustomers_AndListsTheOpenOnes(AccountAction action)
+    {
+        var (svc, db) = Create();
+        var admin = await AddAdminAsync(db);
+        var p = await AddProviderAsync(db);
+        var other = new Provider { BusinessName = "Other Co", ApprovalStatus = ApprovalStatuses.Approved, User = NewUser("Olga", "Other", Roles.ServiceProvider) };
+        db.Providers.Add(other);
+        await db.SaveChangesAsync();
+        var ana = await AddCustomerAsync(db, "Ana");
+        var ben = await AddCustomerAsync(db, "Ben");
+
+        var pending1 = await AddBookingAsync(db, ana, p, BookingStatuses.Pending, 10);
+        var pending2 = await AddBookingAsync(db, ben, p, BookingStatuses.Pending, 11);
+        var accepted = await AddBookingAsync(db, ana, p, BookingStatuses.Accepted, 12, 14);
+        var completed = await AddBookingAsync(db, ben, p, BookingStatuses.Completed, 3);
+        var othersPending = await AddBookingAsync(db, ana, other, BookingStatuses.Pending, 10);
+
+        var result = await svc.ChangeStatusAsync(admin.UserId, p.ProviderId, action, null);
+
+        Assert.Equal(ChangeStatusOutcome.Success, result.Outcome);
+        db.ChangeTracker.Clear();
+        async Task<string> StatusOf(Booking b) => (await db.Bookings.SingleAsync(x => x.BookingId == b.BookingId)).Status;
+        Assert.Equal(BookingStatuses.Cancelled, await StatusOf(pending1));
+        Assert.Equal(BookingStatuses.Cancelled, await StatusOf(pending2));
+        Assert.Equal(BookingStatuses.Accepted, await StatusOf(accepted));        // may be paid: never changed automatically
+        Assert.Equal(BookingStatuses.Completed, await StatusOf(completed));
+        Assert.Equal(BookingStatuses.Pending, await StatusOf(othersPending));   // another provider's booking is untouched
+
+        var notes = await db.Notifications.OrderBy(n => n.NotificationId).ToListAsync();
+        Assert.Equal(new[] { ana.UserId, ben.UserId }, notes.Select(n => n.UserId));
+        Assert.StartsWith($"Your booking #{pending1.BookingId} on Nov 10, 2026 was cancelled because the service provider is no longer available.", notes[0].Message);
+
+        Assert.Contains("2 pending bookings were cancelled and the customers were notified.", result.Message);
+        Assert.Contains($"Still open, please follow up: #{accepted.BookingId} (Accepted, Nov 12, 2:00 PM).", result.Message);
+        Assert.Equal(1, await db.AdminActions.CountAsync());
+    }
+
+    [Fact]
+    public async Task ReactivatingAProvider_ChangesNoBookings_AndPutsTheCopyBack()
+    {
+        var (svc, db) = Create();
+        var admin = await AddAdminAsync(db);
+        var p = await AddProviderAsync(db, account: AccountStatuses.Suspended);
+        p.AccountStatus = AccountStatuses.Suspended;
+        await db.SaveChangesAsync();
+        var ana = await AddCustomerAsync(db, "Ana");
+        var accepted = await AddBookingAsync(db, ana, p, BookingStatuses.Accepted, 12);
+
+        var result = await svc.ChangeStatusAsync(admin.UserId, p.ProviderId, AccountAction.Reactivate, null);
+
+        Assert.Equal("Vincent Valencia was reactivated.", result.Message);
+        db.ChangeTracker.Clear();
+        Assert.Equal(AccountStatuses.Active, (await db.Providers.SingleAsync(x => x.ProviderId == p.ProviderId)).AccountStatus);
+        Assert.Equal(BookingStatuses.Accepted, (await db.Bookings.SingleAsync()).Status);
+        Assert.Empty(db.Notifications);
     }
 
     [Fact]

@@ -24,26 +24,32 @@ public class ProfileRulesTests
     public void SplitName_FirstWordIsTheFirstName(string name, string first, string last)
         => Assert.Equal((first, last), ProfileRules.SplitName(name));
 
+    /// NormalizePhone puts a number into the saved form: separators removed and +63 / 63 turned into 0
+    /// (whether the typed number is allowed at all is InputRules.Phone's job).
     [Theory]
-    [InlineData("+63 917 555 1234", "+639175551234")]
-    [InlineData("(032) 123-4567", "0321234567")]
+    [InlineData("+639175551234", "09175551234")]
+    [InlineData("+63 917 555 1234", "09175551234")]   // old saved numbers may still have spaces
+    [InlineData("639175551234", "09175551234")]
     [InlineData("0917.555.1234", "09175551234")]
+    [InlineData("09171234567", "09171234567")]
+    [InlineData("(032) 123-4567", "0321234567")]       // not a mobile number: cleaned, then refused by IsValidPhone
     [InlineData("   ", null)]
     [InlineData(null, null)]
-    public void NormalizePhone_RemovesSeparators(string? typed, string? expected)
+    public void NormalizePhone_SavesThe09Form(string? typed, string? expected)
         => Assert.Equal(expected, ProfileRules.NormalizePhone(typed));
 
+    /// A SAVED phone number (USERS.PHONE_NUMBER, NVARCHAR(11)) is always an 11-digit mobile number: 09XXXXXXXXX.
     [Theory]
-    [InlineData("+639175551234", true)]
     [InlineData("09171234567", true)]
-    [InlineData("1234567", true)]
-    [InlineData("+12345678901234", true)]            // + and 14 digits = 15 characters, the most the column holds
-    [InlineData("+123456789012345", false)]          // 16 characters
-    [InlineData("1234567890123456", false)]          // 16 digits
-    [InlineData("12345", false)]
+    [InlineData("09991234567", true)]
+    [InlineData("+639175551234", false)]               // the + form is typed, never saved
+    [InlineData("08171234567", false)]                 // not a mobile number
+    [InlineData("0917123456", false)]                  // 10 digits
+    [InlineData("091712345678", false)]                // 12 digits
+    [InlineData("1234567", false)]
+    [InlineData("0321234567", false)]
     [InlineData("abc1234567", false)]
-    [InlineData("63+9175551234", false)]
-    public void IsValidPhone_ChecksTheShape(string phone, bool valid)
+    public void IsValidPhone_OnlyAcceptsTheSaved09Form(string phone, bool valid)
         => Assert.Equal(valid, ProfileRules.IsValidPhone(phone));
 
     [Fact]
@@ -58,12 +64,8 @@ public class ProfileRulesTests
 public class ProviderProfilePageViewModelTests
 {
     [Fact]
-    public void HeaderLine_ShowsBusinessAndCity_OrJustTheBusiness()
-    {
-        Assert.Equal("Marco's Plumbing Works · Quezon City", new ProviderProfilePageViewModel { BusinessName = "Marco's Plumbing Works", City = "Quezon City" }.HeaderLine);
-        Assert.Equal("Marco's Plumbing Works", new ProviderProfilePageViewModel { BusinessName = "Marco's Plumbing Works", City = "  " }.HeaderLine);
-        Assert.Equal("Marco's Plumbing Works", new ProviderProfilePageViewModel { BusinessName = "Marco's Plumbing Works" }.HeaderLine);
-    }
+    public void HeaderLine_ShowsTheBusinessAndCebuCity()
+        => Assert.Equal("Marco's Plumbing Works · Cebu City", new ProviderProfilePageViewModel { BusinessName = "Marco's Plumbing Works" }.HeaderLine);
 
     [Fact]
     public void ErrorFor_ReturnsTheMessage_OrNull()
@@ -71,7 +73,7 @@ public class ProviderProfilePageViewModelTests
         var vm = new ProviderProfilePageViewModel { FieldErrors = new Dictionary<string, string> { ["Email"] = "Bad email." } };
 
         Assert.Equal("Bad email.", vm.ErrorFor("Email"));
-        Assert.Null(vm.ErrorFor("City"));
+        Assert.Null(vm.ErrorFor("Address"));
     }
 }
 
@@ -97,12 +99,12 @@ public class ProviderProfileServiceTests
     private static async Task<Provider> AddProviderAsync(ServisyoDbContext db, string approval = ApprovalStatuses.Approved,
         string account = AccountStatuses.Active, string first = "Marco", string last = "Reyes", string? middle = null,
         string business = "Marco's Plumbing Works", string? email = null, string? phone = "+639175551234",
-        string? city = "Quezon City", string? address = "12 Mango St", string? description = "Licensed master plumber.",
+        string? address = "12 Mango St", string? description = "Licensed master plumber.",
         string? photo = null)
     {
         var p = new Provider
         {
-            BusinessName = business, City = city, Address = address, Description = description, ProfilePhoto = photo,
+            BusinessName = business, Address = address, Description = description, ProfilePhoto = photo,
             ApprovalStatus = approval,
             User = NewUser(first, last, Roles.ServiceProvider, account, email, phone, middle)
         };
@@ -149,7 +151,6 @@ public class ProviderProfileServiceTests
         BusinessName = p.BusinessName,
         PhoneNumber = p.User.PhoneNumber,
         Email = p.User.Email,
-        City = p.City,
         Address = p.Address,
         Description = p.Description
     };
@@ -216,12 +217,11 @@ public class ProviderProfileServiceTests
 
         Assert.Equal("Marco Reyes", page.FullName);
         Assert.Equal("MR", page.Initials);
-        Assert.Equal("Marco's Plumbing Works · Quezon City", page.HeaderLine);
+        Assert.Equal("Marco's Plumbing Works · Cebu City", page.HeaderLine);
         Assert.Equal("Marco Reyes", page.Form.FullName);
         Assert.Equal("Marco's Plumbing Works", page.Form.BusinessName);
         Assert.Equal("+639175551234", page.Form.PhoneNumber);
         Assert.Equal("marco@marcoplumbing.ph", page.Form.Email);
-        Assert.Equal("Quezon City", page.Form.City);
         Assert.Equal("12 Mango St", page.Form.Address);
         Assert.Equal("Licensed master plumber.", page.Form.Description);
         Assert.Empty(page.FieldErrors);
@@ -232,7 +232,7 @@ public class ProviderProfileServiceTests
     public async Task Strength_IsTheSameSixChecksAsTheDashboard()
     {
         var (svc, db) = Create();
-        var p = await AddProviderAsync(db);                                  // description, address + city, phone: 3 of 6
+        var p = await AddProviderAsync(db);                                  // description, address, phone: 3 of 6
         db.ProviderAvailabilities.Add(new ProviderAvailability { ProviderId = p.ProviderId, DayOfWeek = 1, IsAvailable = true, StartTime = new TimeOnly(8, 0), EndTime = new TimeOnly(17, 0) });
         await AddServiceAsync(db, p, "Pipe Repair");
         await db.SaveChangesAsync();
@@ -256,7 +256,7 @@ public class ProviderProfileServiceTests
     public async Task ABareProfile_StartsAtZero_AndSaysWhatToDoFirst()
     {
         var (svc, db) = Create();
-        var p = await AddProviderAsync(db, phone: null, city: null, address: null, description: null);
+        var p = await AddProviderAsync(db, phone: null, address: null, description: null);
 
         var page = (await svc.GetAsync(p.UserId)).Page!;
 
@@ -329,7 +329,7 @@ public class ProviderProfileServiceTests
 
         Assert.False(rejected.Saved);
         Assert.Equal("Typed But Not Saved", page.Form.BusinessName);          // what was typed stays in the boxes
-        Assert.Equal("Marco's Plumbing Works · Quezon City", page.HeaderLine); // the header still shows what is saved
+        Assert.Equal("Marco's Plumbing Works · Cebu City", page.HeaderLine);   // the header still shows what is saved
         Assert.NotNull(page.ErrorFor("Email"));
     }
 
@@ -345,9 +345,8 @@ public class ProviderProfileServiceTests
         {
             FullName = "  Marco   Antonio Reyes ",
             BusinessName = "  Reyes Plumbing & Co.  ",
-            PhoneNumber = "+63 917 555 9999",
+            PhoneNumber = " +639175559999 ",
             Email = "  Marco.New@MarcoPlumbing.PH ",
-            City = " Cebu City ",
             Address = " 5 Colon St ",
             Description = "  Fast and reliable.  "
         });
@@ -362,9 +361,8 @@ public class ProviderProfileServiceTests
         Assert.Equal("Antonio Reyes", saved.User.LastName);           // first word = first name, the rest = last name
         Assert.Equal("Santos", saved.User.MiddleName);                // the middle name is not touched
         Assert.Equal("marco.new@marcoplumbing.ph", saved.User.Email); // emails are stored in lower case, like registration
-        Assert.Equal("+639175559999", saved.User.PhoneNumber);        // the column holds 15 characters, so no spaces
+        Assert.Equal("09175559999", saved.User.PhoneNumber);          // always saved as 09XXXXXXXXX
         Assert.Equal("Reyes Plumbing & Co.", saved.BusinessName);
-        Assert.Equal("Cebu City", saved.City);
         Assert.Equal("5 Colon St", saved.Address);
         Assert.Equal("Fast and reliable.", saved.Description);
     }
@@ -408,7 +406,7 @@ public class ProviderProfileServiceTests
         var p = await AddProviderAsync(db, first: "Marco", last: "");
         var form = FormFrom(p);
         form.FullName = "Marco";
-        form.City = "Mandaue City";
+        form.Address = "7 Gorordo Ave";
 
         Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
 
@@ -453,7 +451,7 @@ public class ProviderProfileServiceTests
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
         form.BusinessName = "A Perfectly Good New Name";
-        form.City = "Cebu City";
+        form.Address = "7 Gorordo Ave";
         form.Email = "not-an-email";
 
         var result = await svc.SaveAsync(p.UserId, form);
@@ -461,13 +459,15 @@ public class ProviderProfileServiceTests
         Assert.False(result.Saved);
         var saved = await ReloadAsync(db, p.ProviderId);
         Assert.Equal("Marco's Plumbing Works", saved.BusinessName);
-        Assert.Equal("Quezon City", saved.City);
+        Assert.Equal("12 Mango St", saved.Address);
     }
 
     [Theory]
     [InlineData("not-an-email")]
     [InlineData("two@@test.com")]
     [InlineData("spaces in@test.com")]
+    [InlineData("marco@gmail2.com")]
+    [InlineData("marco@a.c")]
     public async Task Save_RefusesAnInvalidEmail(string email)
     {
         var (svc, db) = Create();
@@ -478,7 +478,7 @@ public class ProviderProfileServiceTests
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.False(result.Saved);
-        Assert.Equal("Enter a valid email address.", result.FieldErrors["Email"]);
+        Assert.Equal(InputRules.EmailMessage, result.FieldErrors["Email"]);
     }
 
     [Fact]
@@ -513,13 +513,12 @@ public class ProviderProfileServiceTests
     }
 
     [Fact]
-    public async Task Save_TurnsABlankPhoneCityAddressAndBio_IntoNothing()
+    public async Task Save_TurnsABlankPhoneAddressAndBio_IntoNothing()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
         form.PhoneNumber = "   ";
-        form.City = "";
         form.Address = null;
         form.Description = "  \r\n ";
 
@@ -528,7 +527,6 @@ public class ProviderProfileServiceTests
         Assert.True(result.Saved);
         var saved = await ReloadAsync(db, p.ProviderId);
         Assert.Null(saved.User.PhoneNumber);
-        Assert.Null(saved.City);
         Assert.Null(saved.Address);
         Assert.Null(saved.Description);
     }
@@ -537,6 +535,8 @@ public class ProviderProfileServiceTests
     [InlineData("12345")]
     [InlineData("call me")]
     [InlineData("+63 917 555 1234 5678 9")]
+    [InlineData("0917 555 1234")]
+    [InlineData("0917-555-1234")]
     public async Task Save_RefusesAnInvalidPhone(string phone)
     {
         var (svc, db) = Create();
@@ -547,7 +547,7 @@ public class ProviderProfileServiceTests
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.False(result.Saved);
-        Assert.Equal("Enter a valid phone number, for example +63 917 555 1234.", result.FieldErrors["PhoneNumber"]);
+        Assert.Equal(InputRules.PhoneMessage, result.FieldErrors["PhoneNumber"]);
     }
 
     [Fact]
@@ -556,7 +556,7 @@ public class ProviderProfileServiceTests
         var (svc, db) = Create();
         var p = await AddProviderAsync(db, phone: "n/a");
         var form = FormFrom(p);
-        form.City = "Cebu City";
+        form.Address = "7 Gorordo Ave";
 
         var result = await svc.SaveAsync(p.UserId, form);
 
@@ -572,7 +572,6 @@ public class ProviderProfileServiceTests
         var form = FormFrom(p);
         form.FullName = "A " + new string('b', ProfileRules.MaxFullNameLength);
         form.BusinessName = new string('b', ProfileRules.MaxBusinessNameLength + 1);
-        form.City = new string('c', ProfileRules.MaxCityLength + 1);
         form.Address = new string('a', ProfileRules.MaxAddressLength + 1);
         form.Description = new string('d', ProfileRules.MaxDescriptionLength + 1);
         form.Email = new string('e', ProfileRules.MaxEmailLength) + "@test.com";
@@ -580,7 +579,7 @@ public class ProviderProfileServiceTests
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.False(result.Saved);
-        Assert.Equal(new[] { "Address", "BusinessName", "City", "Description", "Email", "FullName" }, result.FieldErrors.Keys.OrderBy(k => k));
+        Assert.Equal(new[] { "Address", "BusinessName", "Description", "Email", "FullName" }, result.FieldErrors.Keys.OrderBy(k => k));
     }
 
     [Fact]
@@ -589,7 +588,7 @@ public class ProviderProfileServiceTests
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
-        form.City = new string('c', ProfileRules.MaxCityLength);
+        form.Address = new string('a', ProfileRules.MaxAddressLength);
         form.Description = new string('a', 127) + "\r\n" + new string('b', 127);        // 255 characters once the line break counts as one
 
         var result = await svc.SaveAsync(p.UserId, form);

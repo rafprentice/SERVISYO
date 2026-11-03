@@ -56,7 +56,7 @@ public class ProviderProfileService : IProviderProfileService
                      && x.User.AccountStatus == AccountStatuses.Active)
             .Select(x => new
             {
-                x.ProviderId, x.ApprovalStatus, x.BusinessName, x.City, x.Address, x.Description, x.ProfilePhoto,
+                x.ProviderId, x.ApprovalStatus, x.BusinessName, x.Address, x.Description, x.ProfilePhoto,
                 x.User.FirstName, x.User.LastName, x.User.Email, x.User.PhoneNumber
             })
             .FirstOrDefaultAsync(ct);
@@ -77,7 +77,7 @@ public class ProviderProfileService : IProviderProfileService
             serviceNames.Count > 0, hasAvailability,
             !string.IsNullOrWhiteSpace(p.Description),
             !string.IsNullOrWhiteSpace(p.ProfilePhoto),
-            !string.IsNullOrWhiteSpace(p.Address) && !string.IsNullOrWhiteSpace(p.City),
+            !string.IsNullOrWhiteSpace(p.Address),
             !string.IsNullOrWhiteSpace(p.PhoneNumber));
 
         var reviewRows = await _db.Reviews.AsNoTracking()
@@ -110,7 +110,6 @@ public class ProviderProfileService : IProviderProfileService
             PhotoUrl = string.IsNullOrWhiteSpace(p.ProfilePhoto) ? null : p.ProfilePhoto,
             NameLocked = await _db.Bookings.AnyAsync(b => b.ProviderId == p.ProviderId && ActiveBookingRules.Statuses.Contains(b.Status), ct),
             BusinessName = p.BusinessName,
-            City = string.IsNullOrWhiteSpace(p.City) ? null : p.City.Trim(),
             StrengthPercent = percent,
             StrengthHint = nextStep is null ? "Your profile is complete." : nextStep + " to reach 100%",
             Form = posted ?? new ProviderProfileForm
@@ -119,7 +118,6 @@ public class ProviderProfileService : IProviderProfileService
                 BusinessName = p.BusinessName,
                 PhoneNumber = p.PhoneNumber,
                 Email = p.Email,
-                City = p.City,
                 Address = p.Address,
                 Description = p.Description
             },
@@ -165,6 +163,8 @@ public class ProviderProfileService : IProviderProfileService
             errors["FullName"] = $"The name can be at most {ProfileRules.MaxFullNameLength} characters.";
         else if (nameChanged && !fullName.Contains(' '))
             errors["FullName"] = "Enter your first and last name.";
+        else if (nameChanged && !InputRules.IsFullName(fullName))
+            errors["FullName"] = InputRules.FullNameMessage;                    // letters only, no numbers or symbols
 
         // ---- business name ----
         var businessName = (form.BusinessName ?? string.Empty).Trim();
@@ -185,9 +185,9 @@ public class ProviderProfileService : IProviderProfileService
         // ---- phone (optional; a number saved earlier in another style is left alone unless it is edited) ----
         var typedPhone = (form.PhoneNumber ?? string.Empty).Trim();
         var phoneChanged = typedPhone != (user.PhoneNumber ?? string.Empty).Trim();
-        var phone = ProfileRules.NormalizePhone(typedPhone);
-        if (phoneChanged && phone is not null && !ProfileRules.IsValidPhone(phone))
-            errors["PhoneNumber"] = "Enter a valid phone number, for example +63 917 555 1234.";
+        var phone = ProfileRules.NormalizePhone(typedPhone);                     // +639171234567 is saved as 09171234567
+        if (phoneChanged && typedPhone.Length > 0 && !InputRules.IsPhone(typedPhone))
+            errors["PhoneNumber"] = InputRules.PhoneMessage;                     // digits only: 09XXXXXXXXX or +639XXXXXXXXX
 
         // ---- email (it is also the sign-in name, so it must stay unique) ----
         var email = (form.Email ?? string.Empty).Trim().ToLowerInvariant();
@@ -196,19 +196,17 @@ public class ProviderProfileService : IProviderProfileService
             errors["Email"] = "Enter your email address.";
         else if (emailChanged && email.Length > ProfileRules.MaxEmailLength)
             errors["Email"] = $"The email can be at most {ProfileRules.MaxEmailLength} characters.";
-        else if (emailChanged && (email.Any(char.IsWhiteSpace) || !new EmailAddressAttribute().IsValid(email)))
-            errors["Email"] = "Enter a valid email address.";
+        else if (emailChanged && !InputRules.IsEmail(email))
+            errors["Email"] = InputRules.EmailMessage;                           // no numbers after the @, parts of 2+ letters
         else if (emailChanged && await EmailUsedByAnotherAsync(email, user.UserId, ct))
             errors["Email"] = EmailTaken;
 
-        // ---- city, address, bio (all optional) ----
-        var city = ProfileRules.NormalizeText(form.City);
-        if (city is { Length: > ProfileRules.MaxCityLength })
-            errors["City"] = $"The city can be at most {ProfileRules.MaxCityLength} characters.";
-
+        // ---- address and bio (both optional; SERVISYO is Cebu City only, so there is no city box) ----
         var address = ProfileRules.NormalizeText(form.Address);
         if (address is { Length: > ProfileRules.MaxAddressLength })
             errors["Address"] = $"The address can be at most {ProfileRules.MaxAddressLength} characters.";
+        else if (address is not null && !InputRules.HasALetter(address))
+            errors["Address"] = InputRules.AddressMessage;
 
         var description = ProfileRules.NormalizeText(form.Description);
         if (description is { Length: > ProfileRules.MaxDescriptionLength })
@@ -231,7 +229,6 @@ public class ProviderProfileService : IProviderProfileService
         if (phoneChanged) user.PhoneNumber = phone;
 
         provider.BusinessName = businessName;
-        provider.City = city;
         provider.Address = address;
         provider.Description = description;
 

@@ -15,7 +15,6 @@
     string? lockId = Model.NameLocked ? "cp-lock" : null;
     var emailError = Model.ErrorFor("Email");
     var phoneError = Model.ErrorFor("PhoneNumber");
-    var cityError = Model.ErrorFor("City");
 
     var currentError = Model.PasswordErrorFor("CurrentPassword");
     var newError = Model.PasswordErrorFor("NewPassword");
@@ -66,7 +65,7 @@
                     <div class="sv-cp__fields">
                         <div class="sv-fld">
                             <label for="cp-name">Full Name</label>
-                            <input id="cp-name" name="FullName" type="text" value="@form.FullName" required maxlength="155" autocomplete="name"
+                            <input id="cp-name" name="FullName" type="text" value="@form.FullName" required maxlength="100" autocomplete="name"
                                    class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
                                    aria-invalid="@(nameError is null ? null : "true")" />
                             @if (Model.NameLocked)
@@ -78,21 +77,15 @@
                         </div>
                         <div class="sv-fld">
                             <label for="cp-email">Email Address</label>
-                            <input id="cp-email" name="Email" type="email" value="@form.Email" required maxlength="155" autocomplete="email"
+                            <input id="cp-email" name="Email" type="email" value="@form.Email" required maxlength="256" autocomplete="email"
                                    aria-invalid="@(emailError is null ? null : "true")" />
                             @if (emailError is not null) { <p class="sv-fld__err" role="alert">@emailError</p> }
                         </div>
                         <div class="sv-fld">
                             <label for="cp-phone">Phone Number</label>
-                            <input id="cp-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="20" autocomplete="tel" placeholder="e.g. +63 917 555 1234"
+                            <input id="cp-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="13" inputmode="tel" pattern="(09[0-9]{9}|\+639[0-9]{9})" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" autocomplete="tel" placeholder="e.g. 09171234567"
                                    aria-invalid="@(phoneError is null ? null : "true")" />
                             @if (phoneError is not null) { <p class="sv-fld__err" role="alert">@phoneError</p> }
-                        </div>
-                        <div class="sv-fld">
-                            <label for="cp-city">City</label>
-                            <input id="cp-city" name="City" type="text" value="@form.City" maxlength="50" autocomplete="address-level2" placeholder="e.g. Cebu City"
-                                   aria-invalid="@(cityError is null ? null : "true")" />
-                            @if (cityError is not null) { <p class="sv-fld__err" role="alert">@cityError</p> }
                         </div>
                     </div>
                     <div class="sv-cp__actions" data-cp-actions>

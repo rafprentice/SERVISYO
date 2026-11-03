@@ -67,7 +67,6 @@ public class HomePageService : IHomePageService
             {
                 p.ProviderId,
                 p.BusinessName,
-                p.City,
                 p.Description,
                 p.AvgRating,
                 p.ReviewCount,
@@ -90,7 +89,6 @@ public class HomePageService : IHomePageService
         {
             ProviderId = p.ProviderId,
             BusinessName = p.BusinessName,
-            City = p.City,
             Description = p.Description,
             AvgRating = p.AvgRating,
             ReviewCount = p.ReviewCount,

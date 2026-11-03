@@ -54,8 +54,9 @@ SELECT d.FirstName, d.LastName, d.Email, N'AAAA', d.UserRole, d.AccountStatus
 FROM @DevUsers d
 WHERE NOT EXISTS (SELECT 1 FROM USERS u WHERE u.EMAIL = d.Email);
 
-INSERT INTO CUSTOMERS (USER_ID, CITY)
-SELECT u.USER_ID, d.City
+-- (database v2.1: no CITY column any more - SERVISYO is Cebu City only; ACCOUNT_STATUS is copied from USERS by a trigger)
+INSERT INTO CUSTOMERS (USER_ID)
+SELECT u.USER_ID
 FROM @DevUsers d JOIN USERS u ON u.EMAIL = d.Email
 WHERE d.UserRole = N'Customer'
   AND NOT EXISTS (SELECT 1 FROM CUSTOMERS c WHERE c.USER_ID = u.USER_ID);
@@ -70,9 +71,9 @@ INSERT INTO @DevProviders VALUES
     (N'dev.felix@servisyo.test',   N'Felix Plumbing (sample)',     N'Mandaue',   N'Pending',  N'Plumbing', 2),
     (N'dev.maricel@servisyo.test', N'Maricel Cleaning (sample)',   N'Poblacion', N'Pending',  N'Cleaning', 1);
 
-INSERT INTO SERVICE_PROVIDERS (USER_ID, BUSINESS_NAME, CITY, REVIEW_COUNT, MIN_NOTICE_DAYS, MAX_JOBS_PER_DAY,
+INSERT INTO SERVICE_PROVIDERS (USER_ID, BUSINESS_NAME, REVIEW_COUNT, MIN_NOTICE_DAYS, MAX_JOBS_PER_DAY,
                                APPROVAL_STATUS, DATE_APPLIED, DATE_APPROVED)
-SELECT u.USER_ID, d.Business, d.City, 0, 1, 5, d.Approval,
+SELECT u.USER_ID, d.Business, 0, 1, 5, d.Approval,
        DATEADD(DAY, -d.AppliedDaysAgo, SYSUTCDATETIME()),
        CASE WHEN d.Approval = N'Approved' THEN SYSUTCDATETIME() END
 FROM @DevProviders d JOIN USERS u ON u.EMAIL = d.Email

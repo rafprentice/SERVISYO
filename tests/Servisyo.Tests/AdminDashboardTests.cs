@@ -99,10 +99,10 @@ public class AdminDashboardServiceTests
 
     private static Provider NewProvider(string first = "Marco", string last = "Reyes",
         string business = "Marco's Plumbing Works", string approval = ApprovalStatuses.Approved,
-        string? city = null, DateTime? applied = null)
+        DateTime? applied = null)
         => new()
         {
-            BusinessName = business, City = city, ApprovalStatus = approval,
+            BusinessName = business, ApprovalStatus = approval,
             DateApplied = applied ?? DateTime.UtcNow,
             User = NewUser(first, last, Roles.ServiceProvider)
         };
@@ -265,13 +265,13 @@ public class AdminDashboardServiceTests
     }
 
     [Fact]
-    public async Task PendingApplications_OnlyPending_OldestFirst_WithCategoryAndCity()
+    public async Task PendingApplications_OnlyPending_OldestFirst_WithCategory()
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
 
-        var felix = NewProvider("Felix", "Torres", "Felix Plumbing", ApprovalStatuses.Pending, "Mandaue", DateTime.UtcNow.AddDays(-2));
-        var maricel = NewProvider("Maricel", "Bautista", "Maricel Cleaning", ApprovalStatuses.Pending, "Poblacion", DateTime.UtcNow.AddDays(-1));
+        var felix = NewProvider("Felix", "Torres", "Felix Plumbing", ApprovalStatuses.Pending, DateTime.UtcNow.AddDays(-2));
+        var maricel = NewProvider("Maricel", "Bautista", "Maricel Cleaning", ApprovalStatuses.Pending, DateTime.UtcNow.AddDays(-1));
         var approved = NewProvider("Done", "Already", "Approved Co", ApprovalStatuses.Approved);
         var rejected = NewProvider("Not", "Accepted", "Rejected Co", ApprovalStatuses.Rejected);
         felix.ProviderCategories.Add(new ProviderCategory { Category = new ServiceCategory { CategoryName = "Plumbing" } });
@@ -285,11 +285,11 @@ public class AdminDashboardServiceTests
         var first = vm.PendingApplications[0];
         Assert.Equal("Felix Torres", first.Name);
         Assert.Equal("FT", first.Initials);
-        Assert.Equal("Plumbing · Mandaue", first.Details);
+        Assert.Equal("Plumbing", first.Details);
 
         var second = vm.PendingApplications[1];
         Assert.Equal("Maricel Bautista", second.Name);
         Assert.Equal("MB", second.Initials);
-        Assert.Equal("Maricel Cleaning · Poblacion", second.Details);   // no category yet -> business name
+        Assert.Equal("Maricel Cleaning", second.Details);   // no category yet -> business name
     }
 }

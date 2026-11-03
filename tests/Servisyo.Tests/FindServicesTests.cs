@@ -56,13 +56,10 @@ public class FindServicesViewModelTests
         => Assert.Equal(expected, new FindProviderCardViewModel { ReviewCount = count }.ReviewsText);
 
     [Fact]
-    public void Card_MoreText_AndLocationText()
+    public void Card_MoreText()
     {
         Assert.Equal("+2 more", new FindProviderCardViewModel { MoreServices = 2 }.MoreText);
         Assert.Null(new FindProviderCardViewModel { MoreServices = 0 }.MoreText);
-        Assert.Equal("Cebu City", new FindProviderCardViewModel { City = "Cebu City" }.LocationText);
-        Assert.Null(new FindProviderCardViewModel { City = "  " }.LocationText);
-        Assert.Null(new FindProviderCardViewModel { City = null }.LocationText);
     }
 
     [Fact]
@@ -142,12 +139,12 @@ public class FindServicesServiceTests
 
     /// An eligible provider by default (Approved + Active account); add services with AddServiceAsync.
     private static async Task<Provider> AddProviderAsync(ServisyoDbContext db, string business, string first = "Marco", string last = "Reyes",
-        string? city = "Cebu City", decimal? rating = null, int reviews = 0, decimal? baseFee = null, int minNotice = 1,
+        decimal? rating = null, int reviews = 0, decimal? baseFee = null, int minNotice = 1,
         string approval = ApprovalStatuses.Approved, string account = AccountStatuses.Active, string? description = null)
     {
         var p = new Provider
         {
-            BusinessName = business, City = city, Description = description, AvgRating = rating, ReviewCount = reviews, BaseFee = baseFee,
+            BusinessName = business, Description = description, AvgRating = rating, ReviewCount = reviews, BaseFee = baseFee,
             MinNoticeDays = minNotice, ApprovalStatus = approval,
             User = new User
             {
@@ -171,9 +168,9 @@ public class FindServicesServiceTests
 
     /// One eligible provider with one active service in the category.
     private static async Task<Provider> AddListedAsync(ServisyoDbContext db, ServiceCategory category, string business, string first = "Marco", string last = "Reyes",
-        string? city = "Cebu City", decimal? rating = null, int reviews = 0, decimal? baseFee = null, decimal price = 500m)
+        decimal? rating = null, int reviews = 0, decimal? baseFee = null, decimal price = 500m)
     {
-        var p = await AddProviderAsync(db, business, first, last, city, rating, reviews, baseFee);
+        var p = await AddProviderAsync(db, business, first, last, rating, reviews, baseFee);
         await AddServiceAsync(db, p, category, "Service of " + business, price);
         return p;
     }
@@ -270,19 +267,18 @@ public class FindServicesServiceTests
     }
 
     [Fact]
-    public async Task Card_ShowsThePersonBusinessCityAndInitials()
+    public async Task Card_ShowsThePersonBusinessAndInitials()
     {
         var (svc, db) = Create();
         var customer = await AddCustomerAsync(db);
         var plumbing = await AddCategoryAsync(db, "Plumbing");
-        await AddListedAsync(db, plumbing, "Marco's Plumbing Works", "Marco", "Reyes", "Quezon City");
+        await AddListedAsync(db, plumbing, "Marco's Plumbing Works", "Marco", "Reyes");
 
         var card = Assert.Single((await OpenAsync(svc, customer)).Cards);
 
         Assert.Equal("Marco Reyes", card.Name);
         Assert.Equal("MR", card.Initials);
         Assert.Equal("Marco's Plumbing Works", card.BusinessName);
-        Assert.Equal("Quezon City", card.City);
     }
 
     [Fact]
@@ -309,14 +305,13 @@ public class FindServicesServiceTests
     [InlineData("marco reyes")]
     [InlineData("  marco    reyes  ")]       // extra spaces are collapsed
     [InlineData("plumbing works")]           // business name
-    [InlineData("quezon")]                   // city
-    public async Task Search_MatchesNameBusinessAndCity_IgnoringCaseAndSpaces(string typed)
+    public async Task Search_MatchesNameAndBusiness_IgnoringCaseAndSpaces(string typed)
     {
         var (svc, db) = Create();
         var customer = await AddCustomerAsync(db);
         var plumbing = await AddCategoryAsync(db, "Plumbing");
-        await AddListedAsync(db, plumbing, "Marco's Plumbing Works", "Marco", "Reyes", "Quezon City");
-        await AddListedAsync(db, plumbing, "Other Cleaning Co", "Lina", "Santos", "Cebu City");
+        await AddListedAsync(db, plumbing, "Marco's Plumbing Works", "Marco", "Reyes");
+        await AddListedAsync(db, plumbing, "Other Cleaning Co", "Lina", "Santos");
 
         var page = await OpenAsync(svc, customer, new FindServicesQuery { Q = typed });
 
@@ -505,9 +500,9 @@ public class FindServicesServiceTests
         var customer = await AddCustomerAsync(db);
         var plumbing = await AddCategoryAsync(db, "Plumbing");
         var cleaning = await AddCategoryAsync(db, "Cleaning");
-        await AddListedAsync(db, plumbing, "Cebu Plumbing", city: "Cebu City");
-        await AddListedAsync(db, plumbing, "Manila Plumbing", city: "Manila");
-        await AddListedAsync(db, cleaning, "Cebu Cleaning", city: "Cebu City");
+        await AddListedAsync(db, plumbing, "Cebu Plumbing");
+        await AddListedAsync(db, plumbing, "Lahug Plumbing");
+        await AddListedAsync(db, cleaning, "Cebu Cleaning");
 
         var page = await OpenAsync(svc, customer, new FindServicesQuery { Q = "cebu", Category = plumbing.CategoryId });
 
@@ -706,7 +701,7 @@ public class FindServicesServiceTests
         var c = await AddCategoryAsync(db, "Plumbing");
         var a = await AddProviderAsync(db, "A Biz", description: "  Licensed plumber.  ");
         await AddServiceAsync(db, a, c, "x");
-        var b = await AddProviderAsync(db, "B Biz", description: "   ", city: "  ");
+        var b = await AddProviderAsync(db, "B Biz", description: "   ");
         await AddServiceAsync(db, b, c, "x");
 
         var cards = (await OpenAsync(svc, customer)).Cards;
@@ -714,7 +709,6 @@ public class FindServicesServiceTests
         Assert.Equal("Licensed plumber.", cards.Single(x => x.BusinessName == "A Biz").Description);
         var blank = cards.Single(x => x.BusinessName == "B Biz");
         Assert.Null(blank.Description);
-        Assert.Null(blank.City);
     }
 
     // ---------------------------------------------------------------- availability hint

@@ -33,7 +33,6 @@ public class FeaturedProviderViewModel
 {
     public int ProviderId { get; set; }
     public string BusinessName { get; set; } = string.Empty;
-    public string? City { get; set; }
     public string? Description { get; set; }
     public decimal? AvgRating { get; set; }
     public int ReviewCount { get; set; }

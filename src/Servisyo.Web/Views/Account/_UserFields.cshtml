@@ -3,30 +3,30 @@
 <div class="row">
     <div class="col-md-4 mb-3">
         <label asp-for="FirstName" class="form-label"></label>
-        <input asp-for="FirstName" class="form-control" autocomplete="given-name" maxlength="155" />
+        <input asp-for="FirstName" class="form-control" autocomplete="given-name" maxlength="100" />
         <span asp-validation-for="FirstName" class="text-danger"></span>
     </div>
     <div class="col-md-4 mb-3">
         <label asp-for="MiddleName" class="form-label"></label>
-        <input asp-for="MiddleName" class="form-control" />
+        <input asp-for="MiddleName" class="form-control" autocomplete="additional-name" maxlength="100" />
         <span asp-validation-for="MiddleName" class="text-danger"></span>
     </div>
     <div class="col-md-4 mb-3">
         <label asp-for="LastName" class="form-label"></label>
-        <input asp-for="LastName" class="form-control" autocomplete="family-name" maxlength="155" />
+        <input asp-for="LastName" class="form-control" autocomplete="family-name" maxlength="100" />
         <span asp-validation-for="LastName" class="text-danger"></span>
     </div>
 </div>
 <div class="row">
     <div class="col-md-6 mb-3">
         <label asp-for="Email" class="form-label"></label>
-        <input asp-for="Email" class="form-control" autocomplete="email" />
+        <input asp-for="Email" class="form-control" autocomplete="email" maxlength="256" />
         <span asp-validation-for="Email" class="text-danger"></span>
     </div>
     <div class="col-md-6 mb-3">
         <label asp-for="PhoneNumber" class="form-label"></label>
         <input asp-for="PhoneNumber" type="tel" class="form-control" autocomplete="tel" inputmode="tel"
-               pattern="\+?[0-9\s\-]{7,15}" maxlength="16" placeholder="09XX XXX XXXX" title="Digits, spaces and hyphens only, e.g. 0917 555 1234" />
+               pattern="(09[0-9]{9}|\+639[0-9]{9})" maxlength="13" placeholder="09171234567" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" />
         <span asp-validation-for="PhoneNumber" class="text-danger"></span>
     </div>
 </div>

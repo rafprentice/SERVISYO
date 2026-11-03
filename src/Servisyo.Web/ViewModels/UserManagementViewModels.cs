@@ -53,7 +53,6 @@ public class UserRowViewModel
     public string Name { get; set; } = string.Empty;
     public string Initials { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
-    public string? City { get; set; }
     public string Status { get; set; } = string.Empty;
     public string StatusTone => Status switch
     {

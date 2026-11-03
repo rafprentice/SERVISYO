@@ -18,8 +18,11 @@ public class RegistrationValidationTests
     [InlineData("Ma. Lourdes", true)]
     [InlineData("O'Brien", true)]
     [InlineData("Peñaranda", true)]
-    [InlineData("Lapu-Lapu City", true)]
+    [InlineData("Niño", true)]
+    [InlineData("Lapu-Lapu", true)]
     [InlineData("123213", false)]
+    [InlineData("Ana@", false)]
+    [InlineData("Ana_Marie", false)]
     [InlineData("Juan2", false)]
     [InlineData("...", false)]
     [InlineData("<script>", false)]
@@ -35,13 +38,51 @@ public class RegistrationValidationTests
 
     [Theory]
     [InlineData("09171234567", true)]
-    [InlineData("0917-555-1234", true)]
-    [InlineData("+63 917 555 1234", true)]
+    [InlineData("+639171234567", true)]
+    [InlineData("0917-555-1234", false)]      // digits only: no dashes
+    [InlineData("0917 555 1234", false)]      // no spaces
+    [InlineData("+63 917 555 1234", false)]
+    [InlineData("9171234567", false)]         // must start with 09 (or +639)
+    [InlineData("0917123456", false)]         // 10 digits
+    [InlineData("091712345678", false)]       // 12 digits
+    [InlineData("08171234567", false)]        // not a mobile number
     [InlineData("qweqweeqw", false)]
-    [InlineData("aweqweqewqe", false)]
     [InlineData("12345", false)]
     [InlineData("0917abc1234", false)]
+    [InlineData("０９１７１２３４５６７", false)]  // full-width digits are not 0-9
     public void Phone(string value, bool ok) => Assert.Equal(ok, InputRules.IsPhone(value));
+
+    [Theory]
+    [InlineData("juan@gmail.com", true)]
+    [InlineData("juan.dela-cruz+1@yahoo.com", true)]
+    [InlineData("juan123@gmail.com", true)]          // numbers are fine BEFORE the @
+    [InlineData("ana@usc.edu.ph", true)]
+    [InlineData("ana@my-mail.com", true)]
+    [InlineData("juan@gmail2.com", false)]           // no numbers in the domain
+    [InlineData("juan@gmail.c0m", false)]            // no numbers in the TLD
+    [InlineData("juan@a.c", false)]                  // domain and TLD need at least 2 letters
+    [InlineData("juan@ab.c", false)]
+    [InlineData("juan@b.co", false)]
+    [InlineData("juan@-ab.com", false)]
+    [InlineData("juan@gmail", false)]                // no TLD
+    [InlineData("juangmail.com", false)]
+    [InlineData("ju an@gmail.com", false)]
+    public void Email(string value, bool ok) => Assert.Equal(ok, InputRules.IsEmail(value));
+
+    [Theory]
+    [InlineData("09171234567", "09171234567")]
+    [InlineData("+639171234567", "09171234567")]
+    [InlineData("639171234567", "09171234567")]
+    [InlineData("0917-123-4567", "09171234567")]     // old saved numbers may still have dashes
+    [InlineData("  ", null)]
+    public void NormalizePhone_SavesThe09Form(string typed, string? saved) => Assert.Equal(saved, ProfileRules.NormalizePhone(typed));
+
+    [Theory]
+    [InlineData("123 Gorordo Ave", true)]
+    [InlineData("Lahug", true)]
+    [InlineData("12345", false)]
+    [InlineData("42-7", false)]
+    public void Address(string value, bool ok) => Assert.Equal(ok, InputRules.HasALetter(value));
 
     // ------------------------------------------------------------------ model validation (what ModelState.IsValid uses)
 
@@ -56,7 +97,7 @@ public class RegistrationValidationTests
 
     private static CustomerRegistrationViewModel GoodCustomer() => new()
     {
-        FullName = "Ana Reyes", Email = "ana@test.com", PhoneNumber = "0917-555-1234", City = "Cebu City",
+        FullName = "Ana Reyes", Email = "ana@test.com", PhoneNumber = "09175551234",
         StreetAddress = "123 Rizal St.", Barangay = "Lahug",
         Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", AcceptTerms = true
     };
@@ -70,10 +111,24 @@ public class RegistrationValidationTests
         var f = GoodCustomer();
         f.FullName = "213123123123";
         f.PhoneNumber = "qweqweeqw";
-        f.City = "qweqwe1";
+        f.StreetAddress = "12345";
+        f.Barangay = "7";
+        f.Email = "ana@gmail2.com";
         Assert.True(Fails(f, nameof(f.FullName)));
         Assert.True(Fails(f, nameof(f.PhoneNumber)));
-        Assert.True(Fails(f, nameof(f.City)));
+        Assert.True(Fails(f, nameof(f.StreetAddress)));
+        Assert.True(Fails(f, nameof(f.Barangay)));
+        Assert.True(Fails(f, nameof(f.Email)));
+    }
+
+    [Fact]
+    public void CustomerForm_TooLongNameOrEmail_Fails()
+    {
+        var f = GoodCustomer();
+        f.FullName = new string('a', 50) + " " + new string('b', 50);        // 101: the name columns hold 100
+        f.Email = new string('e', 250) + "@test.com";                        // 259: EMAIL holds 256
+        Assert.True(Fails(f, nameof(f.FullName)));
+        Assert.True(Fails(f, nameof(f.Email)));
     }
 
     [Fact]
@@ -100,9 +155,9 @@ public class RegistrationValidationTests
         {
             FirstName = "123213", MiddleName = "1231233", LastName = "213123", Email = "x@test.com",
             PhoneNumber = "aweqweqewqe", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1",
-            BusinessName = "123123213", City = "213123", MinNoticeDays = 99, MaxJobsPerDay = 0, BaseFee = -1
+            BusinessName = "123123213", Address = "12345", MinNoticeDays = 99, MaxJobsPerDay = 0, BaseFee = -1
         };
-        foreach (var field in new[] { "FirstName", "MiddleName", "LastName", "PhoneNumber", "BusinessName", "City", "MinNoticeDays", "MaxJobsPerDay", "BaseFee" })
+        foreach (var field in new[] { "FirstName", "MiddleName", "LastName", "PhoneNumber", "BusinessName", "Address", "MinNoticeDays", "MaxJobsPerDay", "BaseFee" })
             Assert.True(Fails(p, field), field + " should be refused");
     }
 
@@ -117,6 +172,7 @@ public class RegistrationValidationTests
     [Theory]
     [InlineData("123", "Santos", null, "Passw0rd1", "Passw0rd1")]
     [InlineData("Maria", "Santos", "qweqweeqw", "Passw0rd1", "Passw0rd1")]
+    [InlineData("Maria", "Santos", "0917 123 4567", "Passw0rd1", "Passw0rd1")]
     [InlineData("Maria", "Santos", null, "short", "short")]
     [InlineData("Maria", "Santos", null, "Passw0rd1", "Different1")]
     public async Task Service_RefusesInvalidCustomerSignUps_AndSavesNothing(string first, string last, string? phone, string pw, string confirm)
@@ -133,17 +189,50 @@ public class RegistrationValidationTests
     }
 
     [Fact]
-    public async Task Service_StoresThePhoneWithoutSpacesOrHyphens()
+    public async Task Service_SavesA63PhoneAs09()
     {
         var svc = NewAuth(out var db);
         var result = await svc.RegisterCustomerAsync(new RegisterCustomerViewModel
         {
-            FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = "maria@email.com", PhoneNumber = "+63 917 555 1234",
+            FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = "maria@email.com", PhoneNumber = "+639175551234",
             Address = "123 Rizal St., Brgy. Lahug", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
         });
 
         Assert.True(result.Succeeded);
-        Assert.Equal("+639175551234", (await db.Users.SingleAsync()).PhoneNumber);
+        Assert.Equal("09175551234", (await db.Users.SingleAsync()).PhoneNumber);
+        Assert.Equal(AccountStatuses.Active, (await db.Customers.SingleAsync()).AccountStatus);   // the status copy
+    }
+
+    [Theory]
+    [InlineData("maria@gmail2.com")]
+    [InlineData("maria@a.c")]
+    public async Task Service_RefusesABadEmailDomain(string email)
+    {
+        var svc = NewAuth(out var db);
+        var result = await svc.RegisterCustomerAsync(new RegisterCustomerViewModel
+        {
+            FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = email, PhoneNumber = "09175551234",
+            Address = "123 Rizal St., Brgy. Lahug", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(InputRules.EmailMessage, result.Error);
+        Assert.Equal(0, await db.Users.CountAsync());
+    }
+
+    [Fact]
+    public async Task Service_RefusesANumbersOnlyAddress()
+    {
+        var svc = NewAuth(out var db);
+        var result = await svc.RegisterCustomerAsync(new RegisterCustomerViewModel
+        {
+            FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = "maria@email.com", PhoneNumber = "09175551234",
+            Address = "12345", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
+        });
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(InputRules.AddressMessage, result.Error);
+        Assert.Equal(0, await db.Users.CountAsync());
     }
 
     [Fact]
@@ -162,16 +251,24 @@ public class RegistrationValidationTests
     }
 
     [Fact]
-    public void EveryFieldExceptCity_IsRequired_OnBothForms()
+    public void EveryField_IsRequired_OnBothForms()
     {
         var c = new CustomerRegistrationViewModel();
         foreach (var field in new[] { "FullName", "Email", "PhoneNumber", "StreetAddress", "Barangay", "Password", "ConfirmPassword", "AcceptTerms" })
             Assert.True(Fails(c, field), "customer " + field + " should be required");
-        Assert.False(Fails(c, "City"));
 
         var p = new RegisterProviderViewModel { MinNoticeDays = 1, MaxJobsPerDay = 5 };
         foreach (var field in new[] { "FirstName", "MiddleName", "LastName", "Email", "PhoneNumber", "Password", "ConfirmPassword", "BusinessName", "Description", "Address", "BaseFee" })
             Assert.True(Fails(p, field), "provider " + field + " should be required");
-        Assert.False(Fails(p, "City"));
+    }
+
+    [Fact]
+    public void TheFormsHaveNoCityField_SERVISYO_IsCebuCityOnly()
+    {
+        Assert.Null(typeof(CustomerRegistrationViewModel).GetProperty("City"));
+        Assert.Null(typeof(RegisterCustomerViewModel).GetProperty("City"));
+        Assert.Null(typeof(RegisterProviderViewModel).GetProperty("City"));
+        Assert.Null(typeof(Customer).GetProperty("City"));
+        Assert.Null(typeof(Provider).GetProperty("City"));
     }
 }

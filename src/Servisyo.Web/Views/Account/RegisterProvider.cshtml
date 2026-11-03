@@ -26,9 +26,10 @@
                     <span asp-validation-for="Address" class="text-danger"></span>
                 </div>
                 <div class="col-md-4 mb-3">
-                    <label asp-for="City" class="form-label"></label>
-                    <input asp-for="City" class="form-control" />
-                    <span asp-validation-for="City" class="text-danger"></span>
+                    <label for="rp-city" class="form-label">City</label>
+                    @* not sent with the form: SERVISYO serves Cebu City only *@
+                    <input id="rp-city" type="text" class="form-control" value="Cebu City" disabled />
+                    <div class="form-text">SERVISYO is available in Cebu City only.</div>
                 </div>
             </div>
             <div class="row">

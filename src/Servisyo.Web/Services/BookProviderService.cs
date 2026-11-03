@@ -63,7 +63,7 @@ public class BookProviderService : IBookProviderService
             .Select(c => new Who(c.CustomerId, c.User.FirstName, c.User.LastName, c.Address))
             .FirstOrDefaultAsync(ct);
 
-    private sealed record ProviderInfo(int ProviderId, int UserId, string Name, string BusinessName, string? City,
+    private sealed record ProviderInfo(int ProviderId, int UserId, string Name, string BusinessName,
         decimal? AvgRating, int ReviewCount, int MinNoticeDays, int MaxJobsPerDay);
 
     /// A provider can be booked when: Approved + Active account (same rule as everywhere) + at least one active service.
@@ -71,7 +71,7 @@ public class BookProviderService : IBookProviderService
         _db.Providers.AsNoTracking()
             .WhereEligible()
             .Where(p => p.ProviderId == providerId && p.Services.Any(s => s.IsActive && s.Category.IsActive))
-            .Select(p => new ProviderInfo(p.ProviderId, p.UserId, p.User.FirstName + " " + p.User.LastName, p.BusinessName, p.City,
+            .Select(p => new ProviderInfo(p.ProviderId, p.UserId, p.User.FirstName + " " + p.User.LastName, p.BusinessName,
                 p.AvgRating, p.ReviewCount, p.MinNoticeDays, p.MaxJobsPerDay))
             .FirstOrDefaultAsync(ct);
 
@@ -178,7 +178,6 @@ public class BookProviderService : IBookProviderService
             ProviderName = provider.Name.Trim(),
             Initials = NameFormat.Initials(provider.Name),
             BusinessName = provider.BusinessName,
-            City = string.IsNullOrWhiteSpace(provider.City) ? null : provider.City.Trim(),
             AvgRating = provider.ReviewCount > 0 ? provider.AvgRating : null,
             ReviewCount = provider.ReviewCount,
             MinNoticeDays = provider.MinNoticeDays,

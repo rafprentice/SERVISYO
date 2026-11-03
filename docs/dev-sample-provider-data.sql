@@ -88,8 +88,9 @@ SELECT d.FirstName, d.LastName, d.Email, N'AAAA', N'Customer', N'Active'
 FROM @DevCustomers d
 WHERE NOT EXISTS (SELECT 1 FROM USERS u WHERE u.EMAIL = d.Email);
 
-INSERT INTO CUSTOMERS (USER_ID, CITY)
-SELECT u.USER_ID, d.City
+-- (database v2.1: no CITY column any more - SERVISYO is Cebu City only; ACCOUNT_STATUS is copied from USERS by a trigger)
+INSERT INTO CUSTOMERS (USER_ID)
+SELECT u.USER_ID
 FROM @DevCustomers d JOIN USERS u ON u.EMAIL = d.Email
 WHERE NOT EXISTS (SELECT 1 FROM CUSTOMERS c WHERE c.USER_ID = u.USER_ID);
 

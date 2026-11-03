@@ -44,7 +44,8 @@ public class AuthService : IAuthService
     public async Task<AuthResult> RegisterCustomerAsync(RegisterCustomerViewModel vm)
     {
         var problem = CheckCommon(vm)
-            ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your street address and barangay." : null);
+            ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your street address and barangay." : null)
+            ?? (InputRules.HasALetter(vm.Address!.Trim()) ? null : InputRules.AddressMessage);
         if (problem is not null) return AuthResult.Fail(problem);
 
         var email = NormalizeEmail(vm.Email);
@@ -56,18 +57,17 @@ public class AuthService : IAuthService
         // On SQL Server: the stored procedure dbo.usp_RegisterCustomer (USERS + CUSTOMERS in one database call)
         var viaProcedure = await RegisterWithProcedureAsync(
             "EXEC dbo.usp_RegisterCustomer @FirstName = @FirstName, @MiddleName = @MiddleName, @LastName = @LastName, " +
-            "@Email = @Email, @PasswordHash = @PasswordHash, @PhoneNumber = @PhoneNumber, @Address = @Address, @City = @City, " +
+            "@Email = @Email, @PasswordHash = @PasswordHash, @PhoneNumber = @PhoneNumber, @Address = @Address, " +
             "@NewUserId = @NewUserId OUTPUT, @NewCustomerId = @NewCustomerId OUTPUT",
             UserParameters(user).Concat(new[]
             {
                 Text("@Address", Clean(vm.Address)),
-                Text("@City", Clean(vm.City)),
                 Output("@NewCustomerId")
             }).ToList());
         if (viaProcedure is not null) return viaProcedure;
 
         // In-memory test database (or the procedure is not installed yet): the same work through EF
-        user.Customer = new Customer { Address = Clean(vm.Address), City = Clean(vm.City) };
+        user.Customer = new Customer { Address = Clean(vm.Address), AccountStatus = AccountStatuses.Active };
 
         _db.Users.Add(user);
         return await SaveAsync(user);   // one SaveChanges = one transaction (user + customer)
@@ -80,6 +80,7 @@ public class AuthService : IAuthService
             ?? (InputRules.HasALetter(vm.BusinessName?.Trim()) ? null : InputRules.BusinessNameMessage)
             ?? (string.IsNullOrWhiteSpace(vm.Description) ? "Please describe your services." : null)
             ?? (string.IsNullOrWhiteSpace(vm.Address) ? "Please enter your business address." : null)
+            ?? (InputRules.HasALetter(vm.Address!.Trim()) ? null : InputRules.AddressMessage)
             ?? (vm.BaseFee is null ? "Please enter your base fee." : null)
             ?? (vm.MinNoticeDays is < 0 or > 30 ? "Enter a whole number of days from 0 to 30." : null)
             ?? (vm.MaxJobsPerDay is < 1 or > 50 ? "Enter a whole number of jobs from 1 to 50." : null)
@@ -97,7 +98,7 @@ public class AuthService : IAuthService
         var viaProcedure = await RegisterWithProcedureAsync(
             "EXEC dbo.usp_RegisterProvider @FirstName = @FirstName, @MiddleName = @MiddleName, @LastName = @LastName, " +
             "@Email = @Email, @PasswordHash = @PasswordHash, @PhoneNumber = @PhoneNumber, @BusinessName = @BusinessName, " +
-            "@Description = @Description, @Address = @Address, @City = @City, @BaseFee = @BaseFee, " +
+            "@Description = @Description, @Address = @Address, @BaseFee = @BaseFee, " +
             "@MinNoticeDays = @MinNoticeDays, @MaxJobsPerDay = @MaxJobsPerDay, " +
             "@NewUserId = @NewUserId OUTPUT, @NewProviderId = @NewProviderId OUTPUT",
             UserParameters(user).Concat(new[]
@@ -105,7 +106,6 @@ public class AuthService : IAuthService
                 Text("@BusinessName", vm.BusinessName.Trim()),
                 Text("@Description", Clean(vm.Description)),
                 Text("@Address", Clean(vm.Address)),
-                Text("@City", Clean(vm.City)),
                 new SqlParameter("@BaseFee", SqlDbType.Decimal) { Precision = 12, Scale = 2, Value = (object?)vm.BaseFee ?? DBNull.Value },
                 new SqlParameter("@MinNoticeDays", SqlDbType.Int) { Value = vm.MinNoticeDays },
                 new SqlParameter("@MaxJobsPerDay", SqlDbType.Int) { Value = vm.MaxJobsPerDay },
@@ -119,11 +119,11 @@ public class AuthService : IAuthService
             BusinessName = vm.BusinessName.Trim(),
             Description = Clean(vm.Description),
             Address = Clean(vm.Address),
-            City = Clean(vm.City),
             BaseFee = vm.BaseFee,
             MinNoticeDays = vm.MinNoticeDays,
             MaxJobsPerDay = vm.MaxJobsPerDay,
             ApprovalStatus = ApprovalStatuses.Pending,   // always Pending until an admin approves
+            AccountStatus = AccountStatuses.Active,      // copy of the user's status
             DateApplied = DateTime.UtcNow
         };
 
@@ -193,15 +193,17 @@ public class AuthService : IAuthService
             return InputRules.NameMessage;
         // the customer page asks for one Full Name (no middle name box); the provider form requires it (checked below)
         if (!string.IsNullOrWhiteSpace(vm.MiddleName) && !InputRules.IsName(vm.MiddleName.Trim())) return InputRules.NameMessage;
+        if (vm.FirstName.Trim().Length > InputRules.MaxNameLength || vm.LastName.Trim().Length > InputRules.MaxNameLength
+            || (vm.MiddleName?.Trim().Length ?? 0) > InputRules.MaxNameLength)
+            return $"Names can be at most {InputRules.MaxNameLength} characters.";
         if (string.IsNullOrWhiteSpace(vm.PhoneNumber)) return "Please enter your phone number.";
-        if (!InputRules.IsPhone(vm.PhoneNumber.Trim())) return InputRules.PhoneMessage;
-        if ((ProfileRules.NormalizePhone(vm.PhoneNumber) ?? string.Empty).Length > 15) return "Phone number is too long.";
+        if (!InputRules.IsPhone(vm.PhoneNumber.Trim())) return InputRules.PhoneMessage;     // 09XXXXXXXXX or +639XXXXXXXXX
         if (string.IsNullOrEmpty(vm.Password) || vm.Password.Length < 8 || !System.Text.RegularExpressions.Regex.IsMatch(vm.Password, InputRules.Password))
             return "Password must be at least 8 characters, with a letter and a number.";
         if (vm.Password != vm.ConfirmPassword)
             return "The passwords do not match.";
-        if (string.IsNullOrWhiteSpace(vm.Email) || !new System.ComponentModel.DataAnnotations.EmailAddressAttribute().IsValid(vm.Email.Trim()))
-            return "Please enter a valid email address.";
+        if (string.IsNullOrWhiteSpace(vm.Email) || vm.Email.Trim().Length > InputRules.MaxEmailLength || !InputRules.IsEmail(vm.Email.Trim()))
+            return InputRules.EmailMessage;
         return null;
     }
 
@@ -213,7 +215,7 @@ public class AuthService : IAuthService
             MiddleName = Clean(vm.MiddleName),
             LastName = vm.LastName.Trim(),
             Email = email,
-            PhoneNumber = ProfileRules.NormalizePhone(vm.PhoneNumber),      // stored without spaces/hyphens: "09171234567"
+            PhoneNumber = ProfileRules.NormalizePhone(vm.PhoneNumber),      // always saved as "09171234567"
             Role = role,                          // set by the server, never by the browser
             AccountStatus = AccountStatuses.Active
         };

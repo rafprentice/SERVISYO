@@ -62,9 +62,9 @@ END
 DECLARE @ProviderId INT = (SELECT PROVIDER_ID FROM SERVICE_PROVIDERS WHERE USER_ID = @ProviderUserId);
 IF @ProviderId IS NULL
 BEGIN
-    INSERT INTO SERVICE_PROVIDERS (USER_ID, BUSINESS_NAME, DESCRIPTION, CITY, REVIEW_COUNT, MIN_NOTICE_DAYS,
+    INSERT INTO SERVICE_PROVIDERS (USER_ID, BUSINESS_NAME, DESCRIPTION, REVIEW_COUNT, MIN_NOTICE_DAYS,
                                    MAX_JOBS_PER_DAY, APPROVAL_STATUS, DATE_APPLIED, DATE_APPROVED)
-    VALUES (@ProviderUserId, N'Dev Plumbing (sample)', N'Sample provider for development.', N'Cebu City', 0, 0,
+    VALUES (@ProviderUserId, N'Dev Plumbing (sample)', N'Sample provider for development.', 0, 0,
             5, N'Approved', SYSUTCDATETIME(), SYSUTCDATETIME());
     SET @ProviderId = SCOPE_IDENTITY();
 END

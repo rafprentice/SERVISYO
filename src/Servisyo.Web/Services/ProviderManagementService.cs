@@ -16,6 +16,8 @@ public interface IProviderManagementService
     Task<ProviderDetailsLookup> GetDetailsAsync(int adminUserId, int providerId, CancellationToken ct = default);
 
     /// Suspend / deactivate / reactivate / restore a provider's ACCOUNT, and write the admin log entry in the same save.
+    /// Suspending or deactivating also cancels the provider's Pending bookings (the customers are notified) and lists
+    /// their Accepted / In Progress bookings in the message so the administrator can follow them up.
     Task<ChangeStatusResult> ChangeStatusAsync(int adminUserId, int providerId, AccountAction action, string? reason, CancellationToken ct = default);
 }
 
@@ -28,6 +30,9 @@ public class ProviderManagementService : IProviderManagementService
     public const int MaxReasonLength = 255;
 
     private const int ManilaOffsetHours = 8;          // the Philippines has no daylight saving
+
+    /// How many still-open bookings the message lists by number (the rest are counted).
+    private const int OpenBookingsListed = 5;
 
     private readonly ServisyoDbContext _db;
     private readonly ILogger<ProviderManagementService> _logger;
@@ -66,7 +71,7 @@ public class ProviderManagementService : IProviderManagementService
             .Skip((page - 1) * PageSize).Take(PageSize)
             .Select(p => new
             {
-                p.ProviderId, p.BusinessName, p.City, p.ApprovalStatus, p.AvgRating, p.ReviewCount,
+                p.ProviderId, p.BusinessName, p.ApprovalStatus, p.AvgRating, p.ReviewCount,
                 First = p.User.FirstName, Last = p.User.LastName, Account = p.User.AccountStatus
             })
             .ToListAsync(ct);
@@ -93,7 +98,7 @@ public class ProviderManagementService : IProviderManagementService
             // Category: what the provider declared, otherwise the category of their first service.
             var category = declared.Where(d => d.ProviderId == r.ProviderId).Select(d => d.Category).FirstOrDefault()
                            ?? myServices.Select(s => s.Category).FirstOrDefault();
-            var where = new[] { category, r.City }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            var where = new[] { category }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
 
             var badges = new List<ProviderBadge> { ApprovalBadge(r.ApprovalStatus) };
             if (r.Account == AccountStatuses.Suspended) badges.Add(new("Suspended", "danger"));
@@ -144,7 +149,7 @@ public class ProviderManagementService : IProviderManagementService
             .Where(x => x.ProviderId == providerId && x.User.Role == Roles.ServiceProvider)
             .Select(x => new
             {
-                x.ProviderId, x.BusinessName, x.Description, x.Address, x.City, x.ApprovalStatus, x.AvgRating, x.ReviewCount,
+                x.ProviderId, x.BusinessName, x.Description, x.Address, x.ApprovalStatus, x.AvgRating, x.ReviewCount,
                 First = x.User.FirstName, Last = x.User.LastName, x.User.Email, x.User.PhoneNumber,
                 Account = x.User.AccountStatus, Joined = x.User.CreatedAt
             })
@@ -168,7 +173,7 @@ public class ProviderManagementService : IProviderManagementService
 
         var name = $"{p.First} {p.Last}".Trim();
         var category = declared ?? services.Select(s => s.Category).FirstOrDefault();
-        var where = new[] { category, p.City }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+        var where = new[] { category }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
 
         var badges = new List<ProviderBadge> { ApprovalBadge(p.ApprovalStatus) };
         if (p.Account == AccountStatuses.Suspended) badges.Add(new("Suspended", "danger"));
@@ -232,8 +237,45 @@ public class ProviderManagementService : IProviderManagementService
             return new(ChangeStatusOutcome.InvalidTransition,
                 $"{name}'s account is currently {user.AccountStatus.ToLowerInvariant()}, so that action isn't available. The list shows the latest status.");
 
-        // 4. The new status and the log entry are saved together (one SaveChanges = one database transaction).
+        // 4. The new status (on USERS and its copy on SERVICE_PROVIDERS), the cancelled bookings, the customers'
+        //    notifications and the log entry are saved together (one SaveChanges = one database transaction).
+        //    In SQL Server the triggers also keep the copy equal; setting it here keeps the app right without them.
         user.AccountStatus = newStatus;
+        provider.AccountStatus = newStatus;
+
+        var stopsWorking = newStatus is AccountStatuses.Suspended or AccountStatuses.Deactivated;
+        var cancelled = new List<Booking>();
+        var stillOpen = new List<OpenBooking>();
+        if (stopsWorking)
+        {
+            // Pending requests can never be accepted now: cancel them and tell each customer.
+            cancelled = await _db.Bookings.Include(b => b.Customer)
+                .Where(b => b.ProviderId == provider.ProviderId && b.Status == BookingStatuses.Pending)
+                .OrderBy(b => b.BookingId)
+                .ToListAsync(ct);
+            var now = DateTime.UtcNow;
+            foreach (var b in cancelled)
+            {
+                b.Status = BookingStatuses.Cancelled;
+                b.UpdatedAt = now;
+                _db.Notifications.Add(new Notification
+                {
+                    UserId = b.Customer.UserId,
+                    Message = $"Your booking #{b.BookingId} on {b.BookingDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} was cancelled "
+                              + "because the service provider is no longer available. Please book another provider.",
+                    CreatedAt = now
+                });
+            }
+
+            // Accepted / In Progress jobs may already be paid: they are NOT changed, only shown to the administrator.
+            stillOpen = await _db.Bookings.AsNoTracking()
+                .Where(b => b.ProviderId == provider.ProviderId
+                         && (b.Status == BookingStatuses.Accepted || b.Status == BookingStatuses.InProgress))
+                .OrderBy(b => b.BookingDate).ThenBy(b => b.BookingTime)
+                .Select(b => new OpenBooking(b.BookingId, b.Status, b.BookingDate, b.BookingTime))
+                .ToListAsync(ct);
+        }
+
         _db.AdminActions.Add(new AdminAction
         {
             AdminUserId = adminUserId,
@@ -242,9 +284,22 @@ public class ProviderManagementService : IProviderManagementService
             TargetId = user.UserId,
             Reason = cleanReason
         });
-        await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Admin {AdminUserId} changed provider account {TargetUserId} to {NewStatus}.", adminUserId, user.UserId, newStatus);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // a customer changed one of these bookings at the same moment (BOOKINGS.ROW_VERSION): nothing was saved
+            _db.ChangeTracker.Clear();
+            _logger.LogWarning("Provider {ProviderId}: status change not saved, a booking changed at the same time.", provider.ProviderId);
+            return new(ChangeStatusOutcome.InvalidTransition,
+                $"{name}'s bookings changed while you were doing this, so nothing was saved. Please try again.");
+        }
+
+        _logger.LogInformation("Admin {AdminUserId} changed provider account {TargetUserId} to {NewStatus}; {Cancelled} pending booking(s) cancelled, {Open} still open.",
+            adminUserId, user.UserId, newStatus, cancelled.Count, stillOpen.Count);
 
         var done = action switch
         {
@@ -253,7 +308,28 @@ public class ProviderManagementService : IProviderManagementService
             AccountAction.Reactivate => "reactivated",
             _ => "restored"
         };
-        return new(ChangeStatusOutcome.Success, $"{name} was {done}.");
+        return new(ChangeStatusOutcome.Success, $"{name} was {done}." + BookingsNote(cancelled.Count, stillOpen));
+    }
+
+    private sealed record OpenBooking(int BookingId, string Status, DateOnly Date, TimeOnly Time);
+
+    /// " 2 pending bookings were cancelled and the customers were notified. Still open, please follow up: #12 (Accepted, Nov 5, 9:00 AM)."
+    private static string BookingsNote(int cancelledCount, IReadOnlyList<OpenBooking> stillOpen)
+    {
+        var note = cancelledCount switch
+        {
+            0 => string.Empty,
+            1 => " 1 pending booking was cancelled and the customer was notified.",
+            _ => $" {cancelledCount} pending bookings were cancelled and the customers were notified."
+        };
+        if (stillOpen.Count > 0)
+        {
+            var listed = stillOpen.Take(OpenBookingsListed).Select(b =>
+                $"#{b.BookingId} ({b.Status}, {b.Date.ToString("MMM d", CultureInfo.InvariantCulture)}, {b.Time.ToString("h:mm tt", CultureInfo.InvariantCulture)})");
+            var more = stillOpen.Count > OpenBookingsListed ? $" and {stillOpen.Count - OpenBookingsListed} more" : string.Empty;
+            note += $" Still open, please follow up: {string.Join(", ", listed)}{more}.";
+        }
+        return note;
     }
 
     /// Same rule as ProviderStatuses.Primary, written so the database can run it.
