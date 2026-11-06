@@ -1,0 +1,118 @@
+@using System.Globalization
+@using Servisyo.Web.ViewModels
+@model BookingDetailsViewModel
+@{
+    // Admin > Bookings > "View": the booking card. admin-approval.js shows it in the pop-up; Details.cshtml shows it as a page.
+    var inv = CultureInfo.InvariantCulture;
+    string Peso(decimal amount) => "₱" + amount.ToString("N2", inv);
+
+    // where "Close" goes when this is a normal page (the same tab, search and page of the list)
+    var closeUrl = Url.Action("Index", "AdminBookings", new
+    {
+        status = Model.ReturnStatus == BookingFilters.All ? null : Model.ReturnStatus,
+        q = Model.ReturnQ,
+        page = Model.ReturnPage > 1 ? Model.ReturnPage : (int?)null
+    });
+}
+<div class="sv-rv sv-pd sv-bd" data-sv-review>
+    <div class="sv-rv__head">
+        <div>
+            <h2 class="sv-rv__title" id="sv-rv-title">Booking <span class="sv-bd__ref">#@Model.Reference</span></h2>
+            <p class="sv-rv__id">Read-only details for admin monitoring</p>
+        </div>
+        <div class="sv-bd__headright">
+            <span class="sv-tag sv-tag--@Model.Status.Tone">@Model.Status.Badge</span>
+            <a class="sv-rv__x" href="@closeUrl" data-sv-close aria-label="Close">&#x2715;</a>
+        </div>
+    </div>
+
+    @* 1. general *@
+    <section class="sv-pd__section" aria-labelledby="bd-general">
+        <h3 class="sv-pd__h" id="bd-general">General Info</h3>
+        <dl class="sv-bd__grid">
+            <div class="sv-pd__cell">
+                <dt>Scheduled</dt>
+                <dd>@Model.Date.ToString("ddd, MMM d, yyyy", inv)<br />@Model.StartTime.ToString("h:mm tt", inv) – @Model.EndTime.ToString("h:mm tt", inv) <span class="sv-bd__muted">(@Model.DurationMinutes min)</span></dd>
+            </div>
+            <div class="sv-pd__cell">
+                <dt>Created</dt>
+                <dd>@Model.CreatedAtCebu.ToString("MMM d, yyyy h:mm tt", inv) <span class="sv-bd__muted">(Cebu time)</span></dd>
+            </div>
+        </dl>
+    </section>
+
+    @* 2. service summary *@
+    <section class="sv-pd__section" aria-labelledby="bd-service">
+        <h3 class="sv-pd__h" id="bd-service">Service Summary</h3>
+        @if (Model.Services.Count == 0)
+        {
+            <p class="sv-rv__none">No service lines recorded.</p>
+        }
+        else
+        {
+            <ul class="sv-bd__lines">
+                @foreach (var s in Model.Services)
+                {
+                    <li class="sv-bd__line">
+                        <div class="sv-bd__linetop">
+                            <span class="sv-bd__svc">@s.Name</span>
+                            <span class="sv-bd__price">@Peso(s.Price)</span>
+                        </div>
+                        <div class="sv-bd__muted">@s.Category · @s.DurationMinutes min</div>
+                        @if (!string.IsNullOrWhiteSpace(s.Description))
+                        {
+                            <p class="sv-bd__desc">@s.Description</p>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+        <dl class="sv-bd__grid">
+            <div class="sv-pd__cell sv-bd__wide">
+                <dt>Customer's request</dt>
+                <dd>@if (Model.RequestDescription is null) { <span class="sv-rv__none">No description given</span> } else { <span class="sv-bd__pre">@Model.RequestDescription</span> }</dd>
+            </div>
+            <div class="sv-pd__cell">
+                <dt>Quoted price</dt>
+                <dd>@Peso(Model.QuotedTotal)</dd>
+            </div>
+        </dl>
+    </section>
+
+    @* 3. customer *@
+    <section class="sv-pd__section" aria-labelledby="bd-customer">
+        <h3 class="sv-pd__h" id="bd-customer">Customer Details</h3>
+        <dl class="sv-bd__grid">
+            <div class="sv-pd__cell"><dt>Full name</dt><dd>@Model.CustomerName</dd></div>
+            <div class="sv-pd__cell"><dt>Email</dt><dd>@Model.CustomerEmail</dd></div>
+            <div class="sv-pd__cell"><dt>Phone</dt><dd>@if (Model.CustomerPhone is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.CustomerPhone }</dd></div>
+            <div class="sv-pd__cell"><dt>Service address</dt><dd>@if (Model.ServiceAddress is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.ServiceAddress }</dd></div>
+        </dl>
+    </section>
+
+    @* 4. provider *@
+    <section class="sv-pd__section" aria-labelledby="bd-provider">
+        <h3 class="sv-pd__h" id="bd-provider">Service Provider Details</h3>
+        <dl class="sv-bd__grid">
+            <div class="sv-pd__cell"><dt>Full name</dt><dd>@Model.ProviderName</dd></div>
+            <div class="sv-pd__cell"><dt>Business name</dt><dd>@Model.BusinessName</dd></div>
+            <div class="sv-pd__cell"><dt>Email</dt><dd>@Model.ProviderEmail</dd></div>
+            <div class="sv-pd__cell"><dt>Phone</dt><dd>@if (Model.ProviderPhone is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.ProviderPhone }</dd></div>
+        </dl>
+    </section>
+
+    @* 5. money *@
+    <section class="sv-pd__section" aria-labelledby="bd-payment">
+        <h3 class="sv-pd__h" id="bd-payment">Financial &amp; Payment Summary</h3>
+        <dl class="sv-bd__grid">
+            <div class="sv-pd__cell"><dt>Total amount</dt><dd class="sv-bd__total">@Peso(Model.TotalAmount)</dd></div>
+            <div class="sv-pd__cell"><dt>Payment status</dt><dd><span class="sv-tag sv-tag--@Model.Payment.Tone">@Model.Payment.Text</span></dd></div>
+            <div class="sv-pd__cell"><dt>Payment method</dt><dd>@if (Model.PaymentMethod is null) { <span class="sv-rv__none">Not chosen yet</span> } else { @Model.PaymentMethod }</dd></div>
+            <div class="sv-pd__cell"><dt>Transaction reference</dt><dd>@if (Model.TransactionReference is null) { <span class="sv-rv__none">None yet</span> } else { <code class="sv-bd__code">@Model.TransactionReference</code> }</dd></div>
+        </dl>
+    </section>
+
+    <div class="sv-bd__foot">
+        <a class="sv-btn sv-btn--outline sv-btn--sm" href="@closeUrl" data-sv-close>Close</a>
+    </div>
+</div>

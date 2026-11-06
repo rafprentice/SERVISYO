@@ -199,10 +199,8 @@ public class CategoryManagementService : ICategoryManagementService
         _db.Database.IsRelational() ? await _db.Database.BeginTransactionAsync(ct) : null;
 
     // Same log format as the other admin actions: ACTION_TYPE says what happened, TARGET_TYPE says to what.
-    private static AdminAction Log(int adminUserId, string actionType, int categoryId, string? reason) => new()
-    {
-        AdminUserId = adminUserId, ActionType = actionType, TargetType = "CATEGORY", TargetId = categoryId, Reason = reason
-    };
+    private static AdminAction Log(int adminUserId, string actionType, int categoryId, string? reason) =>
+        AdminAction.ForCategory(adminUserId, actionType, categoryId, reason);
 
     private static CategoryResult NotAllowed() =>
         new(CategoryOutcome.NotAllowed, "Your administrator account is not allowed to do this.");

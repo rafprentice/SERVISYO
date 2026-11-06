@@ -276,14 +276,8 @@ public class ProviderManagementService : IProviderManagementService
                 .ToListAsync(ct);
         }
 
-        _db.AdminActions.Add(new AdminAction
-        {
-            AdminUserId = adminUserId,
-            ActionType = "Account " + newStatus,
-            TargetType = "USER",
-            TargetId = user.UserId,
-            Reason = cleanReason
-        });
+        // the log points to the SERVICE_PROVIDER (database v2.2), like the approve / reject entries
+        _db.AdminActions.Add(AdminAction.ForProvider(adminUserId, "Account " + newStatus, provider.ProviderId, cleanReason));
 
         try
         {

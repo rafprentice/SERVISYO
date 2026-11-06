@@ -1,0 +1,19 @@
+@using Servisyo.Web.ViewModels
+@model BookingDetailsViewModel
+@{
+    // The same card as the pop-up, shown as a normal page. Used when JavaScript is off or could not open the pop-up.
+    ViewData["Title"] = "Booking Details";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "bookings";
+}
+
+<p class="sv-eyebrow">Monitor</p>
+
+<div class="sv-panel sv-rv-page">
+    <partial name="_BookingDetails" model="Model" />
+</div>
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
+}

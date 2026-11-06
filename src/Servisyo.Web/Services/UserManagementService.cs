@@ -124,10 +124,11 @@ public class UserManagementService : IUserManagementService
         if (cleanReason is { Length: > MaxReasonLength })
             return new(ChangeStatusOutcome.ReasonTooLong, $"The reason can be at most {MaxReasonLength} characters.");
 
-        // 2. The target must be a CUSTOMER account (never an administrator or a provider from this page).
+        // 2. The target must be a CUSTOMER account (never an administrator or a provider from this page),
+        //    with its CUSTOMERS row: the log points to that row (ADMIN_ACTIONS.TARGET_CUSTOMER_ID).
         var target = await _db.Users.Include(u => u.Customer)
             .FirstOrDefaultAsync(u => u.UserId == targetUserId && u.Role == Roles.Customer, ct);
-        if (target is null)
+        if (target?.Customer is null)
             return new(ChangeStatusOutcome.NotFound, "That customer account was not found.");
 
         var name = $"{target.FirstName} {target.LastName}".Trim();
@@ -139,17 +140,10 @@ public class UserManagementService : IUserManagementService
                 $"{name}'s account is currently {target.AccountStatus.ToLowerInvariant()}, so that action isn't available. The list shows the latest status.");
 
         // 4. Save the new status and the log entry together (one SaveChanges = one database transaction).
-        //    Same log format as usp_UpdateAccountStatus in the PDF: 'Account <status>', 'USER'.
+        //    Same log as usp_UpdateAccountStatus: 'Account <status>', target = the CUSTOMER (database v2.2).
         target.AccountStatus = newStatus;
-        if (target.Customer is not null) target.Customer.AccountStatus = newStatus;   // the copy on CUSTOMERS
-        _db.AdminActions.Add(new AdminAction
-        {
-            AdminUserId = adminUserId,
-            ActionType = "Account " + newStatus,
-            TargetType = "USER",
-            TargetId = target.UserId,
-            Reason = cleanReason
-        });
+        target.Customer.AccountStatus = newStatus;     // the copy on CUSTOMERS
+        _db.AdminActions.Add(AdminAction.ForCustomer(adminUserId, "Account " + newStatus, target.Customer.CustomerId, cleanReason));
         await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation("Admin {AdminUserId} changed account {TargetUserId} to {NewStatus}.",

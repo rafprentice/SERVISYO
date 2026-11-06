@@ -145,15 +145,18 @@ public class ProviderProfileServiceTests
         return review;
     }
 
+    /// What the page would send if nothing were disabled: every value as it is saved.
     private static ProviderProfileForm FormFrom(Provider p) => new()
     {
-        FullName = $"{p.User.FirstName} {p.User.LastName}",
+        FirstName = p.User.FirstName,
+        MiddleName = p.User.MiddleName,
+        LastName = p.User.LastName,
         BusinessName = p.BusinessName,
         PhoneNumber = p.User.PhoneNumber,
-        Email = p.User.Email,
         Address = p.Address,
-        Description = p.Description,
-        BaseFee = p.BaseFee
+        BaseFee = p.BaseFee,
+        Email = p.User.Email,
+        Description = p.Description
     };
 
     private static Task<Provider> ReloadAsync(ServisyoDbContext db, int providerId)
@@ -191,18 +194,15 @@ public class ProviderProfileServiceTests
             Assert.Equal(access, page.Access);
             Assert.Equal(access == ProviderDashboardAccess.Allowed, page.Page is not null);
 
-            var save = await svc.SaveAsync(userId, new ProviderProfileForm
-            {
-                FullName = "Hacked Name", BusinessName = "Hacked Business", Email = "hacked@test.com", BaseFee = 750m
-            });
+            var save = await svc.SaveAsync(userId, new ProviderProfileForm { Email = "hacked@test.com", Description = "Hacked bio" });
             Assert.Equal(access, save.Access);
             Assert.Equal(access == ProviderDashboardAccess.Allowed, save.Saved);
         }
 
         // only the approved provider's own data changed
-        Assert.Equal("Hacked Business", (await ReloadAsync(db, approved.ProviderId)).BusinessName);
+        Assert.Equal("Hacked bio", (await ReloadAsync(db, approved.ProviderId)).Description);
         foreach (var other in new[] { pending, rejected, suspended, deactivated })
-            Assert.Equal("Marco's Plumbing Works", (await ReloadAsync(db, other.ProviderId)).BusinessName);
+            Assert.Equal("Licensed master plumber.", (await ReloadAsync(db, other.ProviderId)).Description);
         Assert.Equal("Ana", (await db.Users.AsNoTracking().FirstAsync(u => u.UserId == customer.UserId)).FirstName);
     }
 
@@ -219,8 +219,11 @@ public class ProviderProfileServiceTests
         Assert.Equal("Marco Reyes", page.FullName);
         Assert.Equal("MR", page.Initials);
         Assert.Equal("Marco's Plumbing Works · Cebu City", page.HeaderLine);
-        Assert.Equal("Marco Reyes", page.Form.FullName);
+        Assert.Equal("Marco", page.Form.FirstName);
+        Assert.Equal("Reyes", page.Form.LastName);
         Assert.Equal("Marco's Plumbing Works", page.Form.BusinessName);
+        Assert.Equal(500m, page.Form.BaseFee);
+        Assert.True(page.InfoLocked);                                       // approved: the core information is read-only
         Assert.Equal("+639175551234", page.Form.PhoneNumber);
         Assert.Equal("marco@marcoplumbing.ph", page.Form.Email);
         Assert.Equal("12 Mango St", page.Form.Address);
@@ -317,222 +320,228 @@ public class ProviderProfileServiceTests
     }
 
     [Fact]
-    public async Task ARejectedForm_IsShownAgainWithTheTypedText_AndTheSavedHeader()
+    public async Task ARejectedForm_ShowsTheTypedEmailAndBio_ButTheLockedValuesFromTheDatabase()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
-        var typed = FormFrom(p);
-        typed.BusinessName = "Typed But Not Saved";
-        typed.Email = "not-an-email";
+        var typed = new ProviderProfileForm { Email = "not-an-email", Description = "Typed but not saved" };   // locked boxes are not sent
         var rejected = await svc.SaveAsync(p.UserId, typed);
 
         var page = (await svc.GetAsync(p.UserId, typed, rejected)).Page!;
 
         Assert.False(rejected.Saved);
-        Assert.Equal("Typed But Not Saved", page.Form.BusinessName);          // what was typed stays in the boxes
-        Assert.Equal("Marco's Plumbing Works · Cebu City", page.HeaderLine);   // the header still shows what is saved
+        Assert.Equal("Typed but not saved", page.Form.Description);           // what was typed stays in the boxes
+        Assert.Equal("not-an-email", page.Form.Email);
+        Assert.Equal("Marco's Plumbing Works", page.Form.BusinessName);       // locked: always the saved value
+        Assert.Equal("12 Mango St", page.Form.Address);
+        Assert.Equal("Marco's Plumbing Works · Cebu City", page.HeaderLine);
         Assert.NotNull(page.ErrorFor("Email"));
     }
 
-    // -------------------------------------------------------------------- save
+    // -------------------------------------------------------------- approved = core information locked
 
     [Fact]
-    public async Task Save_UpdatesTheAccountAndTheProfile()
+    public void TheLockedFields_AreTheOnesTheSpecLists()
     {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db, middle: "Santos");
-
-        var result = await svc.SaveAsync(p.UserId, new ProviderProfileForm
-        {
-            FullName = "  Marco   Antonio Reyes ",
-            BusinessName = "  Reyes Plumbing & Co.  ",
-            PhoneNumber = " +639175559999 ",
-            Email = "  Marco.New@MarcoPlumbing.PH ",
-            Address = " 5 Colon St ",
-            Description = "  Fast and reliable.  ",
-            BaseFee = 1500.50m
-        });
-
-        Assert.True(result.Saved);
-        Assert.Empty(result.FieldErrors);
-        Assert.Equal("Marco Antonio Reyes", result.FullName);
-        Assert.Equal("marco.new@marcoplumbing.ph", result.Email);
-
-        var saved = await ReloadAsync(db, p.ProviderId);
-        Assert.Equal("Marco", saved.User.FirstName);
-        Assert.Equal("Antonio Reyes", saved.User.LastName);           // first word = first name, the rest = last name
-        Assert.Equal("Santos", saved.User.MiddleName);                // the middle name is not touched
-        Assert.Equal("marco.new@marcoplumbing.ph", saved.User.Email); // emails are stored in lower case, like registration
-        Assert.Equal("09175559999", saved.User.PhoneNumber);          // always saved as 09XXXXXXXXX
-        Assert.Equal("Reyes Plumbing & Co.", saved.BusinessName);
-        Assert.Equal("5 Colon St", saved.Address);
-        Assert.Equal("Fast and reliable.", saved.Description);
-        Assert.Equal(1500.50m, saved.BaseFee);
+        Assert.Equal(new[] { "FirstName", "MiddleName", "LastName", "BusinessName", "PhoneNumber", "Address", "BaseFee" }, ProviderLockRules.LockedFields);
+        Assert.Equal("Your provider account is approved and verified. Profile updates require Admin assistance.", ProviderLockRules.ApprovedNotice);
+        Assert.True(ProviderLockRules.IsLocked(ApprovalStatuses.Approved));
+        Assert.False(ProviderLockRules.IsLocked(ApprovalStatuses.Pending));
+        Assert.False(ProviderLockRules.IsLocked(ApprovalStatuses.Rejected));
     }
 
-    // ---------------------------------------------------------------- base fee (never 0 or below)
-
     [Fact]
-    public async Task ThePage_ShowsTheSavedBaseFee()
+    public async Task ThePage_OfAnApprovedProvider_IsLocked_AndShowsTheMiddleName()
     {
         var (svc, db) = Create();
-        var p = await AddProviderAsync(db, baseFee: 1250m);
+        var p = await AddProviderAsync(db, middle: "Castro");
 
         var page = (await svc.GetAsync(p.UserId)).Page!;
 
-        Assert.Equal(1250m, page.Form.BaseFee);
+        Assert.True(page.InfoLocked);
+        Assert.Equal("Castro", page.Form.MiddleName);
+    }
+
+    /// Changes one locked field of the form (a value different from the saved one).
+    private static void ChangeLocked(ProviderProfileForm form, string field)
+    {
+        switch (field)
+        {
+            case "FirstName": form.FirstName = "Mark"; break;
+            case "MiddleName": form.MiddleName = "Castro"; break;
+            case "LastName": form.LastName = "Santos"; break;
+            case "BusinessName": form.BusinessName = "A New Business Name"; break;
+            case "PhoneNumber": form.PhoneNumber = "09998887777"; break;
+            case "Address": form.Address = "7 Gorordo Ave"; break;
+            case "BaseFee": form.BaseFee = 750m; break;
+            default: throw new ArgumentOutOfRangeException(nameof(field), field, null);
+        }
     }
 
     [Theory]
-    [InlineData("0")]
-    [InlineData("-1")]
-    [InlineData("-0.01")]
-    [InlineData("0.99")]
-    [InlineData("100000.01")]
-    [InlineData("999999")]
-    public async Task Save_RefusesABaseFeeOf0OrBelow_OrAbove100000_AndSavesNothing(string typed)
+    [InlineData("FirstName")]
+    [InlineData("MiddleName")]
+    [InlineData("LastName")]
+    [InlineData("BusinessName")]
+    [InlineData("PhoneNumber")]
+    [InlineData("Address")]
+    [InlineData("BaseFee")]
+    public async Task Save_RefusesAnyChangeToALockedField_AndSavesNothingAtAll(string field)
     {
         var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
+        var p = await AddProviderAsync(db, email: "marco@test.com");
         var form = FormFrom(p);
-        form.BaseFee = decimal.Parse(typed, System.Globalization.CultureInfo.InvariantCulture);
-        form.BusinessName = "A Perfectly Good New Name";        // valid, but nothing may be saved while the fee is wrong
+        form.Description = "A new bio";                 // a good change in the same request is NOT saved either
+        ChangeLocked(form, field);
 
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.False(result.Saved);
-        Assert.Equal(form.BaseFee > BaseFeeRules.Max ? BaseFeeRules.MaxMessage : BaseFeeRules.MinMessage, result.FieldErrors["BaseFee"]);
+        Assert.True(result.LockViolation);              // the controller answers 403 Forbidden
+        Assert.Equal(ProviderLockRules.ApprovedNotice, result.Message);
+        Assert.Equal(ProviderLockRules.FieldLockedMessage, result.FieldErrors[field]);
+        Assert.Single(result.FieldErrors);
+
         var saved = await ReloadAsync(db, p.ProviderId);
-        Assert.Equal(500m, saved.BaseFee);
+        Assert.Equal("Marco", saved.User.FirstName);
+        Assert.Null(saved.User.MiddleName);
+        Assert.Equal("Reyes", saved.User.LastName);
         Assert.Equal("Marco's Plumbing Works", saved.BusinessName);
+        Assert.Equal("+639175551234", saved.User.PhoneNumber);
+        Assert.Equal("12 Mango St", saved.Address);
+        Assert.Equal(500m, saved.BaseFee);
+        Assert.Equal("Licensed master plumber.", saved.Description);
     }
 
     [Fact]
-    public async Task Save_RequiresABaseFee()
+    public async Task Save_UpdatesEmailAndBio_TheFieldsAnApprovedProviderCanStillEdit()
     {
         var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
+        var p = await AddProviderAsync(db, middle: "Santos");
         var form = FormFrom(p);
-        form.BaseFee = null;
-
-        var result = await svc.SaveAsync(p.UserId, form);
-
-        Assert.False(result.Saved);
-        Assert.Equal(BaseFeeRules.RequiredMessage, result.FieldErrors["BaseFee"]);
-        Assert.Equal(500m, (await ReloadAsync(db, p.ProviderId)).BaseFee);
-    }
-
-    [Theory]
-    [InlineData("1", "1")]
-    [InlineData("1500.5", "1500.5")]
-    [InlineData("250.555", "250.56")]           // BASE_FEE is DECIMAL(12,2)
-    [InlineData("100000", "100000")]
-    public async Task Save_AcceptsABaseFeeFrom1To100000(string typed, string expected)
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-        var form = FormFrom(p);
-        form.BaseFee = decimal.Parse(typed, System.Globalization.CultureInfo.InvariantCulture);
+        form.Email = "  Marco.New@MarcoPlumbing.PH ";
+        form.Description = "  Fast and reliable.  ";
 
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.True(result.Saved);
-        Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), (await ReloadAsync(db, p.ProviderId)).BaseFee);
+        Assert.False(result.LockViolation);
+        Assert.Equal("Marco Reyes", result.FullName);
+        Assert.Equal("marco.new@marcoplumbing.ph", result.Email);
+        var saved = await ReloadAsync(db, p.ProviderId);
+        Assert.Equal("marco.new@marcoplumbing.ph", saved.User.Email);   // emails are stored in lower case, like registration
+        Assert.Equal("Fast and reliable.", saved.Description);
+        Assert.Equal("Santos", saved.User.MiddleName);                 // the locked values are untouched
+        Assert.Equal("Marco's Plumbing Works", saved.BusinessName);
+        Assert.Equal(500m, saved.BaseFee);
+    }
+
+    [Fact]
+    public async Task Save_WithoutTheLockedFields_AsTheBrowserSendsIt_KeepsThem()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+
+        // disabled boxes are never sent: only Email and Bio arrive
+        var result = await svc.SaveAsync(p.UserId, new ProviderProfileForm { Email = p.User.Email, Description = "Only the bio" });
+
+        Assert.True(result.Saved);
+        var saved = await ReloadAsync(db, p.ProviderId);
+        Assert.Equal("Only the bio", saved.Description);
+        Assert.Equal("Marco", saved.User.FirstName);
+        Assert.Equal("+639175551234", saved.User.PhoneNumber);
+        Assert.Equal("12 Mango St", saved.Address);
+        Assert.Equal(500m, saved.BaseFee);
+    }
+
+    [Fact]
+    public async Task Save_SendingTheSavedValuesBack_EvenWithExtraSpaces_IsNotAChange()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db, first: "Maria", last: "Dela Cruz", phone: "+639175551234");
+        var form = FormFrom(p);
+        form.LastName = "  Dela   Cruz ";
+        form.PhoneNumber = "09175551234";             // the same number in the saved 09 form
+        form.BaseFee = 500.00m;
+        form.Description = "New bio";
+
+        var result = await svc.SaveAsync(p.UserId, form);
+
+        Assert.True(result.Saved);
+        var saved = await ReloadAsync(db, p.ProviderId);
+        Assert.Equal("Dela Cruz", saved.User.LastName);
+        Assert.Equal("+639175551234", saved.User.PhoneNumber);         // left exactly as it was
+    }
+
+    [Fact]
+    public async Task Save_ABlankLockedValue_CountsAsNotSent_AndNeverClearsIt()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = FormFrom(p);
+        form.PhoneNumber = "   ";
+        form.Address = "";
+        form.BusinessName = null;
+
+        var result = await svc.SaveAsync(p.UserId, form);
+
+        Assert.True(result.Saved);
+        var saved = await ReloadAsync(db, p.ProviderId);
+        Assert.Equal("+639175551234", saved.User.PhoneNumber);
+        Assert.Equal("12 Mango St", saved.Address);
+        Assert.Equal("Marco's Plumbing Works", saved.BusinessName);
     }
 
     [Theory]
     [InlineData("none")]
     [InlineData("0")]
-    public async Task AnOlderProvider_WithNoOrAZeroBaseFee_MustSetOne_BeforeTheProfileSaves(string old)
+    public async Task AnOlderProvider_WithNoOrAZeroBaseFee_CanStillSaveEmailAndBio(string old)
     {
         var (svc, db) = Create();
-        var p = await AddProviderAsync(db, baseFee: old == "none" ? null : decimal.Parse(old, System.Globalization.CultureInfo.InvariantCulture));
-
-        var refused = await svc.SaveAsync(p.UserId, FormFrom(p));
-        Assert.False(refused.Saved);
-        Assert.True(refused.FieldErrors.ContainsKey("BaseFee"));
-
+        var p = await AddProviderAsync(db, baseFee: old == "none" ? null : 0m);
         var form = FormFrom(p);
-        form.BaseFee = 300m;
-        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
-        Assert.Equal(300m, (await ReloadAsync(db, p.ProviderId)).BaseFee);
-    }
+        form.Description = "Updated bio";
 
-    [Fact]
-    public async Task Save_WithTheNameUnchanged_NeverRewritesFirstMiddleOrLastName()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db, first: "Maria", middle: "Luisa", last: "Dela Cruz");
-        var form = FormFrom(p);
-        form.BusinessName = "New Business Name";
-
-        var result = await svc.SaveAsync(p.UserId, form);
-
-        Assert.True(result.Saved);
-        var saved = await ReloadAsync(db, p.ProviderId);
-        Assert.Equal("Maria", saved.User.FirstName);
-        Assert.Equal("Luisa", saved.User.MiddleName);
-        Assert.Equal("Dela Cruz", saved.User.LastName);
-        Assert.Equal("New Business Name", saved.BusinessName);
-    }
-
-    [Fact]
-    public async Task Save_WithTheNameUnchanged_ToleratesExtraSpaces()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db, first: "Maria", last: "Dela Cruz");
-        var form = FormFrom(p);
-        form.FullName = "  Maria    Dela   Cruz ";
-
-        var result = await svc.SaveAsync(p.UserId, form);
-
-        Assert.True(result.Saved);
-        Assert.Equal("Dela Cruz", (await ReloadAsync(db, p.ProviderId)).User.LastName);
-    }
-
-    [Fact]
-    public async Task Save_AllowsAnOldOneWordName_AsLongAsItIsNotEdited()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db, first: "Marco", last: "");
-        var form = FormFrom(p);
-        form.FullName = "Marco";
-        form.Address = "7 Gorordo Ave";
-
-        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
-
-        form.FullName = "Marco R";                    // once the name is edited, the first-and-last-name rule applies; "Marco R" has both
         Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
         var saved = await ReloadAsync(db, p.ProviderId);
-        Assert.Equal("Marco", saved.User.FirstName);
-        Assert.Equal("R", saved.User.LastName);
+        Assert.Equal("Updated bio", saved.Description);
+        Assert.Equal(old == "none" ? null : 0m, saved.BaseFee);          // only an administrator can fix it now
     }
 
     [Fact]
-    public async Task Save_RefusesANewNameWithoutAFirstAndLastName()
+    public async Task Save_WithActiveBookings_StillUpdatesEmailAndBio()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
+        var customer = new Customer { User = NewUser("Elena", "Cruz", Roles.Customer) };
+        db.Customers.Add(customer);
+        await db.SaveChangesAsync();
+        db.Bookings.Add(new Booking
+        {
+            CustomerId = customer.CustomerId, ProviderId = p.ProviderId, BookingDate = new DateOnly(2026, 11, 20), BookingTime = new TimeOnly(9, 0),
+            TotalDurationMinutes = 60, TotalFee = 500m, Status = BookingStatuses.Accepted, RowVersion = new byte[] { 1 }
+        });
+        await db.SaveChangesAsync();
         var form = FormFrom(p);
-        form.FullName = "Marco";
+        form.Description = "Busy but reachable";
 
-        var result = await svc.SaveAsync(p.UserId, form);
-
-        Assert.False(result.Saved);
-        Assert.Equal("Enter your first and last name.", result.FieldErrors["FullName"]);
-        Assert.Equal("Reyes", (await ReloadAsync(db, p.ProviderId)).User.LastName);
+        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
+        Assert.Equal("Busy but reachable", (await ReloadAsync(db, p.ProviderId)).Description);
     }
 
+    // -------------------------------------------------------------------- save: email and bio
+
     [Fact]
-    public async Task Save_RequiresNameBusinessAndEmail()
+    public async Task Save_RequiresAnEmail()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
 
-        var result = await svc.SaveAsync(p.UserId, new ProviderProfileForm { FullName = "  ", BusinessName = "", Email = null });
+        var result = await svc.SaveAsync(p.UserId, new ProviderProfileForm { Email = null });
 
         Assert.False(result.Saved);
-        Assert.Equal(new[] { "BaseFee", "BusinessName", "Email", "FullName" }, result.FieldErrors.Keys.OrderBy(k => k));
+        Assert.False(result.LockViolation);
+        Assert.Equal(new[] { "Email" }, result.FieldErrors.Keys);
     }
 
     [Fact]
@@ -541,16 +550,13 @@ public class ProviderProfileServiceTests
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
-        form.BusinessName = "A Perfectly Good New Name";
-        form.Address = "7 Gorordo Ave";
+        form.Description = "A perfectly good new bio";
         form.Email = "not-an-email";
 
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.False(result.Saved);
-        var saved = await ReloadAsync(db, p.ProviderId);
-        Assert.Equal("Marco's Plumbing Works", saved.BusinessName);
-        Assert.Equal("12 Mango St", saved.Address);
+        Assert.Equal("Licensed master plumber.", (await ReloadAsync(db, p.ProviderId)).Description);
     }
 
     [Theory]
@@ -604,55 +610,17 @@ public class ProviderProfileServiceTests
     }
 
     [Fact]
-    public async Task Save_TurnsABlankPhoneAddressAndBio_IntoNothing()
+    public async Task Save_TurnsABlankBio_IntoNothing()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
-        form.PhoneNumber = "   ";
-        form.Address = null;
         form.Description = "  \r\n ";
 
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.True(result.Saved);
-        var saved = await ReloadAsync(db, p.ProviderId);
-        Assert.Null(saved.User.PhoneNumber);
-        Assert.Null(saved.Address);
-        Assert.Null(saved.Description);
-    }
-
-    [Theory]
-    [InlineData("12345")]
-    [InlineData("call me")]
-    [InlineData("+63 917 555 1234 5678 9")]
-    [InlineData("0917 555 1234")]
-    [InlineData("0917-555-1234")]
-    public async Task Save_RefusesAnInvalidPhone(string phone)
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-        var form = FormFrom(p);
-        form.PhoneNumber = phone;
-
-        var result = await svc.SaveAsync(p.UserId, form);
-
-        Assert.False(result.Saved);
-        Assert.Equal(InputRules.PhoneMessage, result.FieldErrors["PhoneNumber"]);
-    }
-
-    [Fact]
-    public async Task Save_LeavesAnOldPhoneInAnotherStyleAlone_UntilItIsEdited()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db, phone: "n/a");
-        var form = FormFrom(p);
-        form.Address = "7 Gorordo Ave";
-
-        var result = await svc.SaveAsync(p.UserId, form);
-
-        Assert.True(result.Saved);
-        Assert.Equal("n/a", (await ReloadAsync(db, p.ProviderId)).User.PhoneNumber);
+        Assert.Null((await ReloadAsync(db, p.ProviderId)).Description);
     }
 
     [Fact]
@@ -661,25 +629,21 @@ public class ProviderProfileServiceTests
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
-        form.FullName = "A " + new string('b', ProfileRules.MaxFullNameLength);
-        form.BusinessName = new string('b', ProfileRules.MaxBusinessNameLength + 1);
-        form.Address = new string('a', ProfileRules.MaxAddressLength + 1);
         form.Description = new string('d', ProfileRules.MaxDescriptionLength + 1);
         form.Email = new string('e', ProfileRules.MaxEmailLength) + "@test.com";
 
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.False(result.Saved);
-        Assert.Equal(new[] { "Address", "BusinessName", "Description", "Email", "FullName" }, result.FieldErrors.Keys.OrderBy(k => k));
+        Assert.Equal(new[] { "Description", "Email" }, result.FieldErrors.Keys.OrderBy(k => k));
     }
 
     [Fact]
-    public async Task Save_AcceptsTextExactlyAtTheLimit_AndCountsABrowserLineBreakAsOneCharacter()
+    public async Task Save_AcceptsABioExactlyAtTheLimit_AndCountsABrowserLineBreakAsOneCharacter()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = FormFrom(p);
-        form.Address = new string('a', ProfileRules.MaxAddressLength);
         form.Description = new string('a', 127) + "\r\n" + new string('b', 127);        // 255 characters once the line break counts as one
 
         var result = await svc.SaveAsync(p.UserId, form);
@@ -698,16 +662,14 @@ public class ProviderProfileServiceTests
         var mine = await AddProviderAsync(db, business: "Mine", email: "mine@test.com");
         var other = await AddProviderAsync(db, business: "Other", first: "Liza", last: "Tan", email: "other@test.com");
         var form = FormFrom(mine);
-        form.BusinessName = "Mine Renamed";
-        form.FullName = "Marco Renamed";
+        form.Description = "Mine, updated";
 
         Assert.True((await svc.SaveAsync(mine.UserId, form)).Saved);
 
         var untouched = await ReloadAsync(db, other.ProviderId);
-        Assert.Equal("Other", untouched.BusinessName);
-        Assert.Equal("Liza", untouched.User.FirstName);
+        Assert.Equal("Licensed master plumber.", untouched.Description);
         Assert.Equal("other@test.com", untouched.User.Email);
-        Assert.Equal("Mine Renamed", (await ReloadAsync(db, mine.ProviderId)).BusinessName);
+        Assert.Equal("Mine, updated", (await ReloadAsync(db, mine.ProviderId)).Description);
     }
 
     [Fact]
@@ -722,7 +684,7 @@ public class ProviderProfileServiceTests
         tracked.MaxJobsPerDay = 2;
         await db.SaveChangesAsync();
         var form = FormFrom(p);
-        form.BusinessName = "Changed";
+        form.Description = "Changed";
 
         await svc.SaveAsync(p.UserId, form);
 

@@ -52,9 +52,21 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("nvarchar(255)")
                         .HasColumnName("REASON");
 
-                    b.Property<int>("TargetId")
+                    b.Property<int?>("TargetCategoryId")
                         .HasColumnType("int")
-                        .HasColumnName("TARGET_ID");
+                        .HasColumnName("TARGET_CATEGORY_ID");
+
+                    b.Property<int?>("TargetCustomerId")
+                        .HasColumnType("int")
+                        .HasColumnName("TARGET_CUSTOMER_ID");
+
+                    b.Property<int?>("TargetProviderId")
+                        .HasColumnType("int")
+                        .HasColumnName("TARGET_PROVIDER_ID");
+
+                    b.Property<int?>("TargetReviewId")
+                        .HasColumnType("int")
+                        .HasColumnName("TARGET_REVIEW_ID");
 
                     b.Property<string>("TargetType")
                         .IsRequired()
@@ -66,7 +78,20 @@ namespace Servisyo.Web.Migrations
 
                     b.HasIndex("AdminUserId");
 
-                    b.ToTable("ADMIN_ACTIONS", (string)null);
+                    b.HasIndex("TargetCategoryId");
+
+                    b.HasIndex("TargetCustomerId");
+
+                    b.HasIndex("TargetProviderId");
+
+                    b.HasIndex("TargetReviewId");
+
+                    b.ToTable("ADMIN_ACTIONS", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ADMIN_ACTIONS_TARGET", "([TARGET_TYPE] = 'CUSTOMER' AND [TARGET_CUSTOMER_ID] IS NOT NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'SERVICE_PROVIDER' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NOT NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'REVIEW' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NOT NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'CATEGORY' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ADMIN_ACTIONS_TARGET_TYPE", "[TARGET_TYPE] IN ('CUSTOMER','SERVICE_PROVIDER','REVIEW','CATEGORY')");
+                        });
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Booking", b =>
@@ -1076,7 +1101,35 @@ namespace Servisyo.Web.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Servisyo.Web.Models.ServiceCategory", "TargetCategory")
+                        .WithMany()
+                        .HasForeignKey("TargetCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Servisyo.Web.Models.Customer", "TargetCustomer")
+                        .WithMany()
+                        .HasForeignKey("TargetCustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Servisyo.Web.Models.Provider", "TargetProvider")
+                        .WithMany()
+                        .HasForeignKey("TargetProviderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Servisyo.Web.Models.Review", "TargetReview")
+                        .WithMany()
+                        .HasForeignKey("TargetReviewId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Admin");
+
+                    b.Navigation("TargetCategory");
+
+                    b.Navigation("TargetCustomer");
+
+                    b.Navigation("TargetProvider");
+
+                    b.Navigation("TargetReview");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Booking", b =>

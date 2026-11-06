@@ -9,6 +9,10 @@ public interface IBookingMonitorService
 {
     /// The platform-wide booking list for the admin (read-only). Returns null when the signed-in user is not an Active administrator.
     Task<BookingsPageViewModel?> GetBookingsAsync(int adminUserId, BookingListQuery query, CancellationToken ct = default);
+
+    /// Everything about one booking for the admin's "View" pop-up (read-only). Allowed = false when the signed-in user
+    /// is not an Active administrator; Details = null when there is no such booking.
+    Task<BookingDetailsLookup> GetDetailsAsync(int adminUserId, int bookingId, CancellationToken ct = default);
 }
 
 public class BookingMonitorService : IBookingMonitorService
@@ -23,9 +27,70 @@ public class BookingMonitorService : IBookingMonitorService
         BookingStatuses.Completed, BookingStatuses.Rejected, BookingStatuses.Cancelled
     };
 
+    private const int CebuOffsetHours = 8;      // the Philippines has no daylight saving
+
     private readonly ServisyoDbContext _db;
 
     public BookingMonitorService(ServisyoDbContext db) => _db = db;
+
+    public async Task<BookingDetailsLookup> GetDetailsAsync(int adminUserId, int bookingId, CancellationToken ct = default)
+    {
+        var shell = await AdminShell.BuildAsync(_db, adminUserId, ct);
+        if (shell is null) return new(false, null);
+
+        var b = await _db.Bookings.AsNoTracking()
+            .Where(x => x.BookingId == bookingId)
+            .Select(x => new
+            {
+                x.BookingId, x.BookingDate, x.BookingTime, x.TotalDurationMinutes, x.ServiceLocation, x.ServiceDescription,
+                x.TotalFee, x.Status, x.PaymentStatus, x.CreatedAt,
+                CustomerFirst = x.Customer.User.FirstName, CustomerLast = x.Customer.User.LastName,
+                CustomerEmail = x.Customer.User.Email, CustomerPhone = x.Customer.User.PhoneNumber,
+                ProviderFirst = x.Provider.User.FirstName, ProviderLast = x.Provider.User.LastName,
+                x.Provider.BusinessName, ProviderEmail = x.Provider.User.Email, ProviderPhone = x.Provider.User.PhoneNumber,
+                PayAmount = x.Payment != null ? (decimal?)x.Payment.Amount : null,
+                PayMethod = x.Payment != null ? x.Payment.PaymentMethod : null,
+                PayReference = x.Payment != null ? x.Payment.TransactionReference : null,
+                PayStatus = x.Payment != null ? x.Payment.PaymentStatus : null
+            })
+            .FirstOrDefaultAsync(ct);
+        if (b is null) return new(true, null);
+
+        var services = await _db.BookingServices.AsNoTracking()
+            .Where(s => s.BookingId == bookingId)
+            .OrderBy(s => s.BookingServiceId)
+            .Select(s => new BookingDetailsServiceLine(
+                s.Service.ServiceName, s.Service.Category.CategoryName, s.Service.Description, s.PriceSnapshot, s.DurationMinutesSnapshot))
+            .ToListAsync(ct);
+
+        return new(true, new BookingDetailsViewModel
+        {
+            Shell = shell,
+            BookingId = b.BookingId,
+            Reference = BookingDetailsViewModel.ReferenceFor(b.BookingId, b.CreatedAt),
+            Status = AdminBookingDisplay.For(b.Status),
+            Date = b.BookingDate,
+            StartTime = b.BookingTime,
+            EndTime = b.BookingTime.AddMinutes(b.TotalDurationMinutes),
+            DurationMinutes = b.TotalDurationMinutes,
+            CreatedAtCebu = b.CreatedAt.AddHours(CebuOffsetHours),
+            Services = services,
+            RequestDescription = string.IsNullOrWhiteSpace(b.ServiceDescription) ? null : b.ServiceDescription.Trim(),
+            QuotedTotal = b.TotalFee,
+            CustomerName = $"{b.CustomerFirst} {b.CustomerLast}".Trim(),
+            CustomerEmail = b.CustomerEmail,
+            CustomerPhone = string.IsNullOrWhiteSpace(b.CustomerPhone) ? null : b.CustomerPhone,
+            ServiceAddress = string.IsNullOrWhiteSpace(b.ServiceLocation) ? null : b.ServiceLocation,
+            ProviderName = $"{b.ProviderFirst} {b.ProviderLast}".Trim(),
+            BusinessName = b.BusinessName,
+            ProviderEmail = b.ProviderEmail,
+            ProviderPhone = string.IsNullOrWhiteSpace(b.ProviderPhone) ? null : b.ProviderPhone,
+            TotalAmount = b.PayAmount ?? b.TotalFee,
+            PaymentMethod = BookingDetailsViewModel.PaymentMethodText(b.PayMethod, b.PayReference),
+            TransactionReference = string.IsNullOrWhiteSpace(b.PayReference) ? null : b.PayReference,
+            Payment = PaymentDisplay.For(PaymentProgress.Effective(b.PaymentStatus, b.PayStatus))
+        });
+    }
 
     public async Task<BookingsPageViewModel?> GetBookingsAsync(int adminUserId, BookingListQuery query, CancellationToken ct = default)
     {

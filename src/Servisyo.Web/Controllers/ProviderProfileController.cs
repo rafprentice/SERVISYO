@@ -39,10 +39,14 @@ public class ProviderProfileController : Controller
     {
         if (!TryGetUserId(out var userId)) return Forbid();
 
-        // [Required] / [Range(1, 100000)] on BaseFee: nothing is saved while ModelState is invalid (e.g. a base fee of 0 or below)
+        // The locked fields (names, business name, phone, address, base fee) are never saved from this form, so a value
+        // the model binder could not read there does not matter; a real attempt to change one is refused with 403 below.
+        foreach (var field in ProviderLockRules.LockedFields)
+            ModelState.Remove(field);
+
+        // nothing is saved while ModelState is invalid
         if (!ModelState.IsValid)
         {
-            BaseFeeRules.FixModelStateMessage(ModelState, form.BaseFee);
             var fieldErrors = ModelState
                 .Where(entry => entry.Value is { Errors.Count: > 0 })
                 .ToDictionary(entry => entry.Key,
@@ -55,9 +59,13 @@ public class ProviderProfileController : Controller
             return View(nameof(Index), shown.Page!);
         }
 
+        // the service checks the provider's status FIRST: an approved provider who tries to change locked information
+        // gets nothing saved, and this request is answered with 403 Forbidden (the page never sends those fields)
         var result = await _profile.SaveAsync(userId, form, ct);
         var denied = Denied(result.Access);
         if (denied is not null) return await denied;
+        if (result.LockViolation)
+            return StatusCode(StatusCodes.Status403Forbidden, ProviderLockRules.ApprovedNotice);
 
         if (result.Saved)
         {

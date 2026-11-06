@@ -40,11 +40,10 @@ public class BaseFeeTests
 
     // ------------------------------------------------------------------ the [Range] attributes match the rule
 
-    [Theory]
-    [InlineData(typeof(RegisterProviderViewModel))]
-    [InlineData(typeof(ProviderProfileForm))]
-    public void BothForms_HaveRange1To100000_WithTheMessage(Type form)
+    [Fact]
+    public void TheRegistrationForm_HasRange1To100000_WithTheMessage()
     {
+        var form = typeof(RegisterProviderViewModel);
         var range = form.GetProperty("BaseFee")!.GetCustomAttribute<RangeAttribute>()!;
         Assert.Equal(BaseFeeRules.Min, Convert.ToInt32(range.Minimum));
         Assert.Equal(BaseFeeRules.Max, Convert.ToInt32(range.Maximum));
@@ -67,25 +66,20 @@ public class BaseFeeTests
     [InlineData("1", true)]
     [InlineData("750.25", true)]
     [InlineData("100000", true)]
-    public void ModelValidation_RefusesZeroAndNegative_OnBothForms(string fee, bool ok)
+    public void ModelValidation_RefusesZeroAndNegative_OnRegistration(string fee, bool ok)
     {
-        var registration = new RegisterProviderViewModel { BaseFee = D(fee) };
-        var profile = new ProviderProfileForm { BaseFee = D(fee) };
-
-        foreach (var model in new object[] { registration, profile })
-        {
-            var errors = BaseFeeErrors(model);
-            Assert.Equal(ok, errors.Count == 0);
-            if (!ok) Assert.Equal(BaseFeeRules.MinMessage, errors[0].ErrorMessage);   // the one [Range] message
-        }
+        var errors = BaseFeeErrors(new RegisterProviderViewModel { BaseFee = D(fee) });
+        Assert.Equal(ok, errors.Count == 0);
+        if (!ok) Assert.Equal(BaseFeeRules.MinMessage, errors[0].ErrorMessage);   // the one [Range] message
     }
 
     [Fact]
-    public void ModelValidation_RequiresTheFee_OnBothForms()
-    {
-        Assert.Equal(BaseFeeRules.RequiredMessage, BaseFeeErrors(new RegisterProviderViewModel()).Single().ErrorMessage);
-        Assert.Equal(BaseFeeRules.RequiredMessage, BaseFeeErrors(new ProviderProfileForm()).Single().ErrorMessage);
-    }
+    public void ModelValidation_RequiresTheFee_OnRegistration()
+        => Assert.Equal(BaseFeeRules.RequiredMessage, BaseFeeErrors(new RegisterProviderViewModel()).Single().ErrorMessage);
+
+    [Fact]
+    public void MyProfile_DoesNotTakeABaseFee_ItIsLockedOnceApproved()
+        => Assert.Contains("BaseFee", ProviderLockRules.LockedFields);
 
     // ------------------------------------------------------------------ the message shown after ModelState fails
 

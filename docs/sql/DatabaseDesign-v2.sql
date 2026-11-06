@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.1  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.2  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -13,7 +13,7 @@
      PART 7  Examples and subqueries for the defense
 
    HOW THIS FILE IS USED
-     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2" and "ProfileCleanup" (dotnet ef database update):
+     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup" and "AdminTargets" (dotnet ef database update):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -47,6 +47,15 @@
        by trg_Users_StatusSync / trg_Customers_StatusCopy / trg_Providers_StatusCopy. USERS stays the real status.
      - usp_UpdateAccountStatus: suspending or deactivating a provider cancels their Pending bookings (the customers
        are notified) and lists their Accepted / In Progress bookings for the administrator to follow up.
+
+   WHAT CHANGED IN v2.2 (EF migration "AdminTargets")
+     - ADMIN_ACTIONS no longer has one TARGET_ID that could mean four different things. Each kind of target has its
+       own column with a FOREIGN KEY: TARGET_CUSTOMER_ID -> CUSTOMERS, TARGET_PROVIDER_ID -> SERVICE_PROVIDERS,
+       TARGET_REVIEW_ID -> REVIEWS, TARGET_CATEGORY_ID -> SERVICE_CATEGORIES.
+     - TARGET_TYPE is specific: CUSTOMER, SERVICE_PROVIDER, REVIEW or CATEGORY (no more "USER"). Suspending a customer
+       logs the CUSTOMER; suspending a provider logs the SERVICE_PROVIDER (the PROVIDER_ID, like approve / reject).
+     - CHECK CK_ADMIN_ACTIONS_TARGET: exactly one target column is filled, and it is the one TARGET_TYPE names.
+     - The migration converted the existing rows (USER -> CUSTOMER or SERVICE_PROVIDER) before removing TARGET_ID.
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -66,7 +75,7 @@ END
 GO
 -- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), so the EF migration comes first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]ProfileCleanup')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]AdminTargets')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -341,12 +350,26 @@ CREATE TABLE ADMIN_ACTIONS (
     ADMIN_USER_ID                INT             NOT NULL,
     CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     REASON                       NVARCHAR(255)   NULL,
-    TARGET_ID                    INT             NOT NULL,
+    TARGET_CATEGORY_ID           INT             NULL,      -- v2.2: one FOREIGN KEY column per kind of target
+    TARGET_CUSTOMER_ID           INT             NULL,
+    TARGET_PROVIDER_ID           INT             NULL,
+    TARGET_REVIEW_ID             INT             NULL,
     TARGET_TYPE                  NVARCHAR(50)    NOT NULL,
     CONSTRAINT PK_ADMIN_ACTIONS PRIMARY KEY (ACTION_ID),
-    CONSTRAINT FK_ADMIN_ACTIONS_USERS_ADMIN_USER_ID FOREIGN KEY (ADMIN_USER_ID) REFERENCES USERS(USER_ID)
+    CONSTRAINT FK_ADMIN_ACTIONS_USERS_ADMIN_USER_ID FOREIGN KEY (ADMIN_USER_ID) REFERENCES USERS(USER_ID),
+    CONSTRAINT FK_ADMIN_ACTIONS_CUSTOMERS_TARGET_CUSTOMER_ID FOREIGN KEY (TARGET_CUSTOMER_ID) REFERENCES CUSTOMERS(CUSTOMER_ID),
+    CONSTRAINT FK_ADMIN_ACTIONS_SERVICE_PROVIDERS_TARGET_PROVIDER_ID FOREIGN KEY (TARGET_PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID),
+    CONSTRAINT FK_ADMIN_ACTIONS_REVIEWS_TARGET_REVIEW_ID FOREIGN KEY (TARGET_REVIEW_ID) REFERENCES REVIEWS(REVIEW_ID),
+    CONSTRAINT FK_ADMIN_ACTIONS_SERVICE_CATEGORIES_TARGET_CATEGORY_ID FOREIGN KEY (TARGET_CATEGORY_ID) REFERENCES SERVICE_CATEGORIES(CATEGORY_ID),
+    CONSTRAINT CK_ADMIN_ACTIONS_TARGET_TYPE CHECK ([TARGET_TYPE] IN ('CUSTOMER','SERVICE_PROVIDER','REVIEW','CATEGORY')),
+    -- exactly one target column is filled, and it is the one TARGET_TYPE names
+    CONSTRAINT CK_ADMIN_ACTIONS_TARGET CHECK (([TARGET_TYPE] = 'CUSTOMER' AND [TARGET_CUSTOMER_ID] IS NOT NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'SERVICE_PROVIDER' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NOT NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'REVIEW' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NOT NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'CATEGORY' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NOT NULL))
 );
 CREATE INDEX IX_ADMIN_ACTIONS_ADMIN_USER_ID ON ADMIN_ACTIONS (ADMIN_USER_ID);
+CREATE INDEX IX_ADMIN_ACTIONS_TARGET_CATEGORY_ID ON ADMIN_ACTIONS (TARGET_CATEGORY_ID);
+CREATE INDEX IX_ADMIN_ACTIONS_TARGET_CUSTOMER_ID ON ADMIN_ACTIONS (TARGET_CUSTOMER_ID);
+CREATE INDEX IX_ADMIN_ACTIONS_TARGET_PROVIDER_ID ON ADMIN_ACTIONS (TARGET_PROVIDER_ID);
+CREATE INDEX IX_ADMIN_ACTIONS_TARGET_REVIEW_ID ON ADMIN_ACTIONS (TARGET_REVIEW_ID);
 
 CREATE TABLE BOOKING_REPORTS (
     REPORT_ID                    INT             IDENTITY(1,1) NOT NULL,
@@ -893,7 +916,7 @@ BEGIN
         IF @@ROWCOUNT = 0
             THROW 50114, N'That application has already been decided, so nothing was changed.', 1;
 
-        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_ID, REASON, CREATED_AT)
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID, REASON, CREATED_AT)
         VALUES (@AdminUserId, @Decision, N'SERVICE_PROVIDER', @ProviderId, @Reason, SYSUTCDATETIME());
 
         INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
@@ -921,6 +944,7 @@ BEGIN
        Allowed changes (same as the website): Active -> Suspended | Deactivated, Suspended -> Active | Deactivated,
        Deactivated -> Active. Administrators cannot be changed here (and nobody can change their own account).
        The copies CUSTOMERS.ACCOUNT_STATUS / SERVICE_PROVIDERS.ACCOUNT_STATUS follow automatically (trg_Users_StatusSync).
+       v2.2: the ADMIN_ACTIONS row points to the CUSTOMER (TARGET_CUSTOMER_ID) or the SERVICE_PROVIDER (TARGET_PROVIDER_ID).
        When a SERVICE PROVIDER is suspended or deactivated, their Pending bookings are cancelled and those customers are
        told; Accepted / In Progress bookings are NOT changed (they may already be paid) but are returned as the result
        so the administrator can follow them up. */
@@ -949,6 +973,12 @@ BEGIN
         IF @Role IS NULL OR @Role = N'Administrator'
             THROW 50116, N'That customer or provider account was not found.', 1;
 
+        -- the customer / provider row the ADMIN_ACTIONS log points to (v2.2)
+        DECLARE @CustomerId INT = (SELECT CUSTOMER_ID FROM dbo.CUSTOMERS WHERE USER_ID = @TargetUserId);
+        DECLARE @ProviderId INT = (SELECT PROVIDER_ID FROM dbo.SERVICE_PROVIDERS WHERE USER_ID = @TargetUserId);
+        IF (@Role = N'Customer' AND @CustomerId IS NULL) OR (@Role = N'Service Provider' AND @ProviderId IS NULL)
+            THROW 50116, N'That customer or provider account was not found.', 1;
+
         IF NOT (   (@Current = N'Active'      AND @NewStatus IN (N'Suspended', N'Deactivated'))
                 OR (@Current = N'Suspended'   AND @NewStatus IN (N'Active', N'Deactivated'))
                 OR (@Current = N'Deactivated' AND @NewStatus = N'Active'))
@@ -956,12 +986,15 @@ BEGIN
 
         UPDATE dbo.USERS SET ACCOUNT_STATUS = @NewStatus WHERE USER_ID = @TargetUserId;
 
-        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_ID, REASON, CREATED_AT)
-        VALUES (@AdminUserId, N'Account ' + @NewStatus, N'USER', @TargetUserId, @Reason, SYSUTCDATETIME());
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_CUSTOMER_ID, TARGET_PROVIDER_ID, REASON, CREATED_AT)
+        VALUES (@AdminUserId, N'Account ' + @NewStatus,
+                CASE WHEN @Role = N'Customer' THEN N'CUSTOMER' ELSE N'SERVICE_PROVIDER' END,
+                CASE WHEN @Role = N'Customer' THEN @CustomerId END,
+                CASE WHEN @Role = N'Service Provider' THEN @ProviderId END,
+                @Reason, SYSUTCDATETIME());
 
         -- a provider who can no longer work: cancel their Pending bookings and tell those customers
         DECLARE @Cancelled TABLE (BOOKING_ID INT PRIMARY KEY, CUSTOMER_USER_ID INT, BOOKING_DATE DATE);
-        DECLARE @ProviderId INT = (SELECT PROVIDER_ID FROM dbo.SERVICE_PROVIDERS WHERE USER_ID = @TargetUserId);
         IF @Role = N'Service Provider' AND @NewStatus IN (N'Suspended', N'Deactivated') AND @ProviderId IS NOT NULL
         BEGIN
             UPDATE b
@@ -1035,7 +1068,7 @@ BEGIN
 
         UPDATE dbo.REVIEWS SET STATUS = @NewStatus WHERE REVIEW_ID = @ReviewId;
 
-        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_ID, REASON, CREATED_AT)
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_REVIEW_ID, REASON, CREATED_AT)
         VALUES (@AdminUserId, N'Review ' + @NewStatus, N'REVIEW', @ReviewId, @Reason, SYSUTCDATETIME());
 
         IF @tc = 0 COMMIT TRANSACTION;
@@ -2146,7 +2179,7 @@ BEGIN TRY
                    AND APPROVAL_STATUS = N'Approved' AND DATE_APPROVED IS NOT NULL AND REVIEW_COUNT = 0)
        AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @A AND MESSAGE LIKE N'New provider application from%')
        AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @PU AND MESSAGE = N'Your provider application was Approved.')
-       AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Approved' AND TARGET_ID = @P)
+       AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Approved' AND TARGET_TYPE = N'SERVICE_PROVIDER' AND TARGET_PROVIDER_ID = @P)
        AND EXISTS (SELECT 1 FROM dbo.SERVICES s JOIN dbo.PROVIDER_CATEGORIES pc ON pc.PROVIDER_ID = s.PROVIDER_ID AND pc.CATEGORY_ID = s.CATEGORY_ID
                    WHERE s.SERVICE_ID = @S AND s.PROVIDER_ID = @P)
         INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
@@ -2435,7 +2468,7 @@ BEGIN TRY
     EXEC dbo.usp_ModerateReview @AdminUserId = @A, @ReviewId = @RevId, @NewStatus = N'Visible';
     IF EXISTS (SELECT 1 FROM dbo.SERVICE_PROVIDERS WHERE PROVIDER_ID = @P AND AVG_RATING = 4.0 AND REVIEW_COUNT = 1)
        AND dbo.fn_GetProviderAvgRating(@P) = 4.0
-       AND (SELECT COUNT(*) FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND TARGET_TYPE = N'REVIEW' AND TARGET_ID = @RevId) = 2
+       AND (SELECT COUNT(*) FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND TARGET_TYPE = N'REVIEW' AND TARGET_REVIEW_ID = @RevId) = 2
         INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
     ELSE
         INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'After restoring the review the rating is not 4.0 from 1 review.');
@@ -2546,7 +2579,8 @@ BEGIN TRY
     BEGIN TRANSACTION;
     EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
     EXEC dbo.usp_UpdateAccountStatus @AdminUserId = @A, @TargetUserId = @C, @NewStatus = N'Suspended', @Reason = N'Self-test';
-    IF NOT EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Account Suspended' AND TARGET_ID = @C)
+    IF NOT EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Account Suspended' AND TARGET_TYPE = N'CUSTOMER'
+                   AND TARGET_CUSTOMER_ID = (SELECT CUSTOMER_ID FROM dbo.CUSTOMERS WHERE USER_ID = @C))
         THROW 59004, N'The ADMIN_ACTIONS row is missing.', 1;
     SET @ids = CAST(@S AS NVARCHAR(20));
     EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
@@ -2670,9 +2704,46 @@ BEGIN TRY
        AND EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B2 AND STATUS = N'Accepted')
        AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @C AND MESSAGE LIKE CONCAT(N'Your booking #', @B, N' on % was cancelled because%'))
        AND EXISTS (SELECT 1 FROM dbo.SERVICE_PROVIDERS WHERE PROVIDER_ID = @P AND ACCOUNT_STATUS = N'Suspended' AND APPROVAL_STATUS = N'Approved')
+       AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Account Suspended'
+                   AND TARGET_TYPE = N'SERVICE_PROVIDER' AND TARGET_PROVIDER_ID = @P)
         INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
     ELSE
-        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The bookings, the notification or the provider copy are not as expected.');
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The bookings, the notification, the provider copy or the ADMIN_ACTIONS row are not as expected.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 29
+SET @t = N'29 ADMIN_ACTIONS points to exactly one real target of its TARGET_TYPE (CHECK + FOREIGN KEYS, v2.2)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @n = 0;     -- how many wrong rows were refused (547 = CHECK or FOREIGN KEY)
+    BEGIN TRY   -- the old type "USER" is gone
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID) VALUES (@A, N'Self-test', N'USER', @P);
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    BEGIN TRY   -- no target at all
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE) VALUES (@A, N'Self-test', N'SERVICE_PROVIDER');
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    BEGIN TRY   -- the type does not match the column that is filled
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID) VALUES (@A, N'Self-test', N'CUSTOMER', @P);
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    BEGIN TRY   -- two targets in one row
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID, TARGET_CUSTOMER_ID)
+        VALUES (@A, N'Self-test', N'SERVICE_PROVIDER', @P, (SELECT CUSTOMER_ID FROM dbo.CUSTOMERS WHERE USER_ID = @C));
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    BEGIN TRY   -- a provider that does not exist (FOREIGN KEY)
+        INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID) VALUES (@A, N'Self-test', N'SERVICE_PROVIDER', -1);
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    -- a correct row is accepted
+    INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID) VALUES (@A, N'Self-test OK', N'SERVICE_PROVIDER', @P);
+    IF @n = 5 AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Self-test OK' AND TARGET_PROVIDER_ID = @P)
+        INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(N'wrong rows refused: ', @n, N' of 5'));
     ROLLBACK TRANSACTION;
 END TRY
 BEGIN CATCH

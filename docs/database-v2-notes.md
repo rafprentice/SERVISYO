@@ -111,3 +111,51 @@ The sign-in and forgot-password pages keep the basic email check, so an account 
    - It also shows the CITY values that will be removed.
 2. The migration first turns phone numbers like `0917-123-4567` / `+63 917 123 4567` / `9171234567` into `09171234567`.
 3. It then **stops without changing anything** if a row still does not fit. Fix those rows first.
+
+## Database v2.2: admin-action targets with foreign keys (migration AdminTargets)
+
+**What changed in `ADMIN_ACTIONS`**
+- `TARGET_ID` is gone. It held four different kinds of id, so it could not be a foreign key.
+- Each kind of target now has its own column, and each one is a **FOREIGN KEY** (`ON DELETE NO ACTION`):
+
+| TARGET_TYPE | Column | Points to | Written by |
+|---|---|---|---|
+| `CUSTOMER` | `TARGET_CUSTOMER_ID` | `CUSTOMERS.CUSTOMER_ID` | suspending / deactivating / re-activating a customer |
+| `SERVICE_PROVIDER` | `TARGET_PROVIDER_ID` | `SERVICE_PROVIDERS.PROVIDER_ID` | approving / rejecting an application; suspending / deactivating / re-activating a provider |
+| `REVIEW` | `TARGET_REVIEW_ID` | `REVIEWS.REVIEW_ID` | review moderation |
+| `CATEGORY` | `TARGET_CATEGORY_ID` | `SERVICE_CATEGORIES.CATEGORY_ID` | category created / updated / enabled / disabled |
+
+- `TARGET_TYPE` is specific: there is no `USER` any more.
+- `CK_ADMIN_ACTIONS_TARGET_TYPE`: only the four types above.
+- `CK_ADMIN_ACTIONS_TARGET`: exactly one target column is filled, and it is the one `TARGET_TYPE` names.
+- The app never deletes customers, providers, reviews or categories, so these foreign keys never block the app.
+- `usp_ApproveProvider`, `usp_UpdateAccountStatus` and `usp_ModerateReview` write the new columns.
+
+**Existing rows are converted by the migration**
+- `USER` rows become `CUSTOMER` (that user's `CUSTOMER_ID`) or `SERVICE_PROVIDER` (that user's `PROVIDER_ID`).
+- `SERVICE_PROVIDER`, `REVIEW` and `CATEGORY` rows keep their id in the matching column.
+- The migration saves the targets first, because EF removes `TARGET_ID` before it adds the new columns.
+- It **stops without changing anything** if a row points to something that no longer exists.
+
+**Before updating a database**
+1. Run `docs/sql/check-before-admin-targets.sql` in SSMS. It only reads.
+   - Grid 1 shows every row before and after.
+   - Grid 2 must be **empty**. If it lists rows, send it to Claude.
+2. Back up the database.
+3. Run `tools/add-admin-targets.ps1`, then `dotnet ef database update --project src\Servisyo.Web`.
+
+## Notification clean-up (keeps NOTIFICATIONS small)
+
+- Once a day the website deletes **read** notifications older than **6 months**.
+- **Unread** notifications are never deleted, however old.
+- Each run that deletes something writes one SYSTEM_LOGS line: `System · DELETE · Notification · "Daily clean-up: N read notification(s) older than 6 months deleted ..."`.
+- It runs about 2 minutes after the website starts, then every 24 hours. If the host restarts the website (MonsterASP recycles it), it simply runs again after the restart.
+- A failure is logged and never stops the website.
+- Settings in `appsettings.json`, section `NotificationCleanup`:
+  - `Enabled` (true / false);
+  - `KeepReadMonths` (default 6, never less than 1);
+  - `FirstRunDelayMinutes`, `IntervalHours`.
+- The same clean-up by hand in SSMS:
+  ```sql
+  DELETE FROM dbo.NOTIFICATIONS WHERE IS_READ = 1 AND CREATED_AT < DATEADD(MONTH, -6, SYSUTCDATETIME());
+  ```

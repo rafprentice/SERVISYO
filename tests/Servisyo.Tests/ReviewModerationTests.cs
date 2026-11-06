@@ -299,7 +299,8 @@ public class ReviewModerationServiceTests
         var log = await db.AdminActions.SingleAsync();
         Assert.Equal("Review Removed", log.ActionType);
         Assert.Equal("REVIEW", log.TargetType);
-        Assert.Equal(review.ReviewId, log.TargetId);
+        Assert.Equal(review.ReviewId, log.TargetReviewId);             // database v2.2: the FOREIGN KEY column of a review
+        Assert.Null(log.TargetProviderId);
         Assert.Equal(admin.UserId, log.AdminUserId);
         Assert.Equal("Abusive language", log.Reason);
     }

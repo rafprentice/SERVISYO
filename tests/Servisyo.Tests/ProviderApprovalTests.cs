@@ -255,7 +255,10 @@ public class ProviderApprovalServiceTests
         Assert.Equal(admin.UserId, log.AdminUserId);
         Assert.Equal("Approved", log.ActionType);
         Assert.Equal("SERVICE_PROVIDER", log.TargetType);
-        Assert.Equal(p.ProviderId, log.TargetId);
+        Assert.Equal(p.ProviderId, log.TargetProviderId);              // database v2.2: the FOREIGN KEY column of a provider
+        Assert.Null(log.TargetCustomerId);
+        Assert.Null(log.TargetReviewId);
+        Assert.Null(log.TargetCategoryId);
         Assert.Equal("ID checked", log.Reason);
 
         var note = await db.Notifications.AsNoTracking().SingleAsync();

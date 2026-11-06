@@ -167,14 +167,7 @@ public class ReviewModerationService : IReviewModerationService
             : Math.Round((decimal)visibleRatings.Sum() / visibleRatings.Count, 1, MidpointRounding.AwayFromZero);
 
         // Same log format as usp_ModerateReview in the PDF: 'Review <status>', 'REVIEW'.
-        _db.AdminActions.Add(new AdminAction
-        {
-            AdminUserId = adminUserId,
-            ActionType = "Review " + newStatus,
-            TargetType = "REVIEW",
-            TargetId = review.ReviewId,
-            Reason = cleanReason
-        });
+        _db.AdminActions.Add(AdminAction.ForReview(adminUserId, "Review " + newStatus, review.ReviewId, cleanReason));
 
         await _db.SaveChangesAsync(ct);       // review + provider rating + log entry: one database transaction
 

@@ -182,7 +182,10 @@ public class CategoryManagementServiceTests
         Assert.Equal(admin.UserId, log.AdminUserId);
         Assert.Equal("Category created", log.ActionType);
         Assert.Equal("CATEGORY", log.TargetType);
-        Assert.Equal(saved.CategoryId, log.TargetId);
+        Assert.Equal(saved.CategoryId, log.TargetCategoryId);           // database v2.2: the FOREIGN KEY column of a category
+        Assert.Null(log.TargetCustomerId);
+        Assert.Null(log.TargetProviderId);
+        Assert.Null(log.TargetReviewId);
     }
 
     [Theory]
@@ -299,7 +302,7 @@ public class CategoryManagementServiceTests
         var log = await db.AdminActions.SingleAsync();
         Assert.Equal("Category updated", log.ActionType);
         Assert.Equal("CATEGORY", log.TargetType);
-        Assert.Equal(cat.CategoryId, log.TargetId);
+        Assert.Equal(cat.CategoryId, log.TargetCategoryId);
         Assert.Equal(admin.UserId, log.AdminUserId);
     }
 
@@ -407,7 +410,7 @@ public class CategoryManagementServiceTests
         Assert.All(logs, l =>
         {
             Assert.Equal("CATEGORY", l.TargetType);
-            Assert.Equal(cat.CategoryId, l.TargetId);
+            Assert.Equal(cat.CategoryId, l.TargetCategoryId);
             Assert.Equal(admin.UserId, l.AdminUserId);
         });
     }

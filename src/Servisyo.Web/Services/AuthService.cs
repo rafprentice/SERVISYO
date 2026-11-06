@@ -193,6 +193,9 @@ public class AuthService : IAuthService
             return InputRules.NameMessage;
         // the customer page asks for one Full Name (no middle name box); the provider form requires it (checked below)
         if (!string.IsNullOrWhiteSpace(vm.MiddleName) && !InputRules.IsName(vm.MiddleName.Trim())) return InputRules.NameMessage;
+        // a middle name that is given must be at least 2 characters (spaces at the ends do not count): "C" is refused
+        if (!string.IsNullOrWhiteSpace(vm.MiddleName) && vm.MiddleName.Trim().Length < InputRules.MinMiddleNameLength)
+            return InputRules.MiddleNameTooShortMessage;
         if ((vm.FirstName?.Trim().Length ?? 0) > InputRules.MaxNameLength || (vm.LastName?.Trim().Length ?? 0) > InputRules.MaxNameLength
             || (vm.MiddleName?.Trim().Length ?? 0) > InputRules.MaxNameLength)
             return $"Names can be at most {InputRules.MaxNameLength} characters.";

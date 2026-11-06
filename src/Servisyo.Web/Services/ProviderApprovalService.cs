@@ -167,14 +167,7 @@ public class ProviderApprovalService : IProviderApprovalService
         if (changed == 0)
             return AlreadyDecided(name);          // the transaction is rolled back when it is disposed
 
-        _db.AdminActions.Add(new AdminAction
-        {
-            AdminUserId = adminUserId,
-            ActionType = newStatus,               // 'Approved' / 'Rejected' (as in the PDF)
-            TargetType = "SERVICE_PROVIDER",
-            TargetId = providerId,
-            Reason = cleanReason
-        });
+        _db.AdminActions.Add(AdminAction.ForProvider(adminUserId, newStatus, providerId, cleanReason));   // 'Approved' / 'Rejected' (as in the PDF)
         _db.Notifications.Add(new Notification
         {
             UserId = info.UserId,

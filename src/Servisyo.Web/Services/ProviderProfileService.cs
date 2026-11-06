@@ -57,7 +57,7 @@ public class ProviderProfileService : IProviderProfileService
             .Select(x => new
             {
                 x.ProviderId, x.ApprovalStatus, x.BusinessName, x.Address, x.Description, x.ProfilePhoto, x.BaseFee,
-                x.User.FirstName, x.User.LastName, x.User.Email, x.User.PhoneNumber
+                x.User.FirstName, x.User.MiddleName, x.User.LastName, x.User.Email, x.User.PhoneNumber
             })
             .FirstOrDefaultAsync(ct);
 
@@ -108,19 +108,22 @@ public class ProviderProfileService : IProviderProfileService
             FullName = fullName,
             Initials = NameFormat.Initials(fullName),
             PhotoUrl = string.IsNullOrWhiteSpace(p.ProfilePhoto) ? null : p.ProfilePhoto,
-            NameLocked = await _db.Bookings.AnyAsync(b => b.ProviderId == p.ProviderId && ActiveBookingRules.Statuses.Contains(b.Status), ct),
+            InfoLocked = ProviderLockRules.IsLocked(p.ApprovalStatus),
             BusinessName = p.BusinessName,
             StrengthPercent = percent,
             StrengthHint = nextStep is null ? "Your profile is complete." : nextStep + " to reach 100%",
-            Form = posted ?? new ProviderProfileForm
+            // the locked values always come from the database; after a refused save, Email and Bio show what was typed
+            Form = new ProviderProfileForm
             {
-                FullName = fullName,
+                FirstName = p.FirstName,
+                MiddleName = p.MiddleName,
+                LastName = p.LastName,
                 BusinessName = p.BusinessName,
                 PhoneNumber = p.PhoneNumber,
-                Email = p.Email,
                 Address = p.Address,
-                Description = p.Description,
-                BaseFee = p.BaseFee
+                BaseFee = p.BaseFee,
+                Email = posted is null ? p.Email : posted.Email,
+                Description = posted is null ? p.Description : posted.Description
             },
             FieldErrors = rejected?.FieldErrors ?? NoErrors,
             FormError = rejected is { Saved: false } && rejected.FieldErrors.Count == 0 ? rejected.Message : null,
@@ -152,43 +155,22 @@ public class ProviderProfileService : IProviderProfileService
             return new(access, false, NoErrors, string.Empty);
 
         var user = provider.User;
-        var errors = new Dictionary<string, string>();
 
-        // ---- full name (stored as first + last name; only re-split when the provider actually changed it) ----
-        var fullName = ProfileRules.NormalizeName(form.FullName);
-        var currentName = ProfileRules.NormalizeName($"{user.FirstName} {user.LastName}");
-        var nameChanged = !string.Equals(fullName, currentName, StringComparison.Ordinal);
-        if (fullName.Length == 0)
-            errors["FullName"] = "Enter your full name.";
-        else if (nameChanged && fullName.Length > ProfileRules.MaxFullNameLength)
-            errors["FullName"] = $"The name can be at most {ProfileRules.MaxFullNameLength} characters.";
-        else if (nameChanged && !fullName.Contains(' '))
-            errors["FullName"] = "Enter your first and last name.";
-        else if (nameChanged && !InputRules.IsFullName(fullName))
-            errors["FullName"] = InputRules.FullNameMessage;                    // letters only, no numbers or symbols
-
-        // ---- business name ----
-        var businessName = (form.BusinessName ?? string.Empty).Trim();
-        if (businessName.Length == 0)
-            errors["BusinessName"] = "Enter your business name.";
-        else if (businessName.Length > ProfileRules.MaxBusinessNameLength)
-            errors["BusinessName"] = $"The business name can be at most {ProfileRules.MaxBusinessNameLength} characters.";
-
-        // ---- no name changes while a customer has an open booking with this provider ----
-        var businessChanged = !string.Equals(businessName, (provider.BusinessName ?? string.Empty).Trim(), StringComparison.Ordinal);
-        if ((nameChanged || businessChanged)
-            && await _db.Bookings.AnyAsync(b => b.ProviderId == provider.ProviderId && ActiveBookingRules.Statuses.Contains(b.Status), ct))
+        // ---- an approved provider's core information is locked: refuse any attempt to change it (nothing is saved) ----
+        // (only Approved providers get this far, so for them only Email and About / Bio can change below)
+        if (ProviderLockRules.IsLocked(provider.ApprovalStatus))
         {
-            if (nameChanged && !errors.ContainsKey("FullName")) errors["FullName"] = ActiveBookingRules.NameLockedMessage;
-            if (businessChanged && !errors.ContainsKey("BusinessName")) errors["BusinessName"] = ActiveBookingRules.NameLockedMessage;
+            var changed = ProviderLockRules.ChangedFields(form, provider);
+            if (changed.Count > 0)
+            {
+                _logger.LogWarning("Provider {ProviderId} tried to change locked profile fields: {Fields}. Refused.",
+                    provider.ProviderId, string.Join(", ", changed));
+                return new(access, false, changed.ToDictionary(f => f, _ => ProviderLockRules.FieldLockedMessage),
+                    ProviderLockRules.ApprovedNotice, LockViolation: true);
+            }
         }
 
-        // ---- phone (optional; a number saved earlier in another style is left alone unless it is edited) ----
-        var typedPhone = (form.PhoneNumber ?? string.Empty).Trim();
-        var phoneChanged = typedPhone != (user.PhoneNumber ?? string.Empty).Trim();
-        var phone = ProfileRules.NormalizePhone(typedPhone);                     // +639171234567 is saved as 09171234567
-        if (phoneChanged && typedPhone.Length > 0 && !InputRules.IsPhone(typedPhone))
-            errors["PhoneNumber"] = InputRules.PhoneMessage;                     // digits only: 09XXXXXXXXX or +639XXXXXXXXX
+        var errors = new Dictionary<string, string>();
 
         // ---- email (it is also the sign-in name, so it must stay unique) ----
         var email = (form.Email ?? string.Empty).Trim().ToLowerInvariant();
@@ -202,21 +184,10 @@ public class ProviderProfileService : IProviderProfileService
         else if (emailChanged && await EmailUsedByAnotherAsync(email, user.UserId, ct))
             errors["Email"] = EmailTaken;
 
-        // ---- address and bio (both optional; SERVISYO is Cebu City only, so there is no city box) ----
-        var address = ProfileRules.NormalizeText(form.Address);
-        if (address is { Length: > ProfileRules.MaxAddressLength })
-            errors["Address"] = $"The address can be at most {ProfileRules.MaxAddressLength} characters.";
-        else if (address is not null && !InputRules.HasALetter(address))
-            errors["Address"] = InputRules.AddressMessage;
-
+        // ---- About / Bio (optional) ----
         var description = ProfileRules.NormalizeText(form.Description);
         if (description is { Length: > ProfileRules.MaxDescriptionLength })
             errors["Description"] = $"The bio can be at most {ProfileRules.MaxDescriptionLength} characters.";
-
-        // ---- base fee (required, 1 to 100,000 PHP: a fee of 0 or below is never saved) ----
-        var feeError = BaseFeeRules.Check(form.BaseFee);
-        if (feeError is not null)
-            errors["BaseFee"] = feeError;
 
         if (errors.Count > 0)
         {
@@ -224,20 +195,9 @@ public class ProviderProfileService : IProviderProfileService
             return new(access, false, errors, "Please fix the highlighted fields.");
         }
 
-        // ---- everything is fine: change the account and the provider profile together ----
-        if (nameChanged)
-        {
-            var (first, last) = ProfileRules.SplitName(fullName);
-            user.FirstName = first;
-            user.LastName = last;               // the middle name, if there is one, is left as it was
-        }
+        // ---- everything is fine: only the email and the bio change ----
         if (emailChanged) user.Email = email;
-        if (phoneChanged) user.PhoneNumber = phone;
-
-        provider.BusinessName = businessName;
-        provider.Address = address;
         provider.Description = description;
-        provider.BaseFee = BaseFeeRules.Round(form.BaseFee!.Value);   // checked above
 
         try
         {

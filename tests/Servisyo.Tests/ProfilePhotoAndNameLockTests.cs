@@ -197,7 +197,7 @@ public class NameLockTests
     {
         var db = NewDb();
         var ana = new Customer { User = NewUser("Ana", "Cruz", Roles.Customer), Address = "Lahug" };
-        var vince = new Provider { BusinessName = "Vincent Valencia", ApprovalStatus = ApprovalStatuses.Approved, BaseFee = 500m,   // My Profile needs a base fee of 1+ PHP to save
+        var vince = new Provider { BusinessName = "Vincent Valencia", ApprovalStatus = ApprovalStatuses.Approved, BaseFee = 500m,
                                    User = NewUser("Vincent", "Valencia", Roles.ServiceProvider) };
         db.AddRange(ana, vince);
         await db.SaveChangesAsync();
@@ -262,38 +262,30 @@ public class NameLockTests
         Assert.True((await svc.SaveAsync(ana.UserId, form)).Saved);
     }
 
-    [Fact]
-    public async Task Provider_CannotChangeNameOrBusinessName_WithAnActiveBooking()
+    /// An approved provider's names and business name are locked whether or not there are active bookings
+    /// (ProviderLockRules); only an administrator can change them.
+    [Theory]
+    [InlineData(BookingStatuses.InProgress)]
+    [InlineData(BookingStatuses.Completed)]
+    public async Task ApprovedProvider_CannotRenameAtAll_WithOrWithoutActiveBookings(string status)
     {
         var (db, ana, vince) = await WorldAsync();
-        await BookAsync(db, ana, vince, BookingStatuses.InProgress);
+        await BookAsync(db, ana, vince, status);
         var svc = new ProviderProfileService(db);
 
         var page = (await svc.GetAsync(vince.UserId)).Page!;
         var form = page.Form;
-        form.FullName = "Vince Valencia";
+        form.FirstName = "Vince";
         form.BusinessName = "VV Cleaning";
         var result = await svc.SaveAsync(vince.UserId, form);
 
-        Assert.True(page.NameLocked);
+        Assert.True(page.InfoLocked);
         Assert.False(result.Saved);
-        Assert.Equal(ActiveBookingRules.NameLockedMessage, result.FieldErrors["FullName"]);
-        Assert.Equal(ActiveBookingRules.NameLockedMessage, result.FieldErrors["BusinessName"]);
-        Assert.Equal("Vincent Valencia", (await db.Providers.AsNoTracking().SingleAsync()).BusinessName);
-    }
-
-    [Fact]
-    public async Task Provider_CanRename_WithNoActiveBookings()
-    {
-        var (db, ana, vince) = await WorldAsync();
-        await BookAsync(db, ana, vince, BookingStatuses.Completed);
-        var svc = new ProviderProfileService(db);
-
-        var form = (await svc.GetAsync(vince.UserId)).Page!.Form;
-        form.BusinessName = "VV Cleaning";
-        var result = await svc.SaveAsync(vince.UserId, form);
-
-        Assert.True(result.Saved);
-        Assert.Equal("VV Cleaning", (await db.Providers.AsNoTracking().SingleAsync()).BusinessName);
+        Assert.True(result.LockViolation);
+        Assert.Equal(ProviderLockRules.FieldLockedMessage, result.FieldErrors["FirstName"]);
+        Assert.Equal(ProviderLockRules.FieldLockedMessage, result.FieldErrors["BusinessName"]);
+        var saved = await db.Providers.AsNoTracking().Include(p => p.User).SingleAsync();
+        Assert.Equal("Vincent Valencia", saved.BusinessName);
+        Assert.Equal("Vincent", saved.User.FirstName);
     }
 }

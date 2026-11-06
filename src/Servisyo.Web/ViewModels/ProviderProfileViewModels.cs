@@ -1,5 +1,5 @@
-using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
+using Servisyo.Web.Models;
 
 namespace Servisyo.Web.ViewModels;
 
@@ -50,23 +50,63 @@ public static class ProfileRules
     }
 }
 
-/// The values posted by the Business Information form. Nothing here says WHO the provider is:
-/// that always comes from the sign-in cookie.
+/// The Business Information form. Nothing here says WHO the provider is: that always comes from the sign-in cookie.
+/// An approved provider can only change Email and About / Bio; the other values are shown read-only and are never
+/// saved from this form (ProviderLockRules). They are still listed here so a request that tries to change them is noticed.
 public class ProviderProfileForm
 {
-    public string? FullName { get; set; }
+    // locked once the provider is approved (shown read-only)
+    public string? FirstName { get; set; }
+    public string? MiddleName { get; set; }
+    public string? LastName { get; set; }
     public string? BusinessName { get; set; }
     public string? PhoneNumber { get; set; }
-    public string? Email { get; set; }
     public string? Address { get; set; }
-    public string? Description { get; set; }
-
-    /// SERVICE_PROVIDERS.BASE_FEE: required, 1 to 100,000 PHP (BaseFeeRules). The controller does not save while
-    /// ModelState is invalid, and ProviderProfileService checks the same rule again.
-    [Required(ErrorMessage = "Please enter your base fee.")]
-    // 1.0 / 100000.0 (not 1 / 100000): with whole numbers [Range] rounds the fee to an int first, so 0.99 would pass as 1
-    [Range(1.0, 100000.0, ErrorMessage = "Base fee must be at least 1 PHP.")]
     public decimal? BaseFee { get; set; }
+
+    // still editable
+    public string? Email { get; set; }
+    public string? Description { get; set; }
+}
+
+/// Once an administrator approves a provider (APPROVAL_STATUS = 'Approved'), the core profile and business information
+/// is locked: names, business name, phone number, address and base fee. Only an administrator can change it.
+/// The provider can still change their email, About / Bio, photo, services and availability.
+public static class ProviderLockRules
+{
+    public const string ApprovedNotice = "Your provider account is approved and verified. Profile updates require Admin assistance.";
+    public const string FieldLockedMessage = "This information is locked. Profile updates require Admin assistance.";
+
+    /// The form fields an approved provider can no longer change.
+    public static readonly IReadOnlyList<string> LockedFields =
+        new[] { "FirstName", "MiddleName", "LastName", "BusinessName", "PhoneNumber", "Address", "BaseFee" };
+
+    public static bool IsLocked(string? approvalStatus) => approvalStatus == ApprovalStatuses.Approved;
+
+    /// The locked fields that the posted form tries to CHANGE. A disabled box is never sent by the browser, so a blank or
+    /// missing value means "not sent" and the saved value stays. Sending the saved value again is not a change.
+    /// The provider's User must be loaded.
+    public static IReadOnlyList<string> ChangedFields(ProviderProfileForm form, Provider saved)
+    {
+        var changed = new List<string>();
+
+        void Compare(string field, string? posted, string? current, Func<string?, string?> normalize)
+        {
+            if (string.IsNullOrWhiteSpace(posted)) return;
+            if (!string.Equals(normalize(posted), normalize(current), StringComparison.Ordinal)) changed.Add(field);
+        }
+
+        Compare("FirstName", form.FirstName, saved.User.FirstName, ProfileRules.NormalizeName);
+        Compare("MiddleName", form.MiddleName, saved.User.MiddleName, ProfileRules.NormalizeName);
+        Compare("LastName", form.LastName, saved.User.LastName, ProfileRules.NormalizeName);
+        Compare("BusinessName", form.BusinessName, saved.BusinessName, ProfileRules.NormalizeName);
+        Compare("PhoneNumber", form.PhoneNumber, saved.User.PhoneNumber, ProfileRules.NormalizePhone);
+        Compare("Address", form.Address, saved.Address, ProfileRules.NormalizeText);
+        if (form.BaseFee is decimal fee && (saved.BaseFee is null || BaseFeeRules.Round(fee) != saved.BaseFee.Value))
+            changed.Add("BaseFee");
+
+        return changed;
+    }
 }
 
 public class ProviderProfilePageViewModel
@@ -76,8 +116,8 @@ public class ProviderProfilePageViewModel
     /// "/uploads/avatars/…" or null (then the initials are shown).
     public string? PhotoUrl { get; set; }
 
-    /// True while the user has an active booking: the name fields are read-only (see ActiveBookingRules).
-    public bool NameLocked { get; set; }
+    /// True when the provider is Approved: names, business name, phone, address and base fee are read-only (ProviderLockRules).
+    public bool InfoLocked { get; set; }
 
     // what is SAVED (shown in the header card; typing in the form does not change it until Save)
     public string FullName { get; set; } = string.Empty;
@@ -112,4 +152,5 @@ public record ProviderProfileSaveResult(
     IReadOnlyDictionary<string, string> FieldErrors,
     string Message,
     string FullName = "",
-    string Email = "");
+    string Email = "",
+    bool LockViolation = false);     // an approved provider tried to change locked information: the controller answers 403

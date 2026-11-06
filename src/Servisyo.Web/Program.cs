@@ -49,6 +49,10 @@ builder.Services.AddScoped<IAdminDashboardService, AdminDashboardService>();
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 builder.Services.AddScoped<IProviderManagementService, ProviderManagementService>();
 builder.Services.AddScoped<IBookingMonitorService, BookingMonitorService>();
+// once a day: delete READ notifications older than 6 months (appsettings.json "NotificationCleanup"); unread ones are kept
+builder.Services.Configure<NotificationCleanupOptions>(builder.Configuration.GetSection(NotificationCleanupOptions.SectionName));
+builder.Services.AddScoped<INotificationCleanupService, NotificationCleanupService>();
+builder.Services.AddHostedService<NotificationCleanupWorker>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {

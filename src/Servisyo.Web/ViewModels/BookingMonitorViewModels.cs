@@ -70,3 +70,65 @@ public class BookingsPageViewModel
     public int PageCount { get; set; } = 1;
     public IReadOnlyList<BookingRowViewModel> Rows { get; set; } = Array.Empty<BookingRowViewModel>();
 }
+
+/// One service line of a booking (the price and duration are the snapshot taken when the booking was made).
+public sealed record BookingDetailsServiceLine(string Name, string Category, string? Description, decimal Price, int DurationMinutes);
+
+/// Admin > Bookings > "View": everything about one booking, read-only (shown in a pop-up, or as a page without JavaScript).
+public class BookingDetailsViewModel
+{
+    public PortalShellViewModel Shell { get; set; } = new() { Role = "Admin" };
+
+    public int BookingId { get; set; }
+    public string Reference { get; set; } = string.Empty;          // "BK-2026-0027", the same reference the customer sees
+    public AdminBookingDisplay Status { get; set; } = AdminBookingDisplay.For(string.Empty);
+
+    // 1. general
+    public DateOnly Date { get; set; }
+    public TimeOnly StartTime { get; set; }
+    public TimeOnly EndTime { get; set; }
+    public int DurationMinutes { get; set; }
+    public DateTime CreatedAtCebu { get; set; }                     // stored in UTC, shown in Cebu time (UTC+8)
+
+    // 2. service summary
+    public IReadOnlyList<BookingDetailsServiceLine> Services { get; set; } = Array.Empty<BookingDetailsServiceLine>();
+    public string? RequestDescription { get; set; }                 // what the customer wrote when booking
+    public decimal QuotedTotal { get; set; }                        // BOOKINGS.TOTAL_FEE
+
+    // 3. customer
+    public string CustomerName { get; set; } = string.Empty;
+    public string CustomerEmail { get; set; } = string.Empty;
+    public string? CustomerPhone { get; set; }
+    public string? ServiceAddress { get; set; }
+
+    // 4. service provider
+    public string ProviderName { get; set; } = string.Empty;
+    public string BusinessName { get; set; } = string.Empty;
+    public string ProviderEmail { get; set; } = string.Empty;
+    public string? ProviderPhone { get; set; }
+
+    // 5. financial and payment
+    public decimal TotalAmount { get; set; }                        // the payment's amount, or the booking fee before payment
+    public string? PaymentMethod { get; set; }                      // "Cash on Completion" / "Mock E-Wallet (GCash)"; null = not chosen yet
+    public string? TransactionReference { get; set; }
+    public PaymentDisplay Payment { get; set; } = PaymentDisplay.For(string.Empty);
+
+    // where "Close" goes back to when this is shown as a page (the same tab, search and page of the list)
+    public string ReturnStatus { get; set; } = BookingFilters.All;
+    public string? ReturnQ { get; set; }
+    public int ReturnPage { get; set; } = 1;
+
+    public static string ReferenceFor(int bookingId, DateTime createdAtUtc) => $"BK-{createdAtUtc.Year}-{bookingId:D4}";
+
+    /// "CashOnCompletion" -> "Cash on Completion"; "MockEWallet" + "GCASH-..." -> "Mock E-Wallet (GCash)".
+    public static string? PaymentMethodText(string? method, string? reference) => method switch
+    {
+        null => null,
+        PaymentMethods.CashOnCompletion => "Cash on Completion",
+        PaymentMethods.MockEWallet => MockWallets.FromReference(reference) is string wallet ? $"Mock E-Wallet ({wallet})" : "Mock E-Wallet",
+        _ => method
+    };
+}
+
+/// NotAllowed = the signed-in user is not an Active administrator; Details null = no such booking.
+public sealed record BookingDetailsLookup(bool Allowed, BookingDetailsViewModel? Details);

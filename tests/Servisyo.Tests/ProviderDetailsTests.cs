@@ -146,8 +146,9 @@ public class ProviderDetailsTests
         var log = await db.AdminActions.SingleAsync();
         Assert.Equal(admin.UserId, log.AdminUserId);
         Assert.Equal("Account Suspended", log.ActionType);
-        Assert.Equal("USER", log.TargetType);
-        Assert.Equal(p.UserId, log.TargetId);
+        Assert.Equal("SERVICE_PROVIDER", log.TargetType);               // database v2.2: the provider, not the user account
+        Assert.Equal(p.ProviderId, log.TargetProviderId);
+        Assert.Null(log.TargetCustomerId);
         Assert.Equal("Too many complaints", log.Reason);
     }
 

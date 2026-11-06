@@ -8,7 +8,10 @@
     </div>
     <div class="col-md-4 mb-3">
         <label asp-for="MiddleName" class="form-label"></label>
-        <input asp-for="MiddleName" class="form-control" autocomplete="additional-name" maxlength="100" />
+        <input asp-for="MiddleName" class="form-control" autocomplete="additional-name" maxlength="100"
+               data-val-length="@Servisyo.Web.ViewModels.InputRules.MiddleNameTooShortMessage"
+               data-sv-minlen="@Servisyo.Web.ViewModels.InputRules.MinMiddleNameLength"
+               data-sv-minlen-msg="@Servisyo.Web.ViewModels.InputRules.MiddleNameTooShortMessage" />
         <span asp-validation-for="MiddleName" class="text-danger"></span>
     </div>
     <div class="col-md-4 mb-3">

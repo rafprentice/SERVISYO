@@ -38,6 +38,11 @@ public static class InputRules
     public const int MaxNameLength = 100;
     public const int MaxEmailLength = 256;
 
+    /// A middle name, when one is given, must be at least 2 characters ("Castro" is fine, an initial like "C" is not).
+    public const int MinMiddleNameLength = 2;
+    public const string MiddleNameLengthMessage = "Middle name must be at least 2 characters if provided.";   // [StringLength] on the forms
+    public const string MiddleNameTooShortMessage = "Middle name must be at least 2 characters.";             // shown in the page / by AuthService
+
     /// a business name may have numbers ("A1 Plumbing") but must have at least one letter
     public const string HasLetter = "^(?=.*[" + L + "]).+$";
     public const string BusinessNameMessage = "The business name must contain letters.";
@@ -72,7 +77,9 @@ public abstract class RegisterBaseViewModel
     [RegularExpression(InputRules.Name, ErrorMessage = InputRules.NameMessage)]
     public string FirstName { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Please enter your middle name."), StringLength(InputRules.MaxNameLength), Display(Name = "Middle name")]
+    /// Required on the provider form (the database procedure usp_RegisterProvider requires it); at least 2 characters.
+    [Required(ErrorMessage = "Please enter your middle name."), Display(Name = "Middle name")]
+    [StringLength(100, MinimumLength = 2, ErrorMessage = "Middle name must be at least 2 characters if provided.")]
     [RegularExpression(InputRules.Name, ErrorMessage = InputRules.NameMessage)]
     public string? MiddleName { get; set; }
 

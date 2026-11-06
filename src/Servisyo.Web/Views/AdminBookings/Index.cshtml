@@ -9,7 +9,6 @@
     ViewData["ActiveNav"] = "bookings";
 
     var inv = CultureInfo.InvariantCulture;
-    var soon = "Available in an upcoming update";
 
     string? Q() => string.IsNullOrEmpty(Model.Q) ? null : Model.Q;
     string? StatusParam() => Model.Status == "All" ? null : Model.Status;
@@ -77,7 +76,10 @@
                     <td><span class="sv-tag sv-tag--@b.Payment.Tone">@b.Payment.Text</span></td>
                     <td><span class="sv-tag sv-tag--@b.Status.Tone">@b.Status.Badge</span></td>
                     <td class="sv-table__right">
-                        <span class="sv-viewlink is-disabled" aria-disabled="true" title="@soon">View @Icons.Svg("arrow-right", 14)</span>
+                        @* opens the booking card in a pop-up (admin-approval.js); without JavaScript it opens as a page *@
+                        <a class="sv-viewlink sv-viewlink--open" data-review-link="true"
+                           href="@Url.Action("Details", "AdminBookings", new { bookingId = b.BookingId, q = Q(), status = StatusParam(), page = Model.Page > 1 ? Model.Page : (int?)null })"
+                           aria-label="View booking @b.BookingId">View @Icons.Svg("arrow-right", 14)</a>
                     </td>
                 </tr>
             }
@@ -102,3 +104,10 @@
         </nav>
     }
 </div>
+
+@* the empty pop-up that admin-approval.js fills with the booking card *@
+<partial name="_ApplicationReviewDialog" />
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
+}

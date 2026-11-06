@@ -12,17 +12,15 @@
     var form = Model.Form;
 
     // the problem text for each box (null = no problem)
-    var nameError = Model.ErrorFor("FullName");
-    var businessError = Model.ErrorFor("BusinessName");
-    // only when there IS an active booking; with none, the boxes are normal white editable fields
-    string? lockClass = Model.NameLocked ? "is-locked" : null;
-    string? lockTitle = Model.NameLocked ? "Name and Business Name editing is locked while you have active bookings." : null;
-    string? lockId = Model.NameLocked ? "pf-lock" : null;
-    var phoneError = Model.ErrorFor("PhoneNumber");
     var emailError = Model.ErrorFor("Email");
-    var addressError = Model.ErrorFor("Address");
     var bioError = Model.ErrorFor("Description");
-    var feeError = Model.ErrorFor("BaseFee");
+
+    // once an administrator approves the provider, these boxes are read-only (ProviderLockRules)
+    var locked = Model.InfoLocked;
+    string? lockClass = locked ? "is-locked" : null;
+    string? lockTitle = locked ? ProviderLockRules.ApprovedNotice : null;
+    string? lockId = locked ? "pf-locknote" : null;
+    var feeText = form.BaseFee is decimal fee ? "₱" + fee.ToString("N2", inv) : "";
 }
 
 <div class="sv-pf">
@@ -66,35 +64,40 @@
                 <p class="sv-formerr" role="alert">@Model.FormError</p>
             }
 
+            @if (locked)
+            {
+                <p class="sv-lockhint sv-lockhint--approved" id="pf-locknote" role="note">@Icons.Svg("lock", 12) @ProviderLockRules.ApprovedNotice</p>
+            }
+
+            @* Locked boxes are disabled + read-only: the browser never sends them, and the server refuses any change (403). *@
             <div class="sv-fld">
-                <label for="pf-name">Full Name</label>
-                <input id="pf-name" name="FullName" type="text" value="@form.FullName" required maxlength="100" autocomplete="name"
-                       class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
-                       aria-invalid="@(nameError is null ? null : "true")" />
-                @if (nameError is not null) { <p class="sv-fld__err" role="alert">@nameError</p> }
+                <label for="pf-first">First Name</label>
+                <input id="pf-first" name="FirstName" type="text" value="@form.FirstName" maxlength="100" autocomplete="given-name"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-middle">Middle Name</label>
+                <input id="pf-middle" name="MiddleName" type="text" value="@form.MiddleName" maxlength="100" autocomplete="additional-name"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
+            </div>
+
+            <div class="sv-fld">
+                <label for="pf-last">Last Name</label>
+                <input id="pf-last" name="LastName" type="text" value="@form.LastName" maxlength="100" autocomplete="family-name"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
             </div>
 
             <div class="sv-fld">
                 <label for="pf-business">Business Name</label>
-                <input id="pf-business" name="BusinessName" type="text" value="@form.BusinessName" required maxlength="155" autocomplete="organization"
-                       class="@lockClass" disabled="@Model.NameLocked" readonly="@Model.NameLocked" title="@lockTitle" aria-describedby="@lockId"
-                       aria-invalid="@(businessError is null ? null : "true")" />
-                @if (businessError is not null) { <p class="sv-fld__err" role="alert">@businessError</p> }
+                <input id="pf-business" name="BusinessName" type="text" value="@form.BusinessName" maxlength="155" autocomplete="organization"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
             </div>
-
-            @if (Model.NameLocked)
-            {
-                @* disabled boxes are not sent with the form, so the current names travel in hidden fields (the server re-checks anyway) *@
-                <input type="hidden" name="FullName" value="@form.FullName" />
-                <input type="hidden" name="BusinessName" value="@form.BusinessName" />
-                <p class="sv-lockhint" id="pf-lock" role="note">@Icons.Svg("clock", 12) Name and Business Name editing is locked while you have active bookings.</p>
-            }
 
             <div class="sv-fld">
                 <label for="pf-phone">Phone Number</label>
-                <input id="pf-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="13" inputmode="tel" pattern="(09[0-9]{9}|\+639[0-9]{9})" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" autocomplete="tel" placeholder="e.g. 09171234567"
-                       aria-invalid="@(phoneError is null ? null : "true")" />
-                @if (phoneError is not null) { <p class="sv-fld__err" role="alert">@phoneError</p> }
+                <input id="pf-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="13" autocomplete="tel"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
             </div>
 
             <div class="sv-fld">
@@ -104,23 +107,17 @@
                 @if (emailError is not null) { <p class="sv-fld__err" role="alert">@emailError</p> }
             </div>
 
-
             <div class="sv-fld">
                 <label for="pf-basefee">Base Fee in PHP</label>
-                <input id="pf-basefee" name="BaseFee" type="number" min="1" max="100000" step="any" inputmode="decimal" required
-                       value="@BaseFeeRules.ForInput(form.BaseFee)" placeholder="e.g. 500"
-                       data-sv-basefee aria-describedby="pf-basefee-err"
-                       data-msg-required="@BaseFeeRules.RequiredMessage" data-msg-min="@BaseFeeRules.MinMessage"
-                       data-msg-max="@BaseFeeRules.MaxMessage" data-msg-nan="@BaseFeeRules.NotANumberMessage"
-                       aria-invalid="@(feeError is null ? null : "true")" />
-                <p class="sv-fld__err" id="pf-basefee-err" role="alert" hidden="@(feeError is null)">@feeError</p>
+                @* shown as text ("₱500.00"); it is never posted (no name) because a base fee cannot be changed here *@
+                <input id="pf-basefee" type="text" value="@feeText"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
             </div>
 
             <div class="sv-fld">
-                <label for="pf-address">Address <span class="sv-fld__opt">(optional)</span></label>
-                <input id="pf-address" name="Address" type="text" value="@form.Address" maxlength="255" autocomplete="street-address" placeholder="Street, barangay (Cebu City)"
-                       aria-invalid="@(addressError is null ? null : "true")" />
-                @if (addressError is not null) { <p class="sv-fld__err" role="alert">@addressError</p> }
+                <label for="pf-address">Address</label>
+                <input id="pf-address" name="Address" type="text" value="@form.Address" maxlength="255" autocomplete="street-address"
+                       class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
             </div>
 
             <div class="sv-fld">
@@ -187,6 +184,5 @@
 </div>
 
 @section Scripts {
-    <script src="~/js/base-fee.js" asp-append-version="true"></script>
     <script src="~/js/provider-profile.js" asp-append-version="true"></script>
 }

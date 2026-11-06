@@ -236,8 +236,9 @@ public class UserManagementServiceTests
         var log = await db.AdminActions.AsNoTracking().SingleAsync();
         Assert.Equal(admin.UserId, log.AdminUserId);
         Assert.Equal("Account Suspended", log.ActionType);
-        Assert.Equal("USER", log.TargetType);
-        Assert.Equal(ana.UserId, log.TargetId);
+        Assert.Equal("CUSTOMER", log.TargetType);                       // database v2.2: the customer, not the user account
+        Assert.Equal((await db.Customers.AsNoTracking().SingleAsync()).CustomerId, log.TargetCustomerId);
+        Assert.Null(log.TargetProviderId);
         Assert.Equal("Repeated no-shows", log.Reason);
     }
 

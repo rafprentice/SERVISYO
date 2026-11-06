@@ -27,6 +27,10 @@ public class ServisyoDbContext : DbContext
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<AdminAction> AdminActions => Set<AdminAction>();
+
+    /// CK_ADMIN_ACTIONS_TARGET (database v2.2): exactly one target column is filled, and it is the one TARGET_TYPE names.
+    public const string AdminActionTargetCheck =
+        "([TARGET_TYPE] = 'CUSTOMER' AND [TARGET_CUSTOMER_ID] IS NOT NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'SERVICE_PROVIDER' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NOT NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'REVIEW' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NOT NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'CATEGORY' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NOT NULL)";
     public DbSet<BookingReport> BookingReports => Set<BookingReport>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder cb)
@@ -275,11 +279,21 @@ public class ServisyoDbContext : DbContext
 
         mb.Entity<AdminAction>(e =>
         {
-            e.ToTable("ADMIN_ACTIONS");
+            e.ToTable("ADMIN_ACTIONS", t =>
+            {
+                // database v2.2: a specific target type, and exactly one FOREIGN KEY column filled - the one it names
+                t.HasCheckConstraint("CK_ADMIN_ACTIONS_TARGET_TYPE", "[TARGET_TYPE] IN ('CUSTOMER','SERVICE_PROVIDER','REVIEW','CATEGORY')");
+                t.HasCheckConstraint("CK_ADMIN_ACTIONS_TARGET", AdminActionTargetCheck);
+            });
             e.Property(x => x.ActionType).HasMaxLength(50);
             e.Property(x => x.TargetType).HasMaxLength(50);
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
             e.HasOne(x => x.Admin).WithMany().HasForeignKey(x => x.AdminUserId);
+            // the history is never deleted with its target (the app never deletes customers, providers, reviews or categories)
+            e.HasOne(x => x.TargetCustomer).WithMany().HasForeignKey(x => x.TargetCustomerId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.TargetProvider).WithMany().HasForeignKey(x => x.TargetProviderId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.TargetReview).WithMany().HasForeignKey(x => x.TargetReviewId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.TargetCategory).WithMany().HasForeignKey(x => x.TargetCategoryId).OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<BookingReport>(e =>

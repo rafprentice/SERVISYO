@@ -204,17 +204,50 @@ public class Notification
     public User User { get; set; } = null!;
 }
 
+/// ADMIN_ACTIONS: one row per important administrator action. Database v2.2: the target is stored in the ONE column
+/// that matches TARGET_TYPE, and each of those columns is a real FOREIGN KEY (CK_ADMIN_ACTIONS_TARGET keeps exactly one filled).
 public class AdminAction
 {
     public int ActionId { get; set; }
     public int AdminUserId { get; set; }
     public string ActionType { get; set; } = string.Empty;
-    public string TargetType { get; set; } = string.Empty;
-    public int TargetId { get; set; }                    // polymorphic: no FK by design
+    public string TargetType { get; set; } = string.Empty;   // AdminTargetTypes: CUSTOMER | SERVICE_PROVIDER | REVIEW | CATEGORY
+    public int? TargetCustomerId { get; set; }              // -> CUSTOMERS          (TARGET_TYPE = CUSTOMER)
+    public int? TargetProviderId { get; set; }              // -> SERVICE_PROVIDERS  (TARGET_TYPE = SERVICE_PROVIDER)
+    public int? TargetReviewId { get; set; }                // -> REVIEWS            (TARGET_TYPE = REVIEW)
+    public int? TargetCategoryId { get; set; }              // -> SERVICE_CATEGORIES (TARGET_TYPE = CATEGORY)
     public string? Reason { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public User Admin { get; set; } = null!;
+    public Customer? TargetCustomer { get; set; }
+    public Provider? TargetProvider { get; set; }
+    public Review? TargetReview { get; set; }
+    public ServiceCategory? TargetCategory { get; set; }
+
+    /// The four kinds of target, each filling only its own column.
+    public static AdminAction ForCustomer(int adminUserId, string actionType, int customerId, string? reason) =>
+        new() { AdminUserId = adminUserId, ActionType = actionType, TargetType = AdminTargetTypes.Customer, TargetCustomerId = customerId, Reason = reason };
+
+    public static AdminAction ForProvider(int adminUserId, string actionType, int providerId, string? reason) =>
+        new() { AdminUserId = adminUserId, ActionType = actionType, TargetType = AdminTargetTypes.ServiceProvider, TargetProviderId = providerId, Reason = reason };
+
+    public static AdminAction ForReview(int adminUserId, string actionType, int reviewId, string? reason) =>
+        new() { AdminUserId = adminUserId, ActionType = actionType, TargetType = AdminTargetTypes.Review, TargetReviewId = reviewId, Reason = reason };
+
+    public static AdminAction ForCategory(int adminUserId, string actionType, int categoryId, string? reason) =>
+        new() { AdminUserId = adminUserId, ActionType = actionType, TargetType = AdminTargetTypes.Category, TargetCategoryId = categoryId, Reason = reason };
+}
+
+/// ADMIN_ACTIONS.TARGET_TYPE (database v2.2: there is no "USER" any more).
+public static class AdminTargetTypes
+{
+    public const string Customer = "CUSTOMER";
+    public const string ServiceProvider = "SERVICE_PROVIDER";
+    public const string Review = "REVIEW";
+    public const string Category = "CATEGORY";
+
+    public static readonly IReadOnlyList<string> All = new[] { Customer, ServiceProvider, Review, Category };
 }
 
 public class BookingReport
