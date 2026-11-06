@@ -150,7 +150,7 @@ public class BookProviderService : IBookProviderService
 
     private async Task<PortalShellViewModel> BuildShellAsync(Who who, int userId, CancellationToken ct) =>
         ShellOf(who,
-            await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+            await _db.CountUnreadNotificationsAsync(userId, ct),
             await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct));
 
     // ------------------------------------------------------------------ the form
@@ -356,15 +356,7 @@ public class BookProviderService : IBookProviderService
 
             _db.Bookings.Add(booking);
             await _db.SaveChangesAsync(ct);
-
-            // tell the provider (same wording as usp_CreateBooking)
-            _db.Notifications.Add(new Notification
-            {
-                UserId = provider.UserId,
-                Message = $"You have a new booking request (Booking #{booking.BookingId}).",
-                CreatedAt = now
-            });
-            await _db.SaveChangesAsync(ct);
+            // database v2.3: the provider's bell shows the new Pending booking itself (dbo.usp_GetNotifications)
 
             if (tx is not null) await tx.CommitAsync(ct);
 

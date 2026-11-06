@@ -9,12 +9,13 @@
                                         Maricel Bautista - Cleaning - Poblacion)
      - 4 bookings (Accepted, Pending, In Progress, Completed)
      - 1 FLAGGED review (on the Completed booking)
-     - 1 OPEN booking report (on the In Progress booking)
+   (Database v2.3: BOOKING_REPORTS no longer exists; "bookings that need attention" is worked out by
+    dbo.usp_GetBookingsNeedingAttention, so the flagged review also shows there.)
    None of these accounts can sign in (their password hash is not a real hash).
 
    - Safe to re-run: if the sample bookings exist, nothing more is added.
    - @Refresh = 1 deletes ONLY the bookings marked "DEV SAMPLE (admin)" (plus their
-     reviews, reports and booking lines) and creates them again with fresh dates.
+     reviews and booking lines) and creates them again with fresh dates.
    - Do not run this against a real/production database.
 
    HOW TO RUN (PowerShell, from C:\Users\ralph\Servisyo):
@@ -104,11 +105,9 @@ JOIN SERVICE_PROVIDERS p ON p.USER_ID = u.USER_ID
 JOIN SERVICE_CATEGORIES c ON c.CATEGORY_NAME = s.Category
 WHERE NOT EXISTS (SELECT 1 FROM SERVICES x WHERE x.PROVIDER_ID = p.PROVIDER_ID AND x.SERVICE_NAME = s.Name);
 
--- ---------- Bookings, one flagged review, one open report ----------
+-- ---------- Bookings and one flagged review ----------
 IF @Refresh = 1
 BEGIN
-    DELETE r FROM BOOKING_REPORTS r JOIN BOOKINGS b ON b.BOOKING_ID = r.BOOKING_ID
-    WHERE b.SERVICE_DESCRIPTION LIKE N'DEV SAMPLE (admin)%';
     DELETE r FROM REVIEWS r JOIN BOOKINGS b ON b.BOOKING_ID = r.BOOKING_ID
     WHERE b.SERVICE_DESCRIPTION LIKE N'DEV SAMPLE (admin)%';
     DELETE bs FROM BOOKING_SERVICES bs JOIN BOOKINGS b ON b.BOOKING_ID = bs.BOOKING_ID
@@ -157,12 +156,6 @@ BEGIN
     JOIN BOOKINGS b ON b.SERVICE_DESCRIPTION = N'DEV SAMPLE (admin) #' + CAST(pl.Slot AS NVARCHAR(5))
     WHERE pl.ReviewRating IS NOT NULL;
 
-    INSERT INTO BOOKING_REPORTS (BOOKING_ID, REPORTED_BY_USER_ID, REASON, STATUS)
-    SELECT b.BOOKING_ID, cu.USER_ID, pl.ReportReason, N'Open'
-    FROM @Plan pl
-    JOIN BOOKINGS b ON b.SERVICE_DESCRIPTION = N'DEV SAMPLE (admin) #' + CAST(pl.Slot AS NVARCHAR(5))
-    JOIN USERS cu ON cu.EMAIL = pl.CustomerEmail
-    WHERE pl.ReportReason IS NOT NULL;
 END
 
 COMMIT;
@@ -174,5 +167,5 @@ SELECT
     (SELECT COUNT(*) FROM SERVICE_PROVIDERS WHERE APPROVAL_STATUS = N'Pending')               AS PendingApplications,
     (SELECT COUNT(*) FROM BOOKINGS)                                                           AS TotalBookings,
     (SELECT COUNT(*) FROM REVIEWS WHERE STATUS = N'Flagged')                                  AS FlaggedReviews,
-    (SELECT COUNT(*) FROM USERS WHERE ACCOUNT_STATUS = N'Suspended' AND [ROLE] <> N'Administrator') AS SuspendedAccounts,
-    (SELECT COUNT(*) FROM BOOKING_REPORTS WHERE STATUS <> N'Resolved')                        AS OpenReports;
+    (SELECT COUNT(*) FROM USERS WHERE ACCOUNT_STATUS = N'Suspended' AND [ROLE] <> N'Administrator') AS SuspendedAccounts;
+-- bookings that need attention (database v2.3):  EXEC dbo.usp_GetBookingsNeedingAttention;

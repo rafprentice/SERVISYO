@@ -1,7 +1,9 @@
 /* The notification bell (top bar, every signed-in role).
    - the red number comes from the server and is refreshed every 30 seconds while the tab is visible
-   - clicking the bell opens a panel with the newest notifications (loaded from the server each time)
-   - clicking a notification opens the page it is about (the server marks it read on the way)
+   - clicking the bell opens a panel with the newest notifications (loaded from the server each time); opening it
+     marks everything as seen (database v2.3: USERS.NOTIFICATIONS_SEEN_AT) - the number goes to 0, the dots stay
+     for this look so you can still see what was new
+   - clicking a notification opens the page it is about
    - "Mark all as read" asks the server, then updates the panel and the number
    Text coming from the server is only ever put on the page with textContent. Every permission check is on the server. */
 (function () {
@@ -108,6 +110,24 @@
 
     function isOpen() { return !panel.hidden; }
 
+    // tell the server that everything up to now has been seen; quietly, the panel keeps its dots
+    function markSeen(clearDots) {
+        if (!readAllUrl) return Promise.resolve(false);
+        var body = new FormData();
+        body.append("__RequestVerificationToken", token());
+        return fetch(readAllUrl, { method: "POST", body: body, credentials: "same-origin", headers: { "Accept": "application/json" } })
+            .then(function (response) {
+                if (response.status === 401) { window.location.reload(); throw new Error("signed out"); }
+                if (!response.ok) throw new Error("bad answer");
+                setUnread(0);
+                if (clearDots) {
+                    list.querySelectorAll(".sv-np__item.is-unread").forEach(function (a) { a.classList.remove("is-unread"); });
+                    list.querySelectorAll(".sv-np__dot").forEach(function (d) { d.remove(); });
+                }
+                return true;
+            });
+    }
+
     function load(showLoading) {
         var mine = ++requestId;
         if (showLoading && list.children.length === 0) message("Loading…");
@@ -122,6 +142,8 @@
                 failures = 0;
                 if (mine !== requestId) return;
                 if (isOpen() || list.children.length === 0 || showLoading) render(data); else setUnread(data.unread);
+                // the bell was just opened and something is new: from now on it counts as seen
+                if (showLoading && isOpen() && data.unread > 0) markSeen(false).catch(function () { /* the number stays */ });
             })
             .catch(function () {
                 failures++;
@@ -152,16 +174,7 @@
             if (readAll.getAttribute("data-busy")) return;
             readAll.setAttribute("data-busy", "1");
 
-            var body = new FormData();
-            body.append("__RequestVerificationToken", token());
-            fetch(readAllUrl, { method: "POST", body: body, credentials: "same-origin", headers: { "Accept": "application/json" } })
-                .then(function (response) {
-                    if (response.status === 401) { window.location.reload(); throw new Error("signed out"); }
-                    if (!response.ok) throw new Error("bad answer");
-                    setUnread(0);
-                    list.querySelectorAll(".sv-np__item.is-unread").forEach(function (a) { a.classList.remove("is-unread"); });
-                    list.querySelectorAll(".sv-np__dot").forEach(function (d) { d.remove(); });
-                })
+            markSeen(true)
                 .catch(function () { /* nothing changed on the server, so the panel is left as it is */ })
                 .finally(function () { readAll.removeAttribute("data-busy"); });
         });

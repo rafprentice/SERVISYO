@@ -173,10 +173,6 @@ public class CustomerBookingsServiceTests
         var (svc, db) = Create();
         var ana = await AddCustomerAsync(db);
         var other = await AddCustomerAsync(db, "Ben", "Lim");
-        db.Notifications.AddRange(
-            new Notification { UserId = ana.UserId, Message = "a" },
-            new Notification { UserId = ana.UserId, Message = "b", IsRead = true },
-            new Notification { UserId = other.UserId, Message = "c" });
         db.Messages.Add(new Message { SenderId = other.UserId, ReceiverId = ana.UserId, MessageText = "hi" });
         await db.SaveChangesAsync();
 
@@ -187,7 +183,7 @@ public class CustomerBookingsServiceTests
         Assert.Equal("Ana Reyes", page.FullName);
         Assert.Equal("AR", page.Initials);
         Assert.Equal("Customer Account", page.Subtitle);
-        Assert.Equal(1, page.UnreadNotifications);
+        Assert.Equal(0, page.UnreadNotifications);      // v2.3: from usp_GetNotifications (none in the in-memory test database)
         Assert.Equal(1, page.UnreadMessages);
     }
 
@@ -504,10 +500,7 @@ public class CustomerBookingsServiceTests
         Assert.Equal(BookingStatuses.Cancelled, saved.Status);
         Assert.Equal(NowUtc, saved.UpdatedAt);
 
-        var note = await db.Notifications.AsNoTracking().SingleAsync();
-        Assert.Equal(provider.UserId, note.UserId);                               // the PROVIDER's account, not the customer's
-        Assert.Equal($"Booking #{booking.BookingId} was cancelled by the customer.", note.Message);
-        Assert.False(note.IsRead);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
     }
 
     [Fact]
@@ -546,7 +539,6 @@ public class CustomerBookingsServiceTests
         Assert.Equal(CustomerCancelOutcome.NotPending, result.Outcome);
         Assert.False(result.Succeeded);
         Assert.Equal(status, await StatusOf(db, booking.BookingId));
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]
@@ -577,7 +569,6 @@ public class CustomerBookingsServiceTests
 
         Assert.True(first.Succeeded);
         Assert.Equal(CustomerCancelOutcome.NotPending, second.Outcome);
-        Assert.Single(db.Notifications);
     }
 
     [Fact]
@@ -594,7 +585,6 @@ public class CustomerBookingsServiceTests
         Assert.Equal(CustomerCancelOutcome.NotFound, result.Outcome);
         Assert.Equal("That booking could not be found.", result.Message);
         Assert.Equal(BookingStatuses.Pending, await StatusOf(db, bensBooking.BookingId));
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]
@@ -640,7 +630,6 @@ public class CustomerBookingsServiceTests
 
         Assert.Equal(BookingStatuses.Pending, await StatusOf(db, a.BookingId));
         Assert.Equal(BookingStatuses.Pending, await StatusOf(db, b.BookingId));
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]

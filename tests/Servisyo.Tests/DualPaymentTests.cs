@@ -67,19 +67,22 @@ public class DualPaymentTests
     private static PaymentChoiceForm Wallet(string wallet = MockWallets.GCash, string mobile = "0917-000-0000", string? reference = null) =>
         new() { Method = PaymentMethods.MockEWallet, Wallet = wallet, MobileNumber = mobile, Reference = reference };
 
-    private static Task<Payment> PaymentOf(World w, int bookingId) =>
-        w.Db.Payments.AsNoTracking().Include(p => p.CashDetails).SingleAsync(p => p.BookingId == bookingId);
+    private static Task<PaymentDetail> PaymentOf(World w, int bookingId) =>
+        w.Db.PaymentDetails.AsNoTracking().SingleAsync(p => p.BookingId == bookingId);
+
+    /// v2.3: "collected" is not stored (CASH_PAYMENT_DETAILS is gone): a cash payment whose status is Paid.
+    private static bool IsCollected(PaymentDetail p) => p.PaymentId == PaymentIds.Cash && p.PaymentStatus == PaymentRecordStatuses.Paid;
 
     private static async Task<(Booking Booking, string Effective)> ReloadAsync(World w, int bookingId)
     {
-        var b = await w.Db.Bookings.AsNoTracking().Include(x => x.Payment).SingleAsync(x => x.BookingId == bookingId);
-        return (b, PaymentProgress.Effective(b.PaymentStatus, b.Payment?.PaymentStatus));
+        var b = await w.Db.Bookings.AsNoTracking().Include(x => x.PaymentDetail).SingleAsync(x => x.BookingId == bookingId);
+        return (b, PaymentProgress.Effective(b.PaymentStatus, b.PaymentDetail?.PaymentStatus));
     }
 
     // ================================================================== Option 1: Cash on Service Completion
 
     [Fact]
-    public async Task Cash_CreatesAPendingCollectionPayment_WithCashDetails_AndSchedulesTheBooking()
+    public async Task Cash_CreatesAPendingCollectionPayment_AndSchedulesTheBooking()
     {
         var w = await CreateAsync();
         var b = await BookAsync(w);
@@ -90,15 +93,13 @@ public class DualPaymentTests
         Assert.Equal($"CASH-2026-{b.BookingId:D4}", result.Reference);
 
         var pay = await PaymentOf(w, b.BookingId);
-        Assert.Equal(650m, pay.Amount);                                   // from the booking, not from the browser
-        Assert.Equal(PaymentMethods.CashOnCompletion, pay.PaymentMethod);
+        Assert.Equal(PaymentIds.Cash, pay.PaymentId);                    // PAYMENTS row 1: Cash on Completion
         Assert.Equal(PaymentRecordStatuses.PendingCollection, pay.PaymentStatus);
         Assert.Equal(result.Reference, pay.TransactionReference);
         Assert.Equal(NowUtc, pay.CreatedAt);
         Assert.Null(pay.PaidAt);
-        Assert.NotNull(pay.CashDetails);
-        Assert.False(pay.CashDetails!.IsCollectedByProvider);
-        Assert.Null(pay.CashDetails.CollectedAt);
+        Assert.False(IsCollected(pay));
+        // v2.3: the amount is not stored again; the booking's TOTAL_FEE (650) is the amount
 
         var (saved, effective) = await ReloadAsync(w, b.BookingId);
         Assert.Equal(BookingStatuses.Accepted, saved.Status);
@@ -112,9 +113,7 @@ public class DualPaymentTests
         Assert.Equal(4, info.ActiveStep);
         Assert.Contains("in cash", info.Message);
 
-        var note = await w.Db.Notifications.SingleAsync();
-        Assert.Equal(w.Mary.UserId, note.UserId);
-        Assert.Contains("cash", note.Message);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 10/30)
 
         var (change, users) = Assert.Single(w.Live.Sent);
         Assert.Equal(PaymentRecordStatuses.PendingCollection, change.PaymentStatus);
@@ -158,10 +157,10 @@ public class DualPaymentTests
         Assert.True(result.Succeeded);
         Assert.Equal("GCASH-12345678", result.Reference);
         var pay = await PaymentOf(w, b.BookingId);
-        Assert.Equal(PaymentMethods.MockEWallet, pay.PaymentMethod);
+        Assert.Equal(PaymentIds.GCash, pay.PaymentId);                   // PAYMENTS row 2: GCash
         Assert.Equal(PaymentRecordStatuses.Paid, pay.PaymentStatus);
         Assert.Equal(NowUtc, pay.PaidAt);
-        Assert.Null(pay.CashDetails);
+        Assert.False(IsCollected(pay));                                  // not cash
 
         var (saved, effective) = await ReloadAsync(w, b.BookingId);
         Assert.Equal(PaymentStatuses.Paid, saved.PaymentStatus);
@@ -182,7 +181,7 @@ public class DualPaymentTests
         var result = await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, Wallet(MockWallets.Maya));
 
         Assert.Matches(new Regex("^MAYA-[0-9]{8}$"), result.Reference!);
-        Assert.Contains("Maya", (await w.Db.Notifications.SingleAsync()).Message);
+        Assert.Equal(PaymentIds.Maya, (await PaymentOf(w, b.BookingId)).PaymentId);     // PAYMENTS row 3: Maya
     }
 
     [Theory]
@@ -243,8 +242,7 @@ public class DualPaymentTests
         var result = await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, Wallet(mobile: mobile));
 
         Assert.Equal(PaymentOutcome.InvalidInput, result.Outcome);
-        Assert.Empty(w.Db.Payments);
-        Assert.Empty(w.Db.Notifications);
+        Assert.Empty(w.Db.PaymentDetails);
         Assert.Empty(w.Live.Sent);
         Assert.Equal(PaymentStatuses.Unpaid, (await w.Db.Bookings.AsNoTracking().SingleAsync()).PaymentStatus);
     }
@@ -271,7 +269,7 @@ public class DualPaymentTests
             new PaymentChoiceForm { Method = method, Wallet = wallet, MobileNumber = "0917-000-0000" });
 
         Assert.Equal(PaymentOutcome.InvalidInput, result.Outcome);
-        Assert.Empty(w.Db.Payments);
+        Assert.Empty(w.Db.PaymentDetails);
     }
 
     [Fact]
@@ -285,8 +283,7 @@ public class DualPaymentTests
 
         Assert.Equal(PaymentOutcome.AlreadyPaid, again.Outcome);
         Assert.Contains("cash", again.Message);
-        Assert.Single(w.Db.Payments);
-        Assert.Single(w.Db.Notifications);
+        Assert.Single(w.Db.PaymentDetails);
     }
 
     [Fact]
@@ -299,7 +296,7 @@ public class DualPaymentTests
         Assert.Equal(PaymentOutcome.NotFound, (await w.Payments.ApproveAndPayAsync(w.Ben.UserId, anas.BookingId, Cash)).Outcome);
         Assert.Equal(PaymentOutcome.NotAllowed, (await w.Payments.ApproveAndPayAsync(w.Mary.UserId, anas.BookingId, Cash)).Outcome);
         Assert.Equal(PaymentOutcome.NotPayable, (await w.Payments.ApproveAndPayAsync(w.Ana.UserId, pending.BookingId, Cash)).Outcome);
-        Assert.Empty(w.Db.Payments);
+        Assert.Empty(w.Db.PaymentDetails);
     }
 
     // ================================================================== provider: Confirm Cash Received
@@ -338,26 +335,20 @@ public class DualPaymentTests
         var w = await CreateAsync();
         var b = await CompletedCashJobAsync(w);
         w.Live.Sent.Clear();
-        var notesBefore = await w.Db.Notifications.CountAsync();
 
         var result = await w.Payments.ConfirmCashReceivedAsync(w.Mary.UserId, b.BookingId);
 
         Assert.True(result.Succeeded);
         var pay = await PaymentOf(w, b.BookingId);
-        Assert.True(pay.CashDetails!.IsCollectedByProvider);
-        Assert.Equal(NowUtc, pay.CashDetails.CollectedAt);
+        Assert.True(IsCollected(pay));
         Assert.Equal(PaymentRecordStatuses.Paid, pay.PaymentStatus);
-        Assert.Equal(NowUtc, pay.PaidAt);
+        Assert.Equal(NowUtc, pay.PaidAt);                                 // collected at = PAID_AT
 
         var (saved, _) = await ReloadAsync(w, b.BookingId);
         Assert.Equal(BookingStatuses.Completed, saved.Status);
         Assert.Equal(PaymentStatuses.Paid, saved.PaymentStatus);
-
-        var note = await w.Db.Notifications.OrderByDescending(n => n.NotificationId).FirstAsync();
-        Assert.Equal(notesBefore + 1, await w.Db.Notifications.CountAsync());
-        Assert.Equal(w.Ana.UserId, note.UserId);
-        Assert.Contains("₱650", note.Message);
-        Assert.Contains("MaryCas", note.Message);
+        Assert.Equal(pay.PaidAt, saved.UpdatedAt);                        // one moment: the customer's bell shows the cash as the latest news
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 10/30)
 
         var (change, users) = Assert.Single(w.Live.Sent);
         Assert.Equal("cash-received", change.What);
@@ -398,7 +389,7 @@ public class DualPaymentTests
         var result = await w.Payments.ConfirmCashReceivedAsync(w.Mary.UserId, b.BookingId);
 
         Assert.Equal(BookingActionOutcome.InvalidTransition, result.Outcome);
-        Assert.False((await PaymentOf(w, b.BookingId)).CashDetails!.IsCollectedByProvider);
+        Assert.False(IsCollected(await PaymentOf(w, b.BookingId)));
     }
 
     [Fact]
@@ -429,7 +420,7 @@ public class DualPaymentTests
         var customer = await w.Payments.ConfirmCashReceivedAsync(w.Ana.UserId, b.BookingId);
         Assert.Equal(ProviderDashboardAccess.NotAllowed, customer.Access);
 
-        Assert.False((await PaymentOf(w, b.BookingId)).CashDetails!.IsCollectedByProvider);
+        Assert.False(IsCollected(await PaymentOf(w, b.BookingId)));
     }
 
     [Fact]

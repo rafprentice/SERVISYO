@@ -116,9 +116,9 @@ public class CustomerBookingsService : ICustomerBookingsService
                 ServiceLocation = b.ServiceLocation,
                 ServiceDescription = b.ServiceDescription,
                 HasReview = _db.Reviews.Any(r => r.BookingId == b.BookingId),
-                PayMethod = b.Payment != null ? b.Payment.PaymentMethod : null,
-                PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
-                PayReference = b.Payment != null ? b.Payment.TransactionReference : null
+                PayMethod = b.PaymentDetail != null ? (b.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
+                PayStatus = b.PaymentDetail != null ? b.PaymentDetail.PaymentStatus : null,
+                PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null
             })
             .ToListAsync(ct);
 
@@ -144,7 +144,7 @@ public class CustomerBookingsService : ICustomerBookingsService
                 FirstName = who.FirstName,
                 FullName = fullName,
                 Initials = NameFormat.Initials(fullName),
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             ActiveTab = activeTab.Key,
@@ -208,16 +208,10 @@ public class CustomerBookingsService : ICustomerBookingsService
             return new(true, CustomerCancelOutcome.NotPending, NotPendingText(bookingId, booking.Status));
         }
 
-        // 4. change the status and tell the provider, together or not at all
+        // 4. change the status (database v2.3: the provider's bell shows the cancellation from BOOKINGS itself)
         var now = _clock.GetUtcNow().UtcDateTime;
         booking.Status = BookingStatuses.Cancelled;
         booking.UpdatedAt = now;
-        _db.Notifications.Add(new Notification
-        {
-            UserId = booking.Provider.UserId,
-            Message = $"Booking #{booking.BookingId} was cancelled by the customer.",
-            CreatedAt = now
-        });
 
         try
         {

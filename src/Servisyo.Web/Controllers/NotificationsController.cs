@@ -13,8 +13,9 @@ namespace Servisyo.Web.Controllers;
 /// Everything here is about the SIGNED-IN person's own notifications; the browser never says whose.
 ///   GET  notifications            -> "all notifications" page
 ///   GET  notifications/panel      -> JSON for the dropdown (and for the bell's number)
-///   POST notifications/read-all   -> mark everything read
-///   GET  notifications/{id}/go    -> mark that one read, then open the page it is about
+///   POST notifications/read-all   -> everything up to now is seen (also sent when the bell is opened)
+///   GET  notifications/go?kind=.. -> open the page a notification is about
+/// Database v2.3: the notifications are worked out by dbo.usp_GetNotifications, nothing is stored per notification.
 [Authorize(Roles = Roles.Customer + "," + Roles.ServiceProvider + "," + Roles.Administrator)]
 [Route("notifications")]
 public class NotificationsController : Controller
@@ -59,7 +60,7 @@ public class NotificationsController : Controller
                 time = i.TimeText,
                 read = i.IsRead,
                 icon = i.Icon,
-                url = Url.Action(nameof(Go), "Notifications", new { id = i.Id })
+                url = Url.Action(nameof(Go), "Notifications", new { kind = i.Kind })
             })
         });
     }
@@ -81,16 +82,13 @@ public class NotificationsController : Controller
         return wantsJson ? Json(new { unread = 0 }) : RedirectToAction(nameof(Index));
     }
 
-    [HttpGet("{id:int}/go")]
-    public async Task<IActionResult> Go(int id, CancellationToken ct)
+    [HttpGet("go")]
+    public IActionResult Go(string? kind)
     {
-        if (!TryGetUserId(out var userId)) return Forbid();
+        if (!TryGetUserId(out _)) return Forbid();
 
-        var result = await _notifications.OpenAsync(userId, id, ct);
-        if (!result.Allowed) return await EndSessionAsync();
-        if (result.Item is null) return RedirectToAction(nameof(Index));      // not found (or not yours)
-
-        return Redirect(TargetFor(result.Item.Kind));
+        // only a page of this site, chosen from the kind; the browser cannot send a web address
+        return Redirect(TargetFor(NotificationKinds.Normalize(kind)));
     }
 
     /// Where a notification leads, depending on who is looking. Always a page of this site.

@@ -21,17 +21,14 @@ public class ServisyoDbContext : DbContext
     public DbSet<BookingService> BookingServices => Set<BookingService>();
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<Message> Messages => Set<Message>();
-    public DbSet<Notification> Notifications => Set<Notification>();
-    public DbSet<Payment> Payments => Set<Payment>();
-    public DbSet<CashPaymentDetails> CashPayments => Set<CashPaymentDetails>();
+    public DbSet<Payment> Payments => Set<Payment>();                    // v2.3: the list of payment methods
+    public DbSet<PaymentDetail> PaymentDetails => Set<PaymentDetail>();  // v2.3: each booking's payment (PAYMENTS_DTL)
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
-    public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<AdminAction> AdminActions => Set<AdminAction>();
 
     /// CK_ADMIN_ACTIONS_TARGET (database v2.2): exactly one target column is filled, and it is the one TARGET_TYPE names.
     public const string AdminActionTargetCheck =
         "([TARGET_TYPE] = 'CUSTOMER' AND [TARGET_CUSTOMER_ID] IS NOT NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'SERVICE_PROVIDER' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NOT NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'REVIEW' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NOT NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'CATEGORY' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NOT NULL)";
-    public DbSet<BookingReport> BookingReports => Set<BookingReport>();
 
     protected override void ConfigureConventions(ModelConfigurationBuilder cb)
     {
@@ -43,7 +40,6 @@ public class ServisyoDbContext : DbContext
     {
         // Primary keys whose names EF can't guess automatically
         mb.Entity<AdminAction>().HasKey(x => x.ActionId);
-        mb.Entity<BookingReport>().HasKey(x => x.ReportId);
         mb.Entity<ProviderAvailability>().HasKey(x => x.AvailabilityId);
         mb.Entity<ProviderBreak>().HasKey(x => x.BreakId);
         mb.Entity<ProviderUnavailableDate>().HasKey(x => x.UnavailableId);
@@ -218,15 +214,6 @@ public class ServisyoDbContext : DbContext
             e.HasIndex(x => new { x.ReceiverId, x.IsRead }).HasDatabaseName("IX_MESSAGES_RECEIVER_UNREAD");   // database v2: unread badge
         });
 
-        mb.Entity<EmailOtp>(e =>
-        {
-            e.ToTable("EMAIL_OTPS");
-            e.Property(x => x.Purpose).HasMaxLength(30);
-            e.Property(x => x.CodeHash).HasMaxLength(255);
-            e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
-            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-            e.HasIndex(x => new { x.UserId, x.Purpose });
-        });
         mb.Entity<SystemLog>(e =>
         {
             e.ToTable("SYSTEM_LOGS");
@@ -238,43 +225,36 @@ public class ServisyoDbContext : DbContext
             e.HasIndex(x => x.CreatedAt);
             e.HasIndex(x => new { x.ActionType, x.UserRole });
         });
+        // database v2.3: PAYMENTS is the list of payment methods; PAYMENTS_DTL is each booking's payment
         mb.Entity<Payment>(e =>
         {
-            e.ToTable("PAYMENTS", t =>
+            e.ToTable("PAYMENTS");
+            e.Property(x => x.MethodName).HasMaxLength(50);
+            e.HasIndex(x => x.MethodName).IsUnique();
+            e.HasData(
+                new Payment { PaymentId = PaymentIds.Cash, MethodName = PaymentIds.CashName },
+                new Payment { PaymentId = PaymentIds.GCash, MethodName = PaymentIds.GCashName },
+                new Payment { PaymentId = PaymentIds.Maya, MethodName = PaymentIds.MayaName });
+        });
+
+        mb.Entity<PaymentDetail>(e =>
+        {
+            e.ToTable("PAYMENTS_DTL", t =>
             {
-                t.HasTrigger("trg_Payments_Audit");           // database v2: System Logs for payments
-                t.HasCheckConstraint("CK_PAYMENTS_METHOD", "[PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')");
-                t.HasCheckConstraint("CK_PAYMENTS_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
-                t.HasCheckConstraint("CK_PAYMENTS_AMOUNT", "[AMOUNT] >= 0");
-                // only cash can wait to be collected, and anything paid (or refunded) has a paid date
-                t.HasCheckConstraint("CK_PAYMENTS_PENDING_CASH", "[PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_METHOD] = 'CashOnCompletion'");
-                t.HasCheckConstraint("CK_PAYMENTS_PAID_AT", "[PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL");
+                t.HasTrigger("trg_PaymentsDtl_Audit");        // System Logs for payments
+                t.HasCheckConstraint("CK_PAYMENTS_DTL_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
+                // only cash (PAYMENTS row 1) can wait to be collected, and anything paid (or refunded) has a paid date
+                t.HasCheckConstraint("CK_PAYMENTS_DTL_PENDING_CASH", "[PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_ID] = 1");
+                t.HasCheckConstraint("CK_PAYMENTS_DTL_PAID_AT", "[PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL");
             });
-            e.Property(x => x.PaymentMethod).HasMaxLength(50);
+            e.HasKey(x => x.PaymentDtlId);
             e.Property(x => x.PaymentStatus).HasMaxLength(50);
             e.Property(x => x.TransactionReference).HasMaxLength(50);
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
-            e.HasOne(x => x.Booking).WithOne(b => b.Payment).HasForeignKey<Payment>(x => x.BookingId);
+            e.HasOne(x => x.Booking).WithOne(b => b.PaymentDetail).HasForeignKey<PaymentDetail>(x => x.BookingId);
+            e.HasOne(x => x.Payment).WithMany(p => p.Details).HasForeignKey(x => x.PaymentId);
             e.HasIndex(x => x.BookingId).IsUnique();                // one payment per booking: a second one is refused
             e.HasIndex(x => x.TransactionReference).IsUnique();
-        });
-
-        mb.Entity<CashPaymentDetails>(e =>
-        {
-            e.ToTable("CASH_PAYMENT_DETAILS", t =>
-                t.HasCheckConstraint("CK_CASH_COLLECTED",
-                    "([IS_COLLECTED_BY_PROVIDER] = 0 AND [COLLECTED_AT] IS NULL) OR ([IS_COLLECTED_BY_PROVIDER] = 1 AND [COLLECTED_AT] IS NOT NULL)"));
-            e.HasKey(x => x.PaymentId);
-            e.Property(x => x.PaymentId).ValueGeneratedNever();     // same number as the payment
-            e.Property(x => x.IsCollectedByProvider).HasDefaultValue(false);
-            e.HasOne(x => x.Payment).WithOne(p => p.CashDetails).HasForeignKey<CashPaymentDetails>(x => x.PaymentId);
-        });
-        mb.Entity<Notification>(e =>
-        {
-            e.ToTable("NOTIFICATIONS");
-            e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
-            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
-            e.HasIndex(x => new { x.UserId, x.IsRead }).HasDatabaseName("IX_NOTIFICATIONS_USER_UNREAD");   // database v2: bell count
         });
 
         mb.Entity<AdminAction>(e =>
@@ -294,17 +274,6 @@ public class ServisyoDbContext : DbContext
             e.HasOne(x => x.TargetProvider).WithMany().HasForeignKey(x => x.TargetProviderId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.TargetReview).WithMany().HasForeignKey(x => x.TargetReviewId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.TargetCategory).WithMany().HasForeignKey(x => x.TargetCategoryId).OnDelete(DeleteBehavior.Restrict);
-        });
-
-        mb.Entity<BookingReport>(e =>
-        {
-            e.ToTable("BOOKING_REPORTS", t =>
-                t.HasCheckConstraint("CK_REPORTS_STATUS", "[STATUS] IN ('Open','Under Review','Resolved')"));
-            e.Property(x => x.Status).HasMaxLength(50);
-            e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
-            e.HasOne(x => x.Booking).WithMany(b => b.Reports).HasForeignKey(x => x.BookingId);
-            e.HasOne(x => x.ReportedBy).WithMany().HasForeignKey(x => x.ReportedByUserId);
-            e.HasOne(x => x.ResolvedBy).WithMany().HasForeignKey(x => x.ResolvedByUserId);
         });
 
         // Column names: UPPER_SNAKE_CASE (e.g. CreatedAt -> CREATED_AT), like the PDF.

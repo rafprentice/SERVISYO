@@ -1,19 +1,19 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.2  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.3  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
      PART 1  Tables, keys, relationships, CHECK rules and indexes  (REFERENCE - created by the EF migrations)
      PART 2  Functions (8)
      PART 3  Views (2)
-     PART 4  Stored procedures (19)
+     PART 4  Stored procedures (21)
      PART 5  Triggers (6 new; the 3 audit triggers trg_Users_Audit / trg_Bookings_Audit / trg_Services_Audit are unchanged)
      PART 6  Self-test: runs every procedure, function and trigger with sample data and ROLLS IT ALL BACK
      PART 7  Examples and subqueries for the defense
 
    HOW THIS FILE IS USED
-     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup" and "AdminTargets" (dotnet ef database update):
+     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup", "AdminTargets" and "DerivedData" (dotnet ef database update):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -56,6 +56,26 @@
        logs the CUSTOMER; suspending a provider logs the SERVICE_PROVIDER (the PROVIDER_ID, like approve / reject).
      - CHECK CK_ADMIN_ACTIONS_TARGET: exactly one target column is filled, and it is the one TARGET_TYPE names.
      - The migration converted the existing rows (USER -> CUSTOMER or SERVICE_PROVIDER) before removing TARGET_ID.
+
+   WHAT CHANGED IN v2.3 (EF migration "DerivedData") - the data-management rules
+       1. One fact, one place: a value is never repeated in another table; it is referenced with a FOREIGN KEY.
+       2. Nothing is stored that can be calculated from other rows.
+       3. A table that only holds derivable rows becomes a query that shows the newest 25 (SELECT TOP 25), so the
+          database does not grow with rows nobody needs.
+       4. Every feature keeps working.
+     - NOTIFICATIONS was removed. usp_GetNotifications works out each user's bell from BOOKINGS, PAYMENTS_DTL,
+       REVIEWS, ADMIN_ACTIONS and the Pending applications (newest 25, each booking only its latest news).
+       USERS.NOTIFICATIONS_SEEN_AT is the only thing stored: what is newer is unread.
+     - BOOKING_REPORTS was removed (no screen ever filled it). usp_GetBookingsNeedingAttention lists, newest 25,
+       the bookings an administrator should look at: a flagged or 1-2 star review, or a date that has passed while
+       the booking is still Pending or Accepted.
+     - EMAIL_OTPS was removed. The password reset code is calculated by the app (a keyed hash of the user, the
+       current password hash and the time), so nothing is stored and the code stops working once it is used.
+     - PAYMENTS is now the list of payment methods: 1 Cash on Completion, 2 GCash, 3 Maya. PAYMENTS_DTL is the
+       bridge between BOOKINGS and PAYMENTS: each booking's payment (one per booking), with its status, reference
+       and dates. The amount is not stored again: it is the booking's TOTAL_FEE.
+     - CASH_PAYMENT_DETAILS was removed: "collected by the provider" is a cash payment whose status is Paid, at PAID_AT.
+     - The procedures that used to write NOTIFICATIONS no longer do; trg_Payments_Audit became trg_PaymentsDtl_Audit.
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -67,7 +87,7 @@ GO
    PART 0 - SAFETY CHECKS
    ===================================================================================================== */
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NULL OR OBJECT_ID(N'dbo.BOOKINGS') IS NULL
-   OR OBJECT_ID(N'dbo.PAYMENTS') IS NULL OR OBJECT_ID(N'dbo.SYSTEM_LOGS') IS NULL
+   OR OBJECT_ID(N'dbo.PAYMENTS_DTL') IS NULL OR OBJECT_ID(N'dbo.SYSTEM_LOGS') IS NULL
 BEGIN
     RAISERROR(N'Stopped: run this file on the SERVISYO database (choose it in the SSMS toolbar). Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -75,7 +95,7 @@ END
 GO
 -- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), so the EF migration comes first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]AdminTargets')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]DerivedData')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -86,7 +106,7 @@ DECLARE @clash NVARCHAR(MAX) = STUFF((
     SELECT N', ' + o.name
     FROM sys.objects o
     WHERE o.schema_id = SCHEMA_ID(N'dbo')
-      AND o.name IN (N'fn_DayOfWeek', N'fn_ManilaNow', N'fn_GetFullName', N'fn_GetProviderAvgRating', N'fn_CountProviderJobsOnDate', N'fn_IsProviderAvailable', N'fn_HasBookingConflict', N'fn_GetAvailableSlots', N'vw_BookingOverview', N'vw_ProviderDirectory', N'usp_RegisterCustomer', N'usp_RegisterProvider', N'usp_GetUserForLogin', N'usp_ApproveProvider', N'usp_UpdateAccountStatus', N'usp_ModerateReview', N'usp_AddService', N'usp_SearchServices', N'usp_GetProviderAvailability', N'usp_AddAvailability', N'usp_UpdateAvailability', N'usp_DeleteAvailability', N'usp_CreateBooking', N'usp_CancelBooking', N'usp_UpdateBookingStatus', N'usp_ApproveAndPay', N'usp_ConfirmCashReceived', N'usp_AddReview', N'usp_GetMonthlyReport', N'trg_Reviews_RatingSync', N'trg_Bookings_StatusFlow', N'trg_Payments_Audit', N'trg_Users_StatusSync', N'trg_Customers_StatusCopy', N'trg_Providers_StatusCopy')
+      AND o.name IN (N'fn_DayOfWeek', N'fn_ManilaNow', N'fn_GetFullName', N'fn_GetProviderAvgRating', N'fn_CountProviderJobsOnDate', N'fn_IsProviderAvailable', N'fn_HasBookingConflict', N'fn_GetAvailableSlots', N'vw_BookingOverview', N'vw_ProviderDirectory', N'usp_RegisterCustomer', N'usp_RegisterProvider', N'usp_GetUserForLogin', N'usp_ApproveProvider', N'usp_UpdateAccountStatus', N'usp_ModerateReview', N'usp_AddService', N'usp_SearchServices', N'usp_GetProviderAvailability', N'usp_AddAvailability', N'usp_UpdateAvailability', N'usp_DeleteAvailability', N'usp_CreateBooking', N'usp_CancelBooking', N'usp_UpdateBookingStatus', N'usp_ApproveAndPay', N'usp_ConfirmCashReceived', N'usp_AddReview', N'usp_GetMonthlyReport', N'usp_GetNotifications', N'usp_GetBookingsNeedingAttention', N'trg_Reviews_RatingSync', N'trg_Bookings_StatusFlow', N'trg_PaymentsDtl_Audit', N'trg_Users_StatusSync', N'trg_Customers_StatusCopy', N'trg_Providers_StatusCopy')
       AND ISNULL(OBJECT_DEFINITION(o.object_id), N'') NOT LIKE N'%SERVISYO-DB-V2%'
     ORDER BY o.name
     FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'');
@@ -113,6 +133,7 @@ CREATE TABLE USERS (
     FIRST_NAME                   NVARCHAR(100)   NOT NULL,
     LAST_NAME                    NVARCHAR(100)   NOT NULL,
     MIDDLE_NAME                  NVARCHAR(100)   NULL,
+    NOTIFICATIONS_SEEN_AT        DATETIME2       NULL,      -- v2.3: the bell; newer notifications are unread
     PASSWORD_HASH                NVARCHAR(255)   NOT NULL,
     PHONE_NUMBER                 NVARCHAR(11)    NULL,      -- Philippine mobile, 09XXXXXXXXX
     ROLE                         NVARCHAR(50)    NOT NULL,
@@ -276,34 +297,33 @@ CREATE TABLE BOOKING_SERVICES (
 CREATE INDEX IX_BOOKING_SERVICES_SERVICE_ID ON BOOKING_SERVICES (SERVICE_ID);
 CREATE UNIQUE INDEX IX_BOOKING_SERVICES_BOOKING_ID_SERVICE_ID ON BOOKING_SERVICES (BOOKING_ID, SERVICE_ID);
 
-CREATE TABLE PAYMENTS (
+CREATE TABLE PAYMENTS (                                     -- v2.3: the list of payment methods
     PAYMENT_ID                   INT             IDENTITY(1,1) NOT NULL,
-    AMOUNT                       DECIMAL(10,2)   NOT NULL,
+    METHOD_NAME                  NVARCHAR(50)    NOT NULL,  -- 1 Cash on Completion, 2 GCash, 3 Maya
+    CONSTRAINT PK_PAYMENTS PRIMARY KEY (PAYMENT_ID)
+);
+CREATE UNIQUE INDEX IX_PAYMENTS_METHOD_NAME ON PAYMENTS (METHOD_NAME);
+
+CREATE TABLE PAYMENTS_DTL (                                 -- v2.3: each booking's payment (BOOKINGS <-> PAYMENTS)
+    PAYMENT_DTL_ID               INT             IDENTITY(1,1) NOT NULL,
     BOOKING_ID                   INT             NOT NULL,
     CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-    PAID_AT                      DATETIME2       NULL,
-    PAYMENT_METHOD               NVARCHAR(50)    NOT NULL,
+    PAID_AT                      DATETIME2       NULL,      -- cash: when the provider confirmed it
+    PAYMENT_ID                   INT             NOT NULL,
     PAYMENT_STATUS               NVARCHAR(50)    NOT NULL,
     TRANSACTION_REFERENCE        NVARCHAR(50)    NOT NULL,
-    CONSTRAINT PK_PAYMENTS PRIMARY KEY (PAYMENT_ID),
-    CONSTRAINT FK_PAYMENTS_BOOKINGS_BOOKING_ID FOREIGN KEY (BOOKING_ID) REFERENCES BOOKINGS(BOOKING_ID),
-    CONSTRAINT CK_PAYMENTS_AMOUNT CHECK ([AMOUNT] >= 0),
-    CONSTRAINT CK_PAYMENTS_METHOD CHECK ([PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')),
-    CONSTRAINT CK_PAYMENTS_PAID_AT CHECK ([PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL),
-    CONSTRAINT CK_PAYMENTS_PENDING_CASH CHECK ([PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_METHOD] = 'CashOnCompletion'),
-    CONSTRAINT CK_PAYMENTS_STATUS CHECK ([PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded'))
+    CONSTRAINT PK_PAYMENTS_DTL PRIMARY KEY (PAYMENT_DTL_ID),
+    CONSTRAINT FK_PAYMENTS_DTL_BOOKINGS_BOOKING_ID FOREIGN KEY (BOOKING_ID) REFERENCES BOOKINGS(BOOKING_ID),
+    CONSTRAINT FK_PAYMENTS_DTL_PAYMENTS_PAYMENT_ID FOREIGN KEY (PAYMENT_ID) REFERENCES PAYMENTS(PAYMENT_ID),
+    CONSTRAINT CK_PAYMENTS_DTL_PAID_AT CHECK ([PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL),
+    -- only cash (PAYMENTS row 1, Cash on Completion) can wait to be collected
+    CONSTRAINT CK_PAYMENTS_DTL_PENDING_CASH CHECK ([PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_ID] = 1),
+    CONSTRAINT CK_PAYMENTS_DTL_STATUS CHECK ([PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded'))
 );
-CREATE UNIQUE INDEX IX_PAYMENTS_BOOKING_ID ON PAYMENTS (BOOKING_ID);
-CREATE UNIQUE INDEX IX_PAYMENTS_TRANSACTION_REFERENCE ON PAYMENTS (TRANSACTION_REFERENCE);
-
-CREATE TABLE CASH_PAYMENT_DETAILS (
-    PAYMENT_ID                   INT             NOT NULL,
-    COLLECTED_AT                 DATETIME2       NULL,
-    IS_COLLECTED_BY_PROVIDER     BIT             NOT NULL DEFAULT 0,
-    CONSTRAINT PK_CASH_PAYMENT_DETAILS PRIMARY KEY (PAYMENT_ID),
-    CONSTRAINT FK_CASH_PAYMENT_DETAILS_PAYMENTS_PAYMENT_ID FOREIGN KEY (PAYMENT_ID) REFERENCES PAYMENTS(PAYMENT_ID),
-    CONSTRAINT CK_CASH_COLLECTED CHECK (([IS_COLLECTED_BY_PROVIDER] = 0 AND [COLLECTED_AT] IS NULL) OR ([IS_COLLECTED_BY_PROVIDER] = 1 AND [COLLECTED_AT] IS NOT NULL))
-);
+CREATE UNIQUE INDEX IX_PAYMENTS_DTL_BOOKING_ID ON PAYMENTS_DTL (BOOKING_ID);
+CREATE INDEX IX_PAYMENTS_DTL_PAYMENT_ID ON PAYMENTS_DTL (PAYMENT_ID);
+CREATE UNIQUE INDEX IX_PAYMENTS_DTL_TRANSACTION_REFERENCE ON PAYMENTS_DTL (TRANSACTION_REFERENCE);
+-- triggers on PAYMENTS_DTL: trg_PaymentsDtl_Audit
 
 CREATE TABLE REVIEWS (
     REVIEW_ID                    INT             IDENTITY(1,1) NOT NULL,
@@ -333,17 +353,6 @@ CREATE TABLE MESSAGES (
 CREATE INDEX IX_MESSAGES_RECEIVER_ID ON MESSAGES (RECEIVER_ID);
 CREATE INDEX IX_MESSAGES_SENDER_ID ON MESSAGES (SENDER_ID);
 
-CREATE TABLE NOTIFICATIONS (
-    NOTIFICATION_ID              INT             IDENTITY(1,1) NOT NULL,
-    CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-    IS_READ                      BIT             NOT NULL,
-    MESSAGE                      NVARCHAR(255)   NOT NULL,
-    USER_ID                      INT             NOT NULL,
-    CONSTRAINT PK_NOTIFICATIONS PRIMARY KEY (NOTIFICATION_ID),
-    CONSTRAINT FK_NOTIFICATIONS_USERS_USER_ID FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID)
-);
-CREATE INDEX IX_NOTIFICATIONS_USER_ID ON NOTIFICATIONS (USER_ID);
-
 CREATE TABLE ADMIN_ACTIONS (
     ACTION_ID                    INT             IDENTITY(1,1) NOT NULL,
     ACTION_TYPE                  NVARCHAR(50)    NOT NULL,
@@ -371,40 +380,6 @@ CREATE INDEX IX_ADMIN_ACTIONS_TARGET_CUSTOMER_ID ON ADMIN_ACTIONS (TARGET_CUSTOM
 CREATE INDEX IX_ADMIN_ACTIONS_TARGET_PROVIDER_ID ON ADMIN_ACTIONS (TARGET_PROVIDER_ID);
 CREATE INDEX IX_ADMIN_ACTIONS_TARGET_REVIEW_ID ON ADMIN_ACTIONS (TARGET_REVIEW_ID);
 
-CREATE TABLE BOOKING_REPORTS (
-    REPORT_ID                    INT             IDENTITY(1,1) NOT NULL,
-    BOOKING_ID                   INT             NOT NULL,
-    CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-    REASON                       NVARCHAR(255)   NOT NULL,
-    REPORTED_BY_USER_ID          INT             NOT NULL,
-    RESOLUTION_NOTE              NVARCHAR(255)   NULL,
-    RESOLVED_AT                  DATETIME2       NULL,
-    RESOLVED_BY_USER_ID          INT             NULL,
-    STATUS                       NVARCHAR(50)    NOT NULL,
-    CONSTRAINT PK_BOOKING_REPORTS PRIMARY KEY (REPORT_ID),
-    CONSTRAINT FK_BOOKING_REPORTS_BOOKINGS_BOOKING_ID FOREIGN KEY (BOOKING_ID) REFERENCES BOOKINGS(BOOKING_ID),
-    CONSTRAINT FK_BOOKING_REPORTS_USERS_REPORTED_BY_USER_ID FOREIGN KEY (REPORTED_BY_USER_ID) REFERENCES USERS(USER_ID),
-    CONSTRAINT FK_BOOKING_REPORTS_USERS_RESOLVED_BY_USER_ID FOREIGN KEY (RESOLVED_BY_USER_ID) REFERENCES USERS(USER_ID),
-    CONSTRAINT CK_REPORTS_STATUS CHECK ([STATUS] IN ('Open','Under Review','Resolved'))
-);
-CREATE INDEX IX_BOOKING_REPORTS_BOOKING_ID ON BOOKING_REPORTS (BOOKING_ID);
-CREATE INDEX IX_BOOKING_REPORTS_REPORTED_BY_USER_ID ON BOOKING_REPORTS (REPORTED_BY_USER_ID);
-CREATE INDEX IX_BOOKING_REPORTS_RESOLVED_BY_USER_ID ON BOOKING_REPORTS (RESOLVED_BY_USER_ID);
-
-CREATE TABLE EMAIL_OTPS (
-    EMAIL_OTP_ID                 INT             IDENTITY(1,1) NOT NULL,
-    ATTEMPTS                     INT             NOT NULL,
-    CODE_HASH                    NVARCHAR(255)   NOT NULL,
-    CONSUMED_AT                  DATETIME2       NULL,
-    CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
-    EXPIRES_AT                   DATETIME2       NOT NULL,
-    PURPOSE                      NVARCHAR(30)    NOT NULL,
-    USER_ID                      INT             NOT NULL,
-    CONSTRAINT PK_EMAIL_OTPS PRIMARY KEY (EMAIL_OTP_ID),
-    CONSTRAINT FK_EMAIL_OTPS_USERS_USER_ID FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID)
-);
-CREATE INDEX IX_EMAIL_OTPS_USER_ID_PURPOSE ON EMAIL_OTPS (USER_ID, PURPOSE);
-
 CREATE TABLE SYSTEM_LOGS (
     SYSTEM_LOG_ID                INT             IDENTITY(1,1) NOT NULL,
     ACTION_TYPE                  NVARCHAR(20)    NOT NULL,
@@ -422,7 +397,6 @@ CREATE INDEX IX_SYSTEM_LOGS_ACTION_TYPE_USER_ROLE ON SYSTEM_LOGS (ACTION_TYPE, U
    Added by the DatabaseV2 migration (EF model, see ServisyoDbContext.cs):
 CREATE INDEX IX_BOOKINGS_PROVIDER_STATUS ON BOOKINGS (PROVIDER_ID, STATUS);              -- provider "Booking Requests" lists
 CREATE INDEX IX_BOOKINGS_DATE_PAYMENT ON BOOKINGS (BOOKING_DATE, PAYMENT_STATUS);        -- monthly report
-CREATE INDEX IX_NOTIFICATIONS_USER_UNREAD ON NOTIFICATIONS (USER_ID, IS_READ);           -- bell count (replaces IX_NOTIFICATIONS_USER_ID)
 CREATE INDEX IX_MESSAGES_RECEIVER_UNREAD ON MESSAGES (RECEIVER_ID, IS_READ);             -- unread badge (replaces IX_MESSAGES_RECEIVER_ID)
 ALTER TABLE BOOKINGS ADD CONSTRAINT CK_BOOKINGS_FEE CHECK ([TOTAL_FEE] >= 0);
 ALTER TABLE SERVICE_PROVIDERS ADD CONSTRAINT CK_PROVIDERS_COUNTS CHECK ([REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0));
@@ -605,7 +579,9 @@ CREATE OR ALTER VIEW dbo.vw_BookingOverview
 AS
 /* SERVISYO-DB-V2
    One row per booking with the people, the services, the money and the payment, ready for reports and SSMS.
-   Times are stored in UTC; CREATED_AT_CEBU shows them in Cebu time. */
+   Times are stored in UTC; CREATED_AT_CEBU shows them in Cebu time.
+   v2.3: the payment comes from PAYMENTS_DTL, its method name from the PAYMENTS list. IS_COLLECTED_BY_PROVIDER is
+   calculated (a cash payment that is Paid), no longer stored. */
 SELECT b.BOOKING_ID,
        CONCAT(N'BK-', YEAR(b.CREATED_AT), N'-',
               CASE WHEN b.BOOKING_ID < 10000 THEN RIGHT(CONCAT(N'0000', b.BOOKING_ID), 4) ELSE CAST(b.BOOKING_ID AS NVARCHAR(12)) END) AS REFERENCE,
@@ -628,18 +604,19 @@ SELECT b.BOOKING_ID,
               WHERE bs.BOOKING_ID = b.BOOKING_ID
               ORDER BY bs.BOOKING_SERVICE_ID
               FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'') AS SERVICES,
-       pay.PAYMENT_METHOD,
+       m.METHOD_NAME AS PAYMENT_METHOD,
        pay.PAYMENT_STATUS AS PAYMENT_RECORD_STATUS,
        pay.TRANSACTION_REFERENCE,
-       cash.IS_COLLECTED_BY_PROVIDER,
+       CAST(CASE WHEN m.METHOD_NAME = N'Cash on Completion' AND pay.PAYMENT_STATUS = N'Paid' THEN 1
+                 WHEN m.METHOD_NAME = N'Cash on Completion' THEN 0 END AS BIT) AS IS_COLLECTED_BY_PROVIDER,
        b.SERVICE_LOCATION,
        DATEADD(HOUR, 8, b.CREATED_AT) AS CREATED_AT_CEBU
 FROM dbo.BOOKINGS b
 JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
 JOIN dbo.USERS cu ON cu.USER_ID = c.USER_ID
 JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = b.PROVIDER_ID
-LEFT JOIN dbo.PAYMENTS pay ON pay.BOOKING_ID = b.BOOKING_ID
-LEFT JOIN dbo.CASH_PAYMENT_DETAILS cash ON cash.PAYMENT_ID = pay.PAYMENT_ID;
+LEFT JOIN dbo.PAYMENTS_DTL pay ON pay.BOOKING_ID = b.BOOKING_ID
+LEFT JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = pay.PAYMENT_ID;
 GO
 
 -- vw_ProviderDirectory
@@ -770,7 +747,7 @@ AS
 BEGIN
     /* SERVISYO-DB-V2
        Service-provider sign-up in ONE call: USERS + SERVICE_PROVIDERS (APPROVAL_STATUS = Pending until an
-       administrator decides) + a bell notification for every active administrator, all or nothing.
+       administrator decides), all or nothing. The administrators' bell shows it (usp_GetNotifications).
        Used by the website (AuthService.RegisterProviderAsync). */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
@@ -834,14 +811,8 @@ BEGIN
                 N'Pending', SYSUTCDATETIME(), NULL, N'Active');
         SET @NewProviderId = CAST(SCOPE_IDENTITY() AS INT);
 
-        -- tell every active administrator (their bell)
-        DECLARE @Note NVARCHAR(700) = CONCAT(N'New provider application from ', @BusinessName, N' (', @FirstName, N' ', @LastName, N').');
-        IF LEN(@Note) > 255 SET @Note = LEFT(@Note, 252) + N'...';
-
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        SELECT u.USER_ID, @Note, 0, SYSUTCDATETIME()
-        FROM dbo.USERS u
-        WHERE u.ROLE = N'Administrator' AND u.ACCOUNT_STATUS = N'Active';
+        -- v2.3: nothing is stored for the administrators' bell. usp_GetNotifications shows every Pending
+        -- application straight from SERVICE_PROVIDERS.
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -884,7 +855,7 @@ AS
 BEGIN
     /* SERVISYO-DB-V2
        An ACTIVE administrator approves or rejects a PENDING provider application:
-       status (+ DATE_APPROVED), ADMIN_ACTIONS log and a notification for the provider, all or nothing.
+       status (+ DATE_APPROVED) and the ADMIN_ACTIONS log, all or nothing. The provider's bell shows the decision.
        If two administrators decide at the same moment, only the first one changes anything. */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
@@ -919,8 +890,7 @@ BEGIN
         INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID, REASON, CREATED_AT)
         VALUES (@AdminUserId, @Decision, N'SERVICE_PROVIDER', @ProviderId, @Reason, SYSUTCDATETIME());
 
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@ProviderUserId, N'Your provider application was ' + @Decision + N'.', 0, SYSUTCDATETIME());
+        -- v2.3: the provider's bell shows this decision from the ADMIN_ACTIONS row above (usp_GetNotifications)
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -993,7 +963,8 @@ BEGIN
                 CASE WHEN @Role = N'Service Provider' THEN @ProviderId END,
                 @Reason, SYSUTCDATETIME());
 
-        -- a provider who can no longer work: cancel their Pending bookings and tell those customers
+        -- a provider who can no longer work: cancel their Pending bookings. v2.3: those customers' bells show
+        -- the cancellation from BOOKINGS + this ADMIN_ACTIONS row (usp_GetNotifications); nothing else is stored.
         DECLARE @Cancelled TABLE (BOOKING_ID INT PRIMARY KEY, CUSTOMER_USER_ID INT, BOOKING_DATE DATE);
         IF @Role = N'Service Provider' AND @NewStatus IN (N'Suspended', N'Deactivated') AND @ProviderId IS NOT NULL
         BEGIN
@@ -1003,13 +974,6 @@ BEGIN
             FROM dbo.BOOKINGS b
             JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
             WHERE b.PROVIDER_ID = @ProviderId AND b.STATUS = N'Pending';
-
-            INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-            SELECT x.CUSTOMER_USER_ID,
-                   CONCAT(N'Your booking #', x.BOOKING_ID, N' on ', CONVERT(NVARCHAR(10), x.BOOKING_DATE, 23),
-                          N' was cancelled because the service provider is no longer available. Please book another provider.'),
-                   0, SYSUTCDATETIME()
-            FROM @Cancelled x;
         END
 
         IF @tc = 0 COMMIT TRANSACTION;
@@ -1382,7 +1346,7 @@ BEGIN
        provider in active categories; minimum notice days; at most 90 days ahead; not a day off; the whole job fits the
        working hours and breaks; starts on a 30-minute step and not in the past; no overlap with another active booking;
        daily job limit. The provider row is locked first, so two requests for the same provider are checked one after
-       the other (no double booking). New bookings start as Pending / Unpaid; the provider gets a notification. */
+       the other (no double booking). New bookings start as Pending / Unpaid; the provider's bell shows them. */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
@@ -1482,8 +1446,7 @@ BEGIN
         SELECT @NewBookingId, ch.SERVICE_ID, ch.PRICE, ch.DURATION_MINUTES
         FROM @Chosen ch;
 
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@ProviderUserId, CONCAT(N'You have a new booking request (Booking #', @NewBookingId, N').'), 0, SYSUTCDATETIME());
+        -- v2.3: the provider's bell shows the new Pending booking itself (usp_GetNotifications); nothing else is stored
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -1528,8 +1491,7 @@ BEGIN
         SET STATUS = N'Cancelled', UPDATED_AT = SYSUTCDATETIME()
         WHERE BOOKING_ID = @BookingId;
 
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@ProviderUserId, CONCAT(N'Booking #', @BookingId, N' was cancelled by the customer.'), 0, SYSUTCDATETIME());
+        -- v2.3: the provider's bell shows the cancellation from BOOKINGS (usp_GetNotifications)
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -1551,7 +1513,7 @@ BEGIN
        The ASSIGNED provider (found from their USER_ID) moves one of their bookings:
        Pending -> Accepted | Rejected, Accepted -> In Progress (only after the customer paid or chose cash on
        completion), In Progress -> Completed. Accepting must not overlap another Accepted / In Progress job.
-       The customer gets the PDF's notification "Your booking #N is now <status>.". Customers cancel with usp_CancelBooking. */
+       The customer's bell shows the PDF's "Your booking #N is now <status>." (usp_GetNotifications). Customers cancel with usp_CancelBooking. */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
@@ -1594,7 +1556,7 @@ BEGIN
 
         IF @NewStatus = N'In Progress'
            AND @Payment <> N'Paid'
-           AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS WHERE BOOKING_ID = @BookingId AND PAYMENT_STATUS = N'PendingCollection')
+           AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL WHERE BOOKING_ID = @BookingId AND PAYMENT_STATUS = N'PendingCollection')
             THROW 50144, N'The booking is waiting for the customer to approve and pay the quotation, so it can''t start yet.', 1;
 
         IF @NewStatus = N'Accepted'
@@ -1605,8 +1567,7 @@ BEGIN
         SET STATUS = @NewStatus, UPDATED_AT = SYSUTCDATETIME()
         WHERE BOOKING_ID = @BookingId;
 
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@CustomerUserId, CONCAT(N'Your booking #', @BookingId, N' is now ', @NewStatus, N'.'), 0, SYSUTCDATETIME());
+        -- v2.3: the customer's bell shows the new status from BOOKINGS (usp_GetNotifications)
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -1629,10 +1590,13 @@ AS
 BEGIN
     /* SERVISYO-DB-V2  (DEMO payment: no money moves)
        The customer approves an Accepted quotation of THEIR OWN booking that has no payment yet:
-         CashOnCompletion -> PAYMENTS (PendingCollection, ref CASH-<year>-<booking>) + CASH_PAYMENT_DETAILS;
-                             BOOKINGS.PAYMENT_STATUS stays Unpaid until the provider confirms the cash.
-         MockEWallet      -> PAYMENTS (Paid, ref GCASH-######## / MAYA-########); BOOKINGS.PAYMENT_STATUS = Paid.
-       The amount is always the booking's TOTAL_FEE. The provider gets a notification. */
+         CashOnCompletion -> PAYMENTS_DTL row with PAYMENTS 'Cash on Completion' (PendingCollection,
+                             ref CASH-<year>-<booking>); BOOKINGS.PAYMENT_STATUS stays Unpaid until the provider
+                             confirms the cash.
+         MockEWallet      -> PAYMENTS_DTL row with PAYMENTS 'GCash' or 'Maya' (Paid, ref GCASH-######## /
+                             MAYA-########); BOOKINGS.PAYMENT_STATUS = Paid.
+       v2.3: the amount is not stored again: it is always the booking's TOTAL_FEE. The provider's bell shows the
+       approval from PAYMENTS_DTL (usp_GetNotifications). */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
@@ -1667,12 +1631,18 @@ BEGIN
 
         IF @Status IS NULL
             THROW 50139, N'That booking could not be found.', 1;
-        IF @PayStatus = N'Paid' OR EXISTS (SELECT 1 FROM dbo.PAYMENTS WITH (UPDLOCK, HOLDLOCK) WHERE BOOKING_ID = @BookingId)
+        IF @PayStatus = N'Paid' OR EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL WITH (UPDLOCK, HOLDLOCK) WHERE BOOKING_ID = @BookingId)
             THROW 50147, N'This booking is already paid (or cash on completion was already chosen).', 1;
         IF @Status <> N'Accepted' OR @PayStatus <> N'Unpaid'
             THROW 50148, N'Only an Accepted quotation that is not paid yet can be approved and paid.', 1;
 
         DECLARE @IsCash BIT = CASE WHEN @PaymentMethod = N'CashOnCompletion' THEN 1 ELSE 0 END;
+
+        -- the payment method row in the PAYMENTS list (referenced, never copied)
+        DECLARE @PaymentId INT = (SELECT PAYMENT_ID FROM dbo.PAYMENTS
+                                  WHERE METHOD_NAME = CASE WHEN @IsCash = 1 THEN N'Cash on Completion' ELSE @Wallet END);
+        IF @PaymentId IS NULL
+            THROW 50146, N'That payment method is not in the PAYMENTS list.', 1;
         DECLARE @Prefix NVARCHAR(10) = CASE WHEN @Wallet = N'Maya' THEN N'MAYA' ELSE N'GCASH' END;
         DECLARE @Tries INT = 0;
 
@@ -1683,36 +1653,23 @@ BEGIN
         BEGIN
             -- a test reference: the wallet prefix and 8 random digits, never used before
             SET @TransactionReference = CONCAT(@Prefix, N'-', RIGHT(CONCAT(N'0000000', ABS(CAST(CHECKSUM(NEWID()) AS BIGINT)) % 100000000), 8));
-            WHILE EXISTS (SELECT 1 FROM dbo.PAYMENTS WHERE TRANSACTION_REFERENCE = @TransactionReference) AND @Tries < 10
+            WHILE EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL WHERE TRANSACTION_REFERENCE = @TransactionReference) AND @Tries < 10
             BEGIN
                 SET @Tries += 1;
                 SET @TransactionReference = CONCAT(@Prefix, N'-', RIGHT(CONCAT(N'0000000', ABS(CAST(CHECKSUM(NEWID()) AS BIGINT)) % 100000000), 8));
             END
         END
 
-        INSERT INTO dbo.PAYMENTS (BOOKING_ID, AMOUNT, PAYMENT_METHOD, PAYMENT_STATUS, TRANSACTION_REFERENCE, CREATED_AT, PAID_AT)
-        VALUES (@BookingId, @Fee, @PaymentMethod,
+        INSERT INTO dbo.PAYMENTS_DTL (BOOKING_ID, PAYMENT_ID, PAYMENT_STATUS, TRANSACTION_REFERENCE, CREATED_AT, PAID_AT)
+        VALUES (@BookingId, @PaymentId,
                 CASE WHEN @IsCash = 1 THEN N'PendingCollection' ELSE N'Paid' END,
                 @TransactionReference, SYSUTCDATETIME(),
                 CASE WHEN @IsCash = 1 THEN NULL ELSE SYSUTCDATETIME() END);
-
-        IF @IsCash = 1
-            INSERT INTO dbo.CASH_PAYMENT_DETAILS (PAYMENT_ID, IS_COLLECTED_BY_PROVIDER, COLLECTED_AT)
-            VALUES (CAST(SCOPE_IDENTITY() AS INT), 0, NULL);
 
         UPDATE dbo.BOOKINGS
         SET PAYMENT_STATUS = CASE WHEN @IsCash = 1 THEN PAYMENT_STATUS ELSE N'Paid' END,
             UPDATED_AT = SYSUTCDATETIME()
         WHERE BOOKING_ID = @BookingId;
-
-        DECLARE @Amount NVARCHAR(40) = N'PHP ' + CONVERT(NVARCHAR(30), CAST(@Fee AS MONEY), 1);
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@ProviderUserId,
-                CASE WHEN @IsCash = 1
-                     THEN CONCAT(N'Booking #', @BookingId, N' was approved. The customer will pay ', @Amount, N' in cash when the job is done. It is now scheduled.')
-                     ELSE CONCAT(N'Booking #', @BookingId, N' was approved and paid by ', @Wallet, N' (test, ', @Amount, N', ref ', @TransactionReference, N'). It is now scheduled.')
-                END,
-                0, SYSUTCDATETIME());
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -1731,8 +1688,9 @@ AS
 BEGIN
     /* SERVISYO-DB-V2
        The ASSIGNED provider confirms the cash of a COMPLETED cash-on-completion booking (only once):
-       CASH_PAYMENT_DETAILS collected + time, PAYMENTS -> Paid + PAID_AT, BOOKINGS.PAYMENT_STATUS -> Paid,
-       and a notification for the customer. */
+       PAYMENTS_DTL -> Paid + PAID_AT, BOOKINGS.PAYMENT_STATUS -> Paid. v2.3: "cash collected" is not stored again:
+       it is a cash payment whose status is Paid, collected at PAID_AT. The customer's bell shows it from
+       PAYMENTS_DTL (usp_GetNotifications). */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
@@ -1751,36 +1709,28 @@ BEGIN
     BEGIN TRY
         IF @tc = 0 BEGIN TRANSACTION;
 
-        DECLARE @Status NVARCHAR(50), @CustomerUserId INT, @PaymentId INT, @Method NVARCHAR(50),
-                @PayStatus NVARCHAR(50), @Collected BIT, @Amount DECIMAL(10,2), @Ref NVARCHAR(50);
-        SELECT @Status = b.STATUS, @CustomerUserId = c.USER_ID,
-               @PaymentId = pay.PAYMENT_ID, @Method = pay.PAYMENT_METHOD, @PayStatus = pay.PAYMENT_STATUS,
-               @Collected = cash.IS_COLLECTED_BY_PROVIDER, @Amount = pay.AMOUNT, @Ref = pay.TRANSACTION_REFERENCE
+        DECLARE @Status NVARCHAR(50), @PaymentDtlId INT, @Method NVARCHAR(50), @PayStatus NVARCHAR(50);
+        SELECT @Status = b.STATUS,
+               @PaymentDtlId = d.PAYMENT_DTL_ID, @Method = m.METHOD_NAME, @PayStatus = d.PAYMENT_STATUS
         FROM dbo.BOOKINGS b WITH (UPDLOCK)
-        JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
-        LEFT JOIN dbo.PAYMENTS pay WITH (UPDLOCK) ON pay.BOOKING_ID = b.BOOKING_ID
-        LEFT JOIN dbo.CASH_PAYMENT_DETAILS cash WITH (UPDLOCK) ON cash.PAYMENT_ID = pay.PAYMENT_ID
+        LEFT JOIN dbo.PAYMENTS_DTL d WITH (UPDLOCK) ON d.BOOKING_ID = b.BOOKING_ID
+        LEFT JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = d.PAYMENT_ID
         WHERE b.BOOKING_ID = @BookingId
           AND b.PROVIDER_ID = @ProviderId;
 
         IF @Status IS NULL
             THROW 50139, N'That booking could not be found.', 1;
-        IF @PaymentId IS NULL OR @Method <> N'CashOnCompletion' OR @Collected IS NULL
+        IF @PaymentDtlId IS NULL OR @Method <> N'Cash on Completion'
             THROW 50149, N'This booking is not a cash-on-completion booking.', 1;
-        IF @Collected = 1 OR @PayStatus <> N'PendingCollection'
+        IF @PayStatus <> N'PendingCollection'
             THROW 50150, N'The cash for this booking was already confirmed.', 1;
         IF @Status <> N'Completed'
             THROW 50151, N'Confirm the cash after you mark the job completed.', 1;
 
-        UPDATE dbo.CASH_PAYMENT_DETAILS SET IS_COLLECTED_BY_PROVIDER = 1, COLLECTED_AT = SYSUTCDATETIME() WHERE PAYMENT_ID = @PaymentId;
-        UPDATE dbo.PAYMENTS SET PAYMENT_STATUS = N'Paid', PAID_AT = SYSUTCDATETIME() WHERE PAYMENT_ID = @PaymentId;
-        UPDATE dbo.BOOKINGS SET PAYMENT_STATUS = N'Paid', UPDATED_AT = SYSUTCDATETIME() WHERE BOOKING_ID = @BookingId;
-
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@CustomerUserId,
-                LEFT(CONCAT(@BusinessName, N' confirmed receiving your PHP ', CONVERT(NVARCHAR(30), CAST(@Amount AS MONEY), 1),
-                            N' cash payment for booking #', @BookingId, N' (ref ', @Ref, N').'), 255),
-                0, SYSUTCDATETIME());
+        -- one moment for both rows, so the customer's bell shows the cash confirmation as this booking's latest news
+        DECLARE @Now DATETIME2 = SYSUTCDATETIME();
+        UPDATE dbo.PAYMENTS_DTL SET PAYMENT_STATUS = N'Paid', PAID_AT = @Now WHERE PAYMENT_DTL_ID = @PaymentDtlId;
+        UPDATE dbo.BOOKINGS SET PAYMENT_STATUS = N'Paid', UPDATED_AT = @Now WHERE BOOKING_ID = @BookingId;
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -1802,7 +1752,7 @@ AS
 BEGIN
     /* SERVISYO-DB-V2
        The customer of a COMPLETED booking leaves ONE review (1 to 5 stars, comment up to 255 characters).
-       The provider's AVG_RATING and REVIEW_COUNT are updated by trg_Reviews_RatingSync; the provider is notified. */
+       The provider's AVG_RATING and REVIEW_COUNT are updated by trg_Reviews_RatingSync; the provider's bell shows the review. */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
@@ -1838,11 +1788,7 @@ BEGIN
         VALUES (@BookingId, @Rating, @Comment, SYSUTCDATETIME(), N'Visible');
         SET @NewReviewId = CAST(SCOPE_IDENTITY() AS INT);
 
-        INSERT INTO dbo.NOTIFICATIONS (USER_ID, MESSAGE, IS_READ, CREATED_AT)
-        VALUES (@ProviderUserId,
-                LEFT(CONCAT(LTRIM(RTRIM(@First)), CASE WHEN LEN(LTRIM(RTRIM(@Last))) > 0 THEN N' ' + UPPER(LEFT(LTRIM(@Last), 1)) + N'.' ELSE N'' END,
-                            N' left a ', @Rating, N'-star review for booking #', @BookingId, N'.'), 255),
-                0, SYSUTCDATETIME());
+        -- v2.3: the provider's bell shows the review from REVIEWS (usp_GetNotifications)
 
         IF @tc = 0 COMMIT TRANSACTION;
     END TRY
@@ -1916,12 +1862,204 @@ BEGIN
     GROUP BY sc.CATEGORY_NAME
     ORDER BY COUNT(*) DESC, sc.CATEGORY_NAME;
 
-    SELECT pay.PAYMENT_METHOD, pay.PAYMENT_STATUS, COUNT(*) AS PAYMENTS, SUM(pay.AMOUNT) AS AMOUNT
-    FROM dbo.PAYMENTS pay
-    JOIN dbo.BOOKINGS b ON b.BOOKING_ID = pay.BOOKING_ID
+    -- v2.3: the method comes from the PAYMENTS list, the amount from the booking (never stored twice)
+    SELECT m.METHOD_NAME AS PAYMENT_METHOD, d.PAYMENT_STATUS, COUNT(*) AS PAYMENTS, SUM(b.TOTAL_FEE) AS AMOUNT
+    FROM dbo.PAYMENTS_DTL d
+    JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = d.PAYMENT_ID
+    JOIN dbo.BOOKINGS b ON b.BOOKING_ID = d.BOOKING_ID
     WHERE b.BOOKING_DATE >= @First AND b.BOOKING_DATE < @Next
-    GROUP BY pay.PAYMENT_METHOD, pay.PAYMENT_STATUS
-    ORDER BY pay.PAYMENT_METHOD, pay.PAYMENT_STATUS;
+    GROUP BY m.PAYMENT_ID, m.METHOD_NAME, d.PAYMENT_STATUS
+    ORDER BY m.PAYMENT_ID, d.PAYMENT_STATUS;
+END
+GO
+
+-- usp_GetNotifications
+CREATE OR ALTER PROCEDURE dbo.usp_GetNotifications
+    @UserId INT,
+    @Top    INT = 25
+AS
+BEGIN
+    /* SERVISYO-DB-V2  (v2.3: replaces the NOTIFICATIONS table - nothing is stored, so nothing piles up)
+       The bell of ONE user, worked out from the data itself, newest first, at most 25 rows:
+         customer      - the provider's answer and the job's progress ("Your booking #N is now ..."), a booking
+                         cancelled because its provider was suspended or deactivated, and cash the provider
+                         confirmed receiving. Each booking shows only its latest news.
+         provider      - new booking requests still waiting for an answer, quotations the customer approved
+                         (and paid), bookings the customer cancelled, reviews, and the decision on the application.
+         administrator - every provider application that is still Pending.
+       IsUnread = newer than USERS.NOTIFICATIONS_SEEN_AT (set when the user opens the bell or marks all as read).
+       An unknown or inactive account gets no rows. Times are UTC. The column names match the app's C# class. */
+    SET NOCOUNT ON;
+
+    IF @Top IS NULL OR @Top < 1 OR @Top > 25 SET @Top = 25;
+
+    DECLARE @Role NVARCHAR(50), @SeenAt DATETIME2, @CustomerId INT, @ProviderId INT;
+    SELECT @Role = u.ROLE, @SeenAt = u.NOTIFICATIONS_SEEN_AT, @CustomerId = c.CUSTOMER_ID, @ProviderId = p.PROVIDER_ID
+    FROM dbo.USERS u
+    LEFT JOIN dbo.CUSTOMERS c ON c.USER_ID = u.USER_ID
+    LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.USER_ID = u.USER_ID
+    WHERE u.USER_ID = @UserId
+      AND u.ACCOUNT_STATUS = N'Active';
+    -- @Role stays NULL for an unknown or inactive account, so every part below returns nothing
+
+    DECLARE @Peso NCHAR(1) = NCHAR(8369);   -- the peso sign, written as a number so the file's encoding never matters
+
+    WITH Pay AS (
+        -- each booking's payment with the name of its method (PAYMENTS list)
+        SELECT d.BOOKING_ID, d.PAYMENT_STATUS, d.TRANSACTION_REFERENCE, d.CREATED_AT, d.PAID_AT, m.METHOD_NAME,
+               CASE WHEN m.METHOD_NAME = N'Cash on Completion' THEN 1 ELSE 0 END AS IS_CASH
+        FROM dbo.PAYMENTS_DTL d
+        JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = d.PAYMENT_ID
+    ),
+    SuspensionCancel AS (
+        -- bookings cancelled automatically when an administrator suspended or deactivated their provider
+        -- (usp_UpdateAccountStatus and the app cancel them within the same second as the ADMIN_ACTIONS row)
+        SELECT b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        WHERE b.STATUS = N'Cancelled'
+          AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS a
+                      WHERE a.TARGET_PROVIDER_ID = b.PROVIDER_ID
+                        AND a.ACTION_TYPE IN (N'Account Suspended', N'Account Deactivated')
+                        AND b.UPDATED_AT BETWEEN DATEADD(SECOND, -5, a.CREATED_AT) AND DATEADD(SECOND, 5, a.CREATED_AT))
+    ),
+    Events AS (
+        -- ===== customer: the provider's answer and the job's progress (the booking's status now)
+        SELECT CONCAT(N'B', b.BOOKING_ID) AS GRP, 2 AS PRIORITY, N'booking-update' AS KIND,
+               CONCAT(N'Your booking #', b.BOOKING_ID, N' is now ', b.STATUS, N'.') AS MESSAGE,
+               b.UPDATED_AT AS CREATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        WHERE @Role = N'Customer' AND b.CUSTOMER_ID = @CustomerId
+          AND (   b.STATUS IN (N'Rejected', N'In Progress', N'Completed')
+               OR (b.STATUS = N'Accepted' AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d WHERE d.BOOKING_ID = b.BOOKING_ID)))
+        UNION ALL
+        -- customer: cancelled because the service provider can no longer work
+        SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-cancelled',
+               CONCAT(N'Your booking #', b.BOOKING_ID, N' on ', FORMAT(b.BOOKING_DATE, 'MMM d, yyyy', 'en-US'),
+                      N' was cancelled because the service provider is no longer available. Please book another provider.'),
+               b.UPDATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        JOIN SuspensionCancel sc ON sc.BOOKING_ID = b.BOOKING_ID
+        WHERE @Role = N'Customer' AND b.CUSTOMER_ID = @CustomerId
+        UNION ALL
+        -- customer: the provider confirmed receiving the cash
+        SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-update',
+               CONCAT(sp.BUSINESS_NAME, N' confirmed receiving your ', @Peso, FORMAT(b.TOTAL_FEE, '#,##0.##', 'en-US'),
+                      N' cash payment for booking #', b.BOOKING_ID, N' (ref ', pay.TRANSACTION_REFERENCE, N').'),
+               pay.PAID_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        JOIN Pay pay ON pay.BOOKING_ID = b.BOOKING_ID
+        JOIN dbo.SERVICE_PROVIDERS sp ON sp.PROVIDER_ID = b.PROVIDER_ID
+        WHERE @Role = N'Customer' AND b.CUSTOMER_ID = @CustomerId
+          AND pay.IS_CASH = 1 AND pay.PAYMENT_STATUS = N'Paid' AND pay.PAID_AT IS NOT NULL
+        UNION ALL
+        -- ===== provider: a request that is still waiting for an answer
+        SELECT CONCAT(N'B', b.BOOKING_ID), 3, N'booking-new',
+               CONCAT(N'You have a new booking request (Booking #', b.BOOKING_ID, N').'),
+               b.CREATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId AND b.STATUS = N'Pending'
+        UNION ALL
+        -- provider: the customer approved the quotation (cash on completion, or paid by test e-wallet)
+        SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-update',
+               CASE WHEN pay.IS_CASH = 1
+                    THEN CONCAT(N'Booking #', b.BOOKING_ID, N' was approved. The customer will pay ', @Peso,
+                                FORMAT(b.TOTAL_FEE, '#,##0.##', 'en-US'), N' in cash when the job is done. It is now scheduled.')
+                    ELSE CONCAT(N'Booking #', b.BOOKING_ID, N' was approved and paid by ', pay.METHOD_NAME, N' (test, ', @Peso,
+                                FORMAT(b.TOTAL_FEE, '#,##0.##', 'en-US'), N', ref ', pay.TRANSACTION_REFERENCE, N'). It is now scheduled.')
+               END,
+               pay.CREATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        JOIN Pay pay ON pay.BOOKING_ID = b.BOOKING_ID
+        WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId
+        UNION ALL
+        -- provider: the customer cancelled (not the automatic cancellations of a suspension)
+        SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-cancelled',
+               CONCAT(N'Booking #', b.BOOKING_ID, N' was cancelled by the customer.'),
+               b.UPDATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId AND b.STATUS = N'Cancelled'
+          AND NOT EXISTS (SELECT 1 FROM SuspensionCancel sc WHERE sc.BOOKING_ID = b.BOOKING_ID)
+        UNION ALL
+        -- provider: reviews (not the ones an administrator removed)
+        SELECT CONCAT(N'R', r.REVIEW_ID), 1, N'general',
+               CONCAT(LTRIM(RTRIM(cu.FIRST_NAME)),
+                      CASE WHEN LEN(LTRIM(RTRIM(cu.LAST_NAME))) > 0 THEN N' ' + UPPER(LEFT(LTRIM(cu.LAST_NAME), 1)) + N'.' ELSE N'' END,
+                      N' left a ', r.RATING, N'-star review for booking #', b.BOOKING_ID, N'.'),
+               r.CREATED_AT, b.BOOKING_ID
+        FROM dbo.REVIEWS r
+        JOIN dbo.BOOKINGS b ON b.BOOKING_ID = r.BOOKING_ID
+        JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
+        JOIN dbo.USERS cu ON cu.USER_ID = c.USER_ID
+        WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId AND r.STATUS <> N'Removed'
+        UNION ALL
+        -- provider: the administrator's decision on the application (only the latest one is shown)
+        SELECT N'A', 1, N'application',
+               CONCAT(N'Your provider application was ', a.ACTION_TYPE, N'.'),
+               a.CREATED_AT, NULL
+        FROM dbo.ADMIN_ACTIONS a
+        WHERE @Role = N'Service Provider' AND a.TARGET_PROVIDER_ID = @ProviderId
+          AND a.ACTION_TYPE IN (N'Approved', N'Rejected')
+        UNION ALL
+        -- ===== administrator: every application that is still Pending
+        SELECT CONCAT(N'P', sp.PROVIDER_ID), 1, N'application-new',
+               CONCAT(N'New provider application from ', sp.BUSINESS_NAME, N' (', pu.FIRST_NAME, N' ', pu.LAST_NAME, N').'),
+               sp.DATE_APPLIED, NULL
+        FROM dbo.SERVICE_PROVIDERS sp
+        JOIN dbo.USERS pu ON pu.USER_ID = sp.USER_ID
+        WHERE @Role = N'Administrator' AND sp.APPROVAL_STATUS = N'Pending'
+    ),
+    Latest AS (
+        -- one row per group: the newest news of each booking (ties: the payment / cancellation wins)
+        SELECT e.GRP, e.PRIORITY, e.KIND, e.MESSAGE, e.CREATED_AT, e.BOOKING_ID,
+               ROW_NUMBER() OVER (PARTITION BY e.GRP ORDER BY e.CREATED_AT DESC, e.PRIORITY) AS RN
+        FROM Events e
+    )
+    SELECT TOP (@Top)
+           CAST(l.KIND AS NVARCHAR(30)) AS Kind,
+           CAST(LEFT(l.MESSAGE, 400) AS NVARCHAR(400)) AS Message,
+           l.CREATED_AT AS CreatedAt,
+           l.BOOKING_ID AS BookingId,
+           CAST(CASE WHEN @SeenAt IS NULL OR l.CREATED_AT > @SeenAt THEN 1 ELSE 0 END AS BIT) AS IsUnread
+    FROM Latest l
+    WHERE l.RN = 1
+    ORDER BY l.CREATED_AT DESC, l.PRIORITY, l.GRP;
+END
+GO
+
+-- usp_GetBookingsNeedingAttention
+CREATE OR ALTER PROCEDURE dbo.usp_GetBookingsNeedingAttention
+    @Top INT = 25
+AS
+BEGIN
+    /* SERVISYO-DB-V2  (v2.3: replaces the BOOKING_REPORTS table, which no screen ever filled)
+       The administrator's list of bookings that need a look, worked out from the data, newest first, at most 25:
+         - its review was flagged, or gave 1 or 2 stars (an unhappy customer);
+         - its date has passed (Cebu time) but it is still Pending or Accepted (nobody moved it on).
+       TotalCount = how many bookings need attention in all (it can be more than the 25 rows shown).
+       The column names match the app's C# class. */
+    SET NOCOUNT ON;
+
+    IF @Top IS NULL OR @Top < 1 OR @Top > 25 SET @Top = 25;
+    DECLARE @Today DATE = CAST(dbo.fn_ManilaNow() AS DATE);
+
+    SELECT TOP (@Top)
+           b.BOOKING_ID AS BookingId,
+           CAST(b.STATUS AS NVARCHAR(50)) AS Status,
+           b.BOOKING_DATE AS BookingDate,
+           CAST(CASE WHEN r.STATUS = N'Flagged' THEN CONCAT(N'Review flagged (', r.RATING, N' of 5 stars)')
+                     WHEN r.RATING <= 2 THEN CONCAT(N'Low rating (', r.RATING, N' of 5 stars)')
+                     ELSE CONCAT(N'Date passed, still ', b.STATUS) END AS NVARCHAR(100)) AS Reason,
+           CAST(cu.FIRST_NAME + N' ' + cu.LAST_NAME AS NVARCHAR(255)) AS CustomerName,
+           CAST(sp.BUSINESS_NAME AS NVARCHAR(255)) AS ProviderName,
+           COUNT(*) OVER () AS TotalCount
+    FROM dbo.BOOKINGS b
+    JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
+    JOIN dbo.USERS cu ON cu.USER_ID = c.USER_ID
+    JOIN dbo.SERVICE_PROVIDERS sp ON sp.PROVIDER_ID = b.PROVIDER_ID
+    LEFT JOIN dbo.REVIEWS r ON r.BOOKING_ID = b.BOOKING_ID AND r.STATUS <> N'Removed'
+    WHERE (r.REVIEW_ID IS NOT NULL AND (r.STATUS = N'Flagged' OR r.RATING <= 2))
+       OR (b.STATUS IN (N'Pending', N'Accepted') AND b.BOOKING_DATE < @Today)
+    ORDER BY b.BOOKING_DATE DESC, b.BOOKING_ID DESC;
 END
 GO
 
@@ -1999,20 +2137,21 @@ BEGIN
                JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
                WHERE d.STATUS = N'Accepted' AND i.STATUS = N'In Progress'
                  AND i.PAYMENT_STATUS <> N'Paid'
-                 AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS p
+                 AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL p
                                  WHERE p.BOOKING_ID = i.BOOKING_ID AND p.PAYMENT_STATUS = N'PendingCollection'))
         THROW 50161, N'A booking can start only after the customer has paid or chosen cash on completion.', 1;
 END
 GO
 
--- trg_Payments_Audit
-CREATE OR ALTER TRIGGER dbo.trg_Payments_Audit ON dbo.PAYMENTS
+-- trg_PaymentsDtl_Audit
+CREATE OR ALTER TRIGGER dbo.trg_PaymentsDtl_Audit ON dbo.PAYMENTS_DTL
 AFTER INSERT, UPDATE
 AS
 BEGIN
-    /* SERVISYO-DB-V2
-       System Logs for the PAYMENTS table (same format as the existing audit triggers): who chose cash on completion
-       or paid by test e-wallet, and when cash was confirmed. WHO comes from SESSION_CONTEXT (set by the app). */
+    /* SERVISYO-DB-V2  (v2.3: was trg_Payments_Audit on the old PAYMENTS table)
+       System Logs for each booking's payment (same format as the existing audit triggers): who chose cash on
+       completion or paid by test e-wallet, and when cash was confirmed. The method name comes from PAYMENTS and
+       the amount from BOOKINGS. WHO comes from SESSION_CONTEXT (set by the app). */
     SET NOCOUNT ON;
     DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
     DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
@@ -2021,10 +2160,13 @@ BEGIN
     INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
     SELECT @uid, @role, N'INSERT', N'Payment', i.BOOKING_ID,
            LEFT(CONCAT(N'Booking #', i.BOOKING_ID, N' payment chosen: ',
-                       CASE i.PAYMENT_METHOD WHEN N'CashOnCompletion' THEN N'cash on completion' ELSE N'test e-wallet' END,
-                       N', ', i.PAYMENT_STATUS, N', PHP ', CONVERT(VARCHAR(30), CAST(i.AMOUNT AS MONEY), 1),
+                       CASE m.METHOD_NAME WHEN N'Cash on Completion' THEN N'cash on completion'
+                                          ELSE CONCAT(N'test e-wallet (', m.METHOD_NAME, N')') END,
+                       N', ', i.PAYMENT_STATUS, N', PHP ', CONVERT(VARCHAR(30), CAST(b.TOTAL_FEE AS MONEY), 1),
                        N', ref ', i.TRANSACTION_REFERENCE, N'.'), 500), @now
     FROM inserted i
+    JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = i.PAYMENT_ID
+    JOIN dbo.BOOKINGS b ON b.BOOKING_ID = i.BOOKING_ID
     WHERE NOT EXISTS (SELECT 1 FROM deleted);
 
     INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
@@ -2032,7 +2174,7 @@ BEGIN
            LEFT(CONCAT(N'Booking #', i.BOOKING_ID, N' payment record: ', d.PAYMENT_STATUS, N' -> ', i.PAYMENT_STATUS,
                        N' (ref ', i.TRANSACTION_REFERENCE, N').'), 500), @now
     FROM inserted i
-    JOIN deleted d ON d.PAYMENT_ID = i.PAYMENT_ID
+    JOIN deleted d ON d.PAYMENT_DTL_ID = i.PAYMENT_DTL_ID
     WHERE i.PAYMENT_STATUS <> d.PAYMENT_STATUS;
 END
 GO
@@ -2164,6 +2306,10 @@ SET NOCOUNT ON;
 DECLARE @R TABLE (N INT IDENTITY(1,1), TEST NVARCHAR(200), RESULT NVARCHAR(4), DETAIL NVARCHAR(1000));
 DECLARE @A INT, @C INT, @C2 INT, @PU INT, @P INT, @S INT, @D DATE, @B INT, @B2 INT, @RevId INT, @n INT,
         @ref NVARCHAR(50), @ids NVARCHAR(20), @t NVARCHAR(200), @email NVARCHAR(155), @kw NVARCHAR(100);
+DECLARE @Note TABLE (Kind NVARCHAR(30), Message NVARCHAR(400), CreatedAt DATETIME2, BookingId INT, IsUnread BIT);
+DECLARE @Attn TABLE (BookingId INT, Status NVARCHAR(50), BookingDate DATE, Reason NVARCHAR(100), CustomerName NVARCHAR(255),
+                     ProviderName NVARCHAR(255), TotalCount INT);
+DECLARE @seen DATETIME2, @biz NVARCHAR(155), @P2 INT, @PU2 INT, @k INT;
 DECLARE @Found TABLE (SERVICE_ID INT, SERVICE_NAME NVARCHAR(100), DESCRIPTION NVARCHAR(255), PRICE DECIMAL(10,2), DURATION_MINUTES INT,
                       CATEGORY_ID INT, CATEGORY_NAME NVARCHAR(100), PROVIDER_ID INT, BUSINESS_NAME NVARCHAR(155),
                       AVG_RATING DECIMAL(2,1), REVIEW_COUNT INT);
@@ -2173,12 +2319,12 @@ SET @t = N'01 Register customer + provider (procedures), approve, add service';
 BEGIN TRY
     BEGIN TRANSACTION;
     EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
     IF EXISTS (SELECT 1 FROM dbo.USERS u JOIN dbo.CUSTOMERS c ON c.USER_ID = u.USER_ID
                WHERE u.USER_ID = @C AND u.ROLE = N'Customer' AND u.ACCOUNT_STATUS = N'Active' AND u.PHONE_NUMBER = N'09170000000')
        AND EXISTS (SELECT 1 FROM dbo.SERVICE_PROVIDERS WHERE PROVIDER_ID = @P AND USER_ID = @PU
                    AND APPROVAL_STATUS = N'Approved' AND DATE_APPROVED IS NOT NULL AND REVIEW_COUNT = 0)
-       AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @A AND MESSAGE LIKE N'New provider application from%')
-       AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @PU AND MESSAGE = N'Your provider application was Approved.')
+       AND EXISTS (SELECT 1 FROM @Note WHERE Kind = N'application' AND Message = N'Your provider application was Approved.')
        AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Approved' AND TARGET_TYPE = N'SERVICE_PROVIDER' AND TARGET_PROVIDER_ID = @P)
        AND EXISTS (SELECT 1 FROM dbo.SERVICES s JOIN dbo.PROVIDER_CATEGORIES pc ON pc.PROVIDER_ID = s.PROVIDER_ID AND pc.CATEGORY_ID = s.CATEGORY_ID
                    WHERE s.SERVICE_ID = @S AND s.PROVIDER_ID = @P)
@@ -2216,17 +2362,19 @@ ELSE
     INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(N'got ', dbo.fn_DayOfWeek('2026-10-25'), N' and ', dbo.fn_DayOfWeek('2026-10-31')));
 
 ------------------------------------------------------------------ 4
-SET @t = N'04 usp_CreateBooking: Pending / Unpaid, fee and services copied, provider notified';
+SET @t = N'04 usp_CreateBooking: Pending / Unpaid, fee and services copied, on the provider''s bell';
 BEGIN TRY
     BEGIN TRANSACTION;
     EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
     SET @ids = CAST(@S AS NVARCHAR(20));
     EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
          @ServiceLocation = N'Lahug, Cebu City', @ServiceDescription = N'Kitchen sink is leaking', @NewBookingId = @B OUTPUT;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
     IF EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'Pending' AND PAYMENT_STATUS = N'Unpaid'
                AND TOTAL_FEE = 650 AND TOTAL_DURATION_MINUTES = 60 AND END_TIME = '10:00')
        AND (SELECT COUNT(*) FROM dbo.BOOKING_SERVICES WHERE BOOKING_ID = @B AND SERVICE_ID = @S AND PRICE_SNAPSHOT = 650) = 1
-       AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @PU AND MESSAGE = CONCAT(N'You have a new booking request (Booking #', @B, N').'))
+       AND EXISTS (SELECT 1 FROM @Note WHERE Kind = N'booking-new' AND BookingId = @B AND IsUnread = 1
+                   AND Message = CONCAT(N'You have a new booking request (Booking #', @B, N').'))
        AND EXISTS (SELECT 1 FROM dbo.vw_BookingOverview WHERE BOOKING_ID = @B AND SERVICES LIKE N'Leak Repair%')
         INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
     ELSE
@@ -2336,21 +2484,26 @@ BEGIN TRY
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
     EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
 
-    IF NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS p JOIN dbo.CASH_PAYMENT_DETAILS c ON c.PAYMENT_ID = p.PAYMENT_ID
-                   WHERE p.BOOKING_ID = @B AND p.PAYMENT_METHOD = N'CashOnCompletion' AND p.PAYMENT_STATUS = N'PendingCollection'
-                     AND p.PAID_AT IS NULL AND p.AMOUNT = 650 AND c.IS_COLLECTED_BY_PROVIDER = 0 AND p.TRANSACTION_REFERENCE = @ref)
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
+    IF NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = d.PAYMENT_ID
+                   WHERE d.BOOKING_ID = @B AND d.PAYMENT_ID = 1 AND m.METHOD_NAME = N'Cash on Completion'
+                     AND d.PAYMENT_STATUS = N'PendingCollection' AND d.PAID_AT IS NULL AND d.TRANSACTION_REFERENCE = @ref)
        OR NOT EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'Accepted' AND PAYMENT_STATUS = N'Unpaid')
-        THROW 59001, N'After choosing cash: the payment rows are not as expected.', 1;
+       OR NOT EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Kind = N'booking-update'
+                      AND Message = CONCAT(N'Booking #', @B, N' was approved. The customer will pay ', NCHAR(8369), N'650 in cash when the job is done. It is now scheduled.'))
+        THROW 59001, N'After choosing cash: the payment row or the provider''s bell is not as expected.', 1;
 
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Completed';
     EXEC dbo.usp_ConfirmCashReceived @ProviderUserId = @PU, @BookingId = @B;
 
-    IF EXISTS (SELECT 1 FROM dbo.PAYMENTS p JOIN dbo.CASH_PAYMENT_DETAILS c ON c.PAYMENT_ID = p.PAYMENT_ID
-               WHERE p.BOOKING_ID = @B AND p.PAYMENT_STATUS = N'Paid' AND p.PAID_AT IS NOT NULL
-                 AND c.IS_COLLECTED_BY_PROVIDER = 1 AND c.COLLECTED_AT IS NOT NULL)
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @C;
+    IF EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d WHERE d.BOOKING_ID = @B AND d.PAYMENT_STATUS = N'Paid' AND d.PAID_AT IS NOT NULL)
+       AND EXISTS (SELECT 1 FROM dbo.vw_BookingOverview WHERE BOOKING_ID = @B AND IS_COLLECTED_BY_PROVIDER = 1)
        AND EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'Completed' AND PAYMENT_STATUS = N'Paid')
-       AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @C AND MESSAGE LIKE N'%cash payment for booking #%')
+       AND EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Kind = N'booking-update'
+                   AND Message LIKE CONCAT(N'% confirmed receiving your ', NCHAR(8369), N'650 cash payment for booking #', @B, N' (ref ', @ref, N').'))
+       AND (SELECT COUNT(*) FROM @Note WHERE BookingId = @B) = 1
        AND EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE ENTITY_NAME = N'Payment' AND ENTITY_ID = @B AND DESCRIPTION LIKE N'%PendingCollection -> Paid%')
         INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'PASS', @ref);
     ELSE
@@ -2393,8 +2546,8 @@ BEGIN TRY
     EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'MockEWallet', @Wallet = N'gcash',
          @MobileNumber = N'0917-000-0000', @TransactionReference = @ref OUTPUT;
     IF @ref LIKE N'GCASH-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' AND LEN(@ref) = 14
-       AND EXISTS (SELECT 1 FROM dbo.PAYMENTS WHERE BOOKING_ID = @B AND PAYMENT_METHOD = N'MockEWallet' AND PAYMENT_STATUS = N'Paid' AND PAID_AT IS NOT NULL)
-       AND NOT EXISTS (SELECT 1 FROM dbo.CASH_PAYMENT_DETAILS c JOIN dbo.PAYMENTS p ON p.PAYMENT_ID = c.PAYMENT_ID WHERE p.BOOKING_ID = @B)
+       AND EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = d.PAYMENT_ID
+                   WHERE d.BOOKING_ID = @B AND m.METHOD_NAME = N'GCash' AND d.PAYMENT_STATUS = N'Paid' AND d.PAID_AT IS NOT NULL)
        AND EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND PAYMENT_STATUS = N'Paid')
         INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'PASS', @ref);
     ELSE
@@ -2689,7 +2842,7 @@ BEGIN CATCH
 END CATCH;
 
 ------------------------------------------------------------------ 28
-SET @t = N'28 Suspending a provider cancels Pending bookings, keeps Accepted ones and tells the customer';
+SET @t = N'28 Suspending a provider cancels Pending bookings, keeps Accepted ones, the customer''s bell says why';
 BEGIN TRY
     BEGIN TRANSACTION;
     EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
@@ -2700,9 +2853,11 @@ BEGIN TRY
          @ServiceLocation = N'Mabolo', @ServiceDescription = N'Gets accepted', @NewBookingId = @B2 OUTPUT;
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B2, @NewStatus = N'Accepted';
     EXEC dbo.usp_UpdateAccountStatus @AdminUserId = @A, @TargetUserId = @PU, @NewStatus = N'Suspended', @Reason = N'Self-test';
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @C;
     IF EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'Cancelled')
        AND EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B2 AND STATUS = N'Accepted')
-       AND EXISTS (SELECT 1 FROM dbo.NOTIFICATIONS WHERE USER_ID = @C AND MESSAGE LIKE CONCAT(N'Your booking #', @B, N' on % was cancelled because%'))
+       AND EXISTS (SELECT 1 FROM @Note WHERE Kind = N'booking-cancelled' AND BookingId = @B
+                   AND Message LIKE CONCAT(N'Your booking #', @B, N' on % was cancelled because the service provider is no longer available.%'))
        AND EXISTS (SELECT 1 FROM dbo.SERVICE_PROVIDERS WHERE PROVIDER_ID = @P AND ACCOUNT_STATUS = N'Suspended' AND APPROVAL_STATUS = N'Approved')
        AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS WHERE ADMIN_USER_ID = @A AND ACTION_TYPE = N'Account Suspended'
                    AND TARGET_TYPE = N'SERVICE_PROVIDER' AND TARGET_PROVIDER_ID = @P)
@@ -2751,6 +2906,189 @@ BEGIN CATCH
     INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
 END CATCH;
 
+------------------------------------------------------------------ 30
+SET @t = N'30 usp_GetNotifications: each role sees its own news, each booking only its latest (v2.3)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    -- a second provider who is still waiting: on the administrator's bell until it is decided
+    SET @email = N'nora-' + LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''), 12) + N'@selftest.local';
+    SET @biz = N'Selftest Waiting ' + LEFT(REPLACE(CONVERT(NVARCHAR(36), NEWID()), N'-', N''), 8);
+    EXEC dbo.usp_RegisterProvider @FirstName = N'Nora', @MiddleName = N'Reyes', @LastName = N'Selftest', @Email = @email,
+         @PasswordHash = N'SELFTEST-NOT-A-REAL-PASSWORD-HASH-000000', @PhoneNumber = N'09181234568', @BusinessName = @biz,
+         @Description = N'Waiting for a decision', @Address = N'Talamban', @BaseFee = 300, @MinNoticeDays = 1, @MaxJobsPerDay = 3,
+         @NewUserId = @PU2 OUTPUT, @NewProviderId = @P2 OUTPUT;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @A;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE Kind = N'application-new'
+                   AND Message = CONCAT(N'New provider application from ', @biz, N' (Nora Selftest).'))
+        THROW 59030, N'The administrator does not see the Pending application.', 1;
+    EXEC dbo.usp_ApproveProvider @AdminUserId = @A, @ProviderId = @P2, @Decision = N'Rejected', @Reason = N'Self-test';
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @A;
+    IF EXISTS (SELECT 1 FROM @Note WHERE Message LIKE CONCAT(N'%', @biz, N'%'))
+        THROW 59030, N'A decided application is still on the administrator''s bell.', 1;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU2;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE Kind = N'application' AND Message = N'Your provider application was Rejected.')
+        THROW 59030, N'The rejected provider does not see the decision.', 1;
+
+    -- booking 1 is accepted: the customer sees "now Accepted", the provider's "new request" row is gone
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Accepted job', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    -- booking 2 is cancelled by its customer: only the provider is told
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C2, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '14:00',
+         @ServiceLocation = N'Mabolo', @ServiceDescription = N'Cancelled job', @NewBookingId = @B2 OUTPUT;
+    EXEC dbo.usp_CancelBooking @CustomerUserId = @C2, @BookingId = @B2;
+
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @C;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Kind = N'booking-update' AND Message = CONCAT(N'Your booking #', @B, N' is now Accepted.'))
+        THROW 59030, N'The customer does not see the accepted booking.', 1;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @C2;
+    IF EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B2)
+        THROW 59030, N'A customer is told about the booking they cancelled themselves.', 1;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
+    IF EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B)
+       OR NOT EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B2 AND Kind = N'booking-cancelled'
+                      AND Message = CONCAT(N'Booking #', @B2, N' was cancelled by the customer.'))
+       OR EXISTS (SELECT BookingId FROM @Note WHERE BookingId IS NOT NULL GROUP BY BookingId HAVING COUNT(*) > 1)
+        THROW 59030, N'The provider''s bell is not as expected.', 1;
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 31
+SET @t = N'31 usp_GetNotifications: at most 25 rows, unread = newer than NOTIFICATIONS_SEEN_AT, none when suspended';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    -- 30 waiting requests, made directly (one per day, so the active-slot index is happy)
+    SELECT @n = CUSTOMER_ID FROM dbo.CUSTOMERS WHERE USER_ID = @C;
+    SET @k = 1;
+    WHILE @k <= 30
+    BEGIN
+        INSERT INTO dbo.BOOKINGS (CUSTOMER_ID, PROVIDER_ID, BOOKING_DATE, BOOKING_TIME, TOTAL_DURATION_MINUTES, SERVICE_LOCATION,
+                                  SERVICE_DESCRIPTION, TOTAL_FEE, STATUS, PAYMENT_STATUS, CREATED_AT, UPDATED_AT)
+        VALUES (@n, @P, DATEADD(DAY, 30 + @k, @D), '09:00', 60, N'Lahug', N'Many requests', 650, N'Pending', N'Unpaid',
+                DATEADD(MINUTE, -@k, SYSUTCDATETIME()), DATEADD(MINUTE, -@k, SYSUTCDATETIME()));
+        SET @k += 1;
+    END
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU, @Top = 500;
+    IF (SELECT COUNT(*) FROM @Note) <> 25 OR EXISTS (SELECT 1 FROM @Note WHERE IsUnread = 0)
+        THROW 59031, N'Not exactly 25 rows, or some are not unread before the bell was opened.', 1;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU, @Top = 5;
+    IF (SELECT COUNT(*) FROM @Note) <> 5
+        THROW 59031, N'@Top = 5 did not return 5 rows.', 1;
+
+    -- the bell is opened: everything up to now is seen; one newer request is unread
+    SET @seen = SYSUTCDATETIME();
+    UPDATE dbo.USERS SET NOTIFICATIONS_SEEN_AT = @seen WHERE USER_ID = @PU;
+    INSERT INTO dbo.BOOKINGS (CUSTOMER_ID, PROVIDER_ID, BOOKING_DATE, BOOKING_TIME, TOTAL_DURATION_MINUTES, SERVICE_LOCATION,
+                              SERVICE_DESCRIPTION, TOTAL_FEE, STATUS, PAYMENT_STATUS, CREATED_AT, UPDATED_AT)
+    VALUES (@n, @P, DATEADD(DAY, 70, @D), '09:00', 60, N'Lahug', N'After the bell', 650, N'Pending', N'Unpaid',
+            DATEADD(SECOND, 1, @seen), DATEADD(SECOND, 1, @seen));
+    SET @B = CAST(SCOPE_IDENTITY() AS INT);
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
+    IF (SELECT COUNT(*) FROM @Note WHERE IsUnread = 1) <> 1 OR NOT EXISTS (SELECT 1 FROM @Note WHERE IsUnread = 1 AND BookingId = @B)
+        THROW 59031, N'Only the request made after the bell was opened should be unread.', 1;
+
+    -- a suspended account gets nothing
+    UPDATE dbo.USERS SET ACCOUNT_STATUS = N'Suspended' WHERE USER_ID = @PU;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
+    IF EXISTS (SELECT 1 FROM @Note)
+        THROW 59031, N'A suspended account still gets notifications.', 1;
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 32
+SET @t = N'32 PAYMENTS is the list of methods; PAYMENTS_DTL: one payment per booking, only cash can wait (v2.3)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    IF (SELECT COUNT(*) FROM dbo.PAYMENTS
+        WHERE (PAYMENT_ID = 1 AND METHOD_NAME = N'Cash on Completion') OR (PAYMENT_ID = 2 AND METHOD_NAME = N'GCash')
+           OR (PAYMENT_ID = 3 AND METHOD_NAME = N'Maya')) <> 3
+        THROW 59032, N'PAYMENTS does not have the rows 1 Cash on Completion, 2 GCash, 3 Maya.', 1;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Maya job', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'MockEWallet', @Wallet = N'MAYA',
+         @MobileNumber = N'09170000000', @TransactionReference = @ref OUTPUT;
+    IF @ref NOT LIKE N'MAYA-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'
+       OR NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL WHERE BOOKING_ID = @B AND PAYMENT_ID = 3 AND PAYMENT_STATUS = N'Paid')
+        THROW 59032, N'The Maya payment is not as expected.', 1;
+    SET @n = 0;     -- wrong rows refused
+    BEGIN TRY   -- a second payment for the same booking (unique BOOKING_ID)
+        INSERT INTO dbo.PAYMENTS_DTL (BOOKING_ID, PAYMENT_ID, PAYMENT_STATUS, TRANSACTION_REFERENCE, CREATED_AT, PAID_AT)
+        VALUES (@B, 2, N'Paid', N'GCASH-00000001-SELFTEST', SYSUTCDATETIME(), SYSUTCDATETIME());
+    END TRY BEGIN CATCH IF ERROR_NUMBER() IN (2601, 2627) SET @n += 1; END CATCH;
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C2, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '14:00',
+         @ServiceLocation = N'Mabolo', @ServiceDescription = N'Wrong payments', @NewBookingId = @B2 OUTPUT;
+    BEGIN TRY   -- GCash cannot wait to be collected (CHECK)
+        INSERT INTO dbo.PAYMENTS_DTL (BOOKING_ID, PAYMENT_ID, PAYMENT_STATUS, TRANSACTION_REFERENCE, CREATED_AT, PAID_AT)
+        VALUES (@B2, 2, N'PendingCollection', N'GCASH-00000002-SELFTEST', SYSUTCDATETIME(), NULL);
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    BEGIN TRY   -- a method that is not in the PAYMENTS list (FOREIGN KEY)
+        INSERT INTO dbo.PAYMENTS_DTL (BOOKING_ID, PAYMENT_ID, PAYMENT_STATUS, TRANSACTION_REFERENCE, CREATED_AT, PAID_AT)
+        VALUES (@B2, 99, N'Paid', N'X-00000003-SELFTEST', SYSUTCDATETIME(), SYSUTCDATETIME());
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    BEGIN TRY   -- a method still in use cannot be deleted (FOREIGN KEY)
+        DELETE FROM dbo.PAYMENTS WHERE PAYMENT_ID = 3;
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @n += 1; END CATCH;
+    IF @n = 4
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'PASS', @ref);
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(N'wrong rows refused: ', @n, N' of 4'));
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 33
+SET @t = N'33 usp_GetBookingsNeedingAttention: low ratings and passed dates still Pending (v2.3)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    -- a finished job with a 2-star review
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Unhappy customer', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Completed';
+    EXEC dbo.usp_AddReview @CustomerUserId = @C, @BookingId = @B, @Rating = 2, @Comment = N'Late and messy', @NewReviewId = @RevId OUTPUT;
+    -- a request whose date has passed while it is still Pending
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C2, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '14:00',
+         @ServiceLocation = N'Mabolo', @ServiceDescription = N'Forgotten request', @NewBookingId = @B2 OUTPUT;
+    UPDATE dbo.BOOKINGS SET BOOKING_DATE = DATEADD(DAY, -3, CAST(dbo.fn_ManilaNow() AS DATE)) WHERE BOOKING_ID = @B2;
+
+    DELETE @Attn; INSERT @Attn EXEC dbo.usp_GetBookingsNeedingAttention;
+    IF EXISTS (SELECT 1 FROM @Attn WHERE BookingId = @B AND Reason = N'Low rating (2 of 5 stars)')
+       AND EXISTS (SELECT 1 FROM @Attn WHERE BookingId = @B2 AND Reason = N'Date passed, still Pending')
+       AND (SELECT COUNT(*) FROM @Attn) <= 25
+       AND NOT EXISTS (SELECT 1 FROM @Attn WHERE TotalCount < 2)
+        INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The two bookings are not both on the list.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
 ------------------------------------------------------------------ results
 SELECT N AS [#], TEST, RESULT, DETAIL FROM @R ORDER BY N;
 
@@ -2772,6 +3110,9 @@ GO
 -- Free start times for a 2-hour job:      SELECT * FROM dbo.fn_GetAvailableSlots(1, DATEADD(DAY, 7, CAST(dbo.fn_ManilaNow() AS DATE)), 120);
 -- This month's report:                    EXEC dbo.usp_GetMonthlyReport @Year = 2026, @Month = 10;
 -- Every booking with names and payment:   SELECT * FROM dbo.vw_BookingOverview ORDER BY BOOKING_ID DESC;
+-- One user's bell (newest 25):            EXEC dbo.usp_GetNotifications @UserId = 2;
+-- Bookings that need an administrator:    EXEC dbo.usp_GetBookingsNeedingAttention;
+-- The payment methods:                    SELECT * FROM dbo.PAYMENTS;
 -- Providers customers can see:            SELECT * FROM dbo.vw_ProviderDirectory ORDER BY AVG_RATING DESC;
 -- Rating check (stored vs calculated):    SELECT PROVIDER_ID, AVG_RATING, dbo.fn_GetProviderAvgRating(PROVIDER_ID) AS CALCULATED FROM dbo.SERVICE_PROVIDERS;
 
@@ -2804,7 +3145,7 @@ WHERE IS_ACTIVE = 1 AND PRICE > (SELECT AVG(PRICE) FROM dbo.SERVICES WHERE IS_AC
 -- F. Cash still to collect, by provider (cash on completion, job completed, not confirmed)
 SELECT v.BUSINESS_NAME, COUNT(*) AS JOBS, SUM(v.TOTAL_FEE) AS CASH_TO_COLLECT
 FROM dbo.vw_BookingOverview v
-WHERE v.PAYMENT_METHOD = N'CashOnCompletion' AND v.PAYMENT_RECORD_STATUS = N'PendingCollection' AND v.STATUS = N'Completed'
+WHERE v.PAYMENT_METHOD = N'Cash on Completion' AND v.PAYMENT_RECORD_STATUS = N'PendingCollection' AND v.STATUS = N'Completed'
 GROUP BY v.BUSINESS_NAME;
    ===================================================================================================== */
 

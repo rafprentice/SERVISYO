@@ -167,12 +167,8 @@ public class ProviderApprovalService : IProviderApprovalService
         if (changed == 0)
             return AlreadyDecided(name);          // the transaction is rolled back when it is disposed
 
-        _db.AdminActions.Add(AdminAction.ForProvider(adminUserId, newStatus, providerId, cleanReason));   // 'Approved' / 'Rejected' (as in the PDF)
-        _db.Notifications.Add(new Notification
-        {
-            UserId = info.UserId,
-            Message = $"Your provider application was {newStatus}."
-        });
+        // 'Approved' / 'Rejected' (as in the PDF). Database v2.3: the provider's bell shows the decision from this row.
+        _db.AdminActions.Add(AdminAction.ForProvider(adminUserId, newStatus, providerId, cleanReason));
         await _db.SaveChangesAsync(ct);
 
         if (tx is not null) await tx.CommitAsync(ct);

@@ -32,166 +32,246 @@ internal sealed class FakeEmailService : IEmailService
     public string LastCode() => Regex.Match(Messages[^1].Text, @"Your code: (\d{6})").Groups[1].Value;
 }
 
+/// Database v2.3: the reset code is calculated (HMAC of the user, the password hash and the 15-minute window),
+/// so the EMAIL_OTPS table is gone and nothing about a code is stored.
 public class OtpServiceTests
 {
-    private static (OtpService otp, ServisyoDbContext db, TestClock clock, PasswordHasher<User> hasher) Create()
+    internal const string Secret = "unit-test-secret-that-is-long-enough-0123456789";
+
+    private static (OtpService otp, TestClock clock) Create(string? secret = Secret, TestClock? clock = null)
     {
-        var db = new ServisyoDbContext(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        var clock = new TestClock();
-        var hasher = new PasswordHasher<User>();
-        return (new OtpService(db, hasher, clock), db, clock, hasher);
+        clock ??= new TestClock();
+        return (new OtpService(Options.Create(new OtpOptions { CodeSecret = secret }), clock), clock);
     }
 
-    private static async Task<User> AddUserAsync(ServisyoDbContext db)
+    private static User NewUser(int id = 7, string passwordHash = "HASH-ONE") => new()
     {
-        var u = new User { FirstName = "Ana", LastName = "Test", Email = $"{Guid.NewGuid():N}@test.com", PasswordHash = "x", Role = Roles.Customer };
-        db.Users.Add(u);
-        await db.SaveChangesAsync();
-        return u;
-    }
+        UserId = id, FirstName = "Ana", LastName = "Test", Email = $"user{id}@test.com", PasswordHash = passwordHash, Role = Roles.Customer
+    };
+
+    private static string Other(string code) => code == "000000" ? "000001" : "000000";
 
     [Fact]
-    public async Task Issue_GivesASixDigitCode_AndStoresOnlyAHashOfIt()
+    public async Task Issue_GivesASixDigitCode_AndNothingIsStored()
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, _) = Create();
 
-        var result = await otp.IssueAsync(user, OtpPurposes.PasswordReset);
+        var result = await otp.IssueAsync(NewUser(), OtpPurposes.PasswordReset);
 
         Assert.Equal(OtpIssueStatus.Issued, result.Status);
         Assert.Matches(@"^\d{6}$", result.Code!);
-        var row = await db.EmailOtps.SingleAsync();
-        Assert.DoesNotContain(result.Code!, row.CodeHash);
-        Assert.Equal(row.CreatedAt.AddMinutes(OtpService.ValidMinutes), row.ExpiresAt);
+
+        var db = new ServisyoDbContext(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), e => e.GetTableName() == "EMAIL_OTPS");
     }
 
     [Fact]
-    public async Task Verify_RightCode_Works_ButOnlyOnce()
+    public async Task Verify_RightCode_Works()
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, _) = Create();
+        var user = NewUser();
         var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
 
         Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+    }
+
+    [Fact]
+    public async Task TheCode_StopsWorking_OnceThePasswordChanges()
+    {
+        var (otp, _) = Create();
+        var user = NewUser(passwordHash: "HASH-ONE");
+        var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+
+        user.PasswordHash = "HASH-TWO";       // the reset saved a new password
+
         Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
     }
 
     [Fact]
-    public async Task Verify_WrongCode_IsInvalid_AndTheTryIsCounted()
+    public async Task TheCode_WorksForFifteenMinutes_ButNotAfterThirty()
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, clock) = Create();
+        var user = NewUser();
         var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
-        var wrong = code == "000000" ? "000001" : "000000";
 
-        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, wrong));
-        Assert.Equal(1, (await db.EmailOtps.SingleAsync()).Attempts);
+        clock.Advance(TimeSpan.FromMinutes(OtpService.ValidMinutes));
+        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+
+        clock.Advance(TimeSpan.FromMinutes(OtpService.ValidMinutes) + TimeSpan.FromSeconds(1));
+        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+    }
+
+    [Fact]
+    public async Task ACodeSentAtTheEndOfAWindow_StillGetsItsFifteenMinutes()
+    {
+        var clock = new TestClock();
+        clock.Now = new DateTimeOffset(2026, 10, 15, 2, 14, 59, TimeSpan.Zero);     // one second before the next window
+        var (otp, _) = Create(clock: clock);
+        var user = NewUser();
+        var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+
+        clock.Advance(TimeSpan.FromMinutes(OtpService.ValidMinutes) - TimeSpan.FromSeconds(1));
+
+        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+    }
+
+    [Fact]
+    public async Task Verify_WrongCode_IsInvalid()
+    {
+        var (otp, _) = Create();
+        var user = NewUser();
+        var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+
+        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, Other(code)));
     }
 
     [Fact]
     public async Task Verify_LocksAfterFiveWrongTries_EvenForTheRightCode()
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, _) = Create();
+        var user = NewUser();
         var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
-        var wrong = code == "000000" ? "000001" : "000000";
 
         for (var i = 1; i < OtpService.MaxAttempts; i++)
-            Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, wrong));
-        Assert.Equal(OtpVerifyStatus.TooManyAttempts, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, wrong));
+            Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, Other(code)));
+        Assert.Equal(OtpVerifyStatus.TooManyAttempts, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, Other(code)));
 
         Assert.Equal(OtpVerifyStatus.TooManyAttempts, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
     }
 
     [Fact]
-    public async Task Verify_ExpiredCode_IsInvalid()
+    public async Task ANewEmail_DoesNotGiveMoreTries()
     {
-        var (otp, db, clock, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, clock) = Create();
+        var user = NewUser();
         var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+        for (var i = 1; i < OtpService.MaxAttempts; i++)
+            await otp.VerifyAsync(user, OtpPurposes.PasswordReset, Other(code));
 
-        clock.Advance(TimeSpan.FromMinutes(OtpService.ValidMinutes + 1));
+        clock.Advance(TimeSpan.FromSeconds(OtpService.ResendCooldownSeconds));
+        Assert.Equal(OtpIssueStatus.Issued, (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Status);
 
-        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+        Assert.Equal(OtpVerifyStatus.TooManyAttempts, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, Other(code)));
+    }
+
+    [Fact]
+    public async Task TheLock_EndsAfterThirtyMinutes()
+    {
+        var (otp, clock) = Create();
+        var user = NewUser();
+        var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+        for (var i = 0; i < OtpService.MaxAttempts; i++)
+            await otp.VerifyAsync(user, OtpPurposes.PasswordReset, Other(code));
+
+        clock.Advance(OtpService.LockTime + TimeSpan.FromSeconds(1));
+        var fresh = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+
+        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, fresh));
     }
 
     [Fact]
     public async Task Issue_WithinAMinute_IsThrottled_AndWorksAgainAfterwards()
     {
-        var (otp, db, clock, _) = Create();
-        var user = await AddUserAsync(db);
-        await otp.IssueAsync(user, OtpPurposes.PasswordReset);
+        var (otp, clock) = Create();
+        var user = NewUser();
+
+        Assert.Equal(OtpIssueStatus.Issued, (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Status);
 
         clock.Advance(TimeSpan.FromSeconds(20));
-        var again = await otp.IssueAsync(user, OtpPurposes.PasswordReset);
-        Assert.Equal(OtpIssueStatus.Throttled, again.Status);
-        Assert.Null(again.Code);
-        Assert.Equal(40, again.RetryAfterSeconds);
+        var second = await otp.IssueAsync(user, OtpPurposes.PasswordReset);
+        Assert.Equal(OtpIssueStatus.Throttled, second.Status);
+        Assert.Null(second.Code);
+        Assert.Equal(40, second.RetryAfterSeconds);
 
         clock.Advance(TimeSpan.FromSeconds(41));
         Assert.Equal(OtpIssueStatus.Issued, (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Status);
     }
 
     [Fact]
-    public async Task Issue_ANewCode_CancelsTheOldOne()
+    public async Task Issue_AgainInTheSameWindow_GivesTheSameCode()
     {
-        var (otp, db, clock, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, clock) = Create();
+        var user = NewUser();
         var first = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
-        clock.Advance(TimeSpan.FromSeconds(OtpService.ResendCooldownSeconds + 1));
-        var second = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
 
-        if (first != second)    // (1 in a million: the two random codes are equal, and then there is nothing to compare)
-            Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, first));
-        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, second));
+        clock.Advance(TimeSpan.FromMinutes(2));
+
+        Assert.Equal(first, (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code);
     }
 
     [Fact]
     public async Task Verify_ACodeForAnotherPurpose_DoesNotWork()
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
-        var code = (await otp.IssueAsync(user, OtpPurposes.EmailVerification)).Code!;
+        var (otp, _) = Create();
+        var user = NewUser();
+        var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
 
-        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
-        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.EmailVerification, code));
+        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, "SomethingElse", code));
     }
 
     [Fact]
     public async Task Verify_ACodeBelongingToSomeoneElse_DoesNotWork()
     {
-        var (otp, db, _, _) = Create();
-        var ana = await AddUserAsync(db);
-        var ben = await AddUserAsync(db);
-        var code = (await otp.IssueAsync(ana, OtpPurposes.PasswordReset)).Code!;
+        var (otp, _) = Create();
+        var ana = NewUser(id: 7);
+        var ben = NewUser(id: 8);
+        var anasCode = (await otp.IssueAsync(ana, OtpPurposes.PasswordReset)).Code!;
 
-        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(ben, OtpPurposes.PasswordReset, code));
+        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(ben, OtpPurposes.PasswordReset, anasCode));
+    }
+
+    [Fact]
+    public async Task TheSameSecret_GivesTheSameCode_AnotherSecretDoesNot()
+    {
+        var clock = new TestClock();
+        var user = NewUser();
+        var code = (await Create(Secret, clock).otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+
+        // e.g. after the website restarted: the code is worked out again from the same secret
+        Assert.Equal(OtpVerifyStatus.Ok, await Create(Secret, clock).otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+        Assert.Equal(OtpVerifyStatus.Invalid,
+            await Create("another-secret-that-is-also-long-enough-987654321", clock).otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
     }
 
     [Theory]
-    [InlineData("")]
     [InlineData(null)]
+    [InlineData("")]
+    [InlineData("short")]
+    public async Task WithoutAGoodSecret_ItStillWorks_WithARandomKey(string? secret)
+    {
+        var (otp, clock) = Create(secret);
+        var user = NewUser();
+        var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
+
+        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+        // another instance has another random key: nobody can guess the codes
+        Assert.Equal(OtpVerifyStatus.Invalid, await Create(secret, clock).otp.VerifyAsync(user, OtpPurposes.PasswordReset, code));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
     [InlineData("12345")]
     [InlineData("1234567")]
-    [InlineData("12 456")]
     [InlineData("abcdef")]
+    [InlineData("12 456")]
     public async Task Verify_RubbishInput_IsInvalid(string? input)
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, _) = Create();
+        var user = NewUser();
         await otp.IssueAsync(user, OtpPurposes.PasswordReset);
 
-        Assert.NotEqual(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, input));
+        Assert.Equal(OtpVerifyStatus.Invalid, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, input));
     }
 
     [Fact]
     public async Task Verify_IgnoresSpacesAroundTheCode()
     {
-        var (otp, db, _, _) = Create();
-        var user = await AddUserAsync(db);
+        var (otp, _) = Create();
+        var user = NewUser();
         var code = (await otp.IssueAsync(user, OtpPurposes.PasswordReset)).Code!;
 
-        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, $"  {code} "));
+        Assert.Equal(OtpVerifyStatus.Ok, await otp.VerifyAsync(user, OtpPurposes.PasswordReset, "  " + code + " "));
     }
 }
 
@@ -205,7 +285,7 @@ public class PasswordResetServiceTests
         var clock = new TestClock();
         var hasher = new PasswordHasher<User>();
         var mail = new FakeEmailService();
-        var svc = new PasswordResetService(db, new OtpService(db, hasher, clock), mail, hasher);
+        var svc = new PasswordResetService(db, new OtpService(Options.Create(new OtpOptions { CodeSecret = OtpServiceTests.Secret }), clock), mail, hasher);
         return new Setup(svc, db, mail, clock, hasher);
     }
 
@@ -247,7 +327,6 @@ public class PasswordResetServiceTests
         await s.Svc.RequestResetAsync(email);
 
         Assert.Empty(s.Mail.Messages);
-        Assert.Empty(s.Db.EmailOtps);
     }
 
     [Theory]
@@ -365,7 +444,7 @@ public class PasswordResetServiceTests
         await s.Svc.RequestResetAsync("ana@test.com");
         var code = s.Mail.LastCode();
 
-        s.Clock.Advance(TimeSpan.FromMinutes(OtpService.ValidMinutes + 1));
+        s.Clock.Advance(TimeSpan.FromMinutes(OtpService.StepMinutes * OtpService.AcceptedSteps) + TimeSpan.FromSeconds(1));   // past both windows
 
         Assert.Equal(PasswordResetStatus.InvalidCode, await s.Svc.ResetPasswordAsync("ana@test.com", code, "NewPass456"));
     }

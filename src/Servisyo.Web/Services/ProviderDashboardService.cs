@@ -101,9 +101,9 @@ public class ProviderDashboardService : IProviderDashboardService
         // finished jobs whose customer chose cash on completion and the cash is not confirmed yet
         var cashRows = await mine
             .Where(b => b.Status == BookingStatuses.Completed
-                     && b.Payment != null && b.Payment.PaymentStatus == PaymentRecordStatuses.PendingCollection)
+                     && b.PaymentDetail != null && b.PaymentDetail.PaymentStatus == PaymentRecordStatuses.PendingCollection)
             .OrderBy(b => b.BookingDate).ThenBy(b => b.BookingTime).Take(3)
-            .Select(b => new { b.BookingId, Amount = b.Payment!.Amount, CustomerName = b.Customer.User.FirstName + " " + b.Customer.User.LastName })
+            .Select(b => new { b.BookingId, Amount = b.TotalFee, CustomerName = b.Customer.User.FirstName + " " + b.Customer.User.LastName })
             .ToListAsync(ct);
 
         var ids = recentRows.Concat(todayRows).Concat(soonRows).Concat(activeRows)
@@ -199,7 +199,7 @@ public class ProviderDashboardService : IProviderDashboardService
                 FullName = fullName,
                 Initials = NameFormat.Initials(fullName),
                 Subtitle = p.BusinessName,
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             BusinessName = p.BusinessName,

@@ -1,4 +1,8 @@
 /* =====================================================================
+   HISTORY (database v2.0 - v2.2). Since v2.3 (EF migration "DerivedData") PAYMENTS is the list of
+   payment methods, each booking's payment is in PAYMENTS_DTL, and CASH_PAYMENT_DETAILS is gone.
+   The current tables are in docs/sql/DatabaseDesign-v2.sql, PART 1.
+
    PAYMENTS and CASH_PAYMENT_DETAILS: READABLE COPY FOR DOCUMENTATION ONLY.
    Do NOT run this file. The EF Core migration "AddPayments"
    (tools\add-payments.ps1, then dotnet ef database update) creates these tables.

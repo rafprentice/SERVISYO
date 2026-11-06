@@ -560,10 +560,7 @@ public class BookProviderServiceTests
 
         var result = await svc.CreateAsync(c.UserId, p.ProviderId, Form(s));
 
-        var note = await db.Notifications.SingleAsync();
-        Assert.Equal(p.UserId, note.UserId);
-        Assert.Equal($"You have a new booking request (Booking #{result.BookingId}).", note.Message);
-        Assert.False(note.IsRead);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
     }
 
     [Fact]
@@ -632,7 +629,6 @@ public class BookProviderServiceTests
         Assert.Equal("Please select a service address.", result.FieldErrors["Location"]);
         Assert.Equal("Describe what you need done.", result.FieldErrors["Description"]);
         Assert.Empty(db.Bookings);
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]
@@ -831,7 +827,6 @@ public class BookProviderServiceTests
         Assert.Equal(BookOutcome.Invalid, second.Outcome);
         Assert.Equal(BookingSlotRules.Explain(SlotCheck.Clash, 1), second.FieldErrors["Time"]);
         Assert.Single(db.Bookings);
-        Assert.Single(db.Notifications);                 // the provider is only told about the booking that was made
     }
 
     [Fact]

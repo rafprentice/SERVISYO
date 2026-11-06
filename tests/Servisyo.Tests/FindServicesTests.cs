@@ -217,10 +217,6 @@ public class FindServicesServiceTests
         var (svc, db) = Create();
         var customer = await AddCustomerAsync(db, first: "Ana", last: "Reyes");
         var other = await AddCustomerAsync(db, first: "Ben", last: "Lim");
-        db.Notifications.AddRange(
-            new Notification { UserId = customer.UserId, Message = "a" },
-            new Notification { UserId = customer.UserId, Message = "b", IsRead = true },
-            new Notification { UserId = other.UserId, Message = "c" });
         db.Messages.Add(new Message { SenderId = other.UserId, ReceiverId = customer.UserId, MessageText = "hi" });
         await db.SaveChangesAsync();
 
@@ -230,7 +226,7 @@ public class FindServicesServiceTests
         Assert.Equal("Ana", page.Shell.FirstName);
         Assert.Equal("Ana Reyes", page.Shell.FullName);
         Assert.Equal("AR", page.Shell.Initials);
-        Assert.Equal(1, page.Shell.UnreadNotifications);
+        Assert.Equal(0, page.Shell.UnreadNotifications);      // v2.3: from usp_GetNotifications (none in the in-memory test database)
         Assert.Equal(1, page.Shell.UnreadMessages);
     }
 
@@ -832,13 +828,11 @@ public class FindServicesServiceTests
         await AddListedAsync(db, c, "A Works", rating: 4m, reviews: 2);
         var users = await db.Users.CountAsync();
         var providers = await db.Providers.CountAsync();
-        var notes = await db.Notifications.CountAsync();
 
         await OpenAsync(svc, customer, new FindServicesQuery { Q = "a", Sort = "price", Category = c.CategoryId });
 
         Assert.Equal(users, await db.Users.CountAsync());
         Assert.Equal(providers, await db.Providers.CountAsync());
-        Assert.Equal(notes, await db.Notifications.CountAsync());
         Assert.Equal(4m, (await db.Providers.SingleAsync()).AvgRating);
     }
 }

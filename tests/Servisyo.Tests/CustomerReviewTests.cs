@@ -137,9 +137,7 @@ public class CustomerReviewTests
         Assert.Equal(1, nina.ReviewCount);
         Assert.Equal(4.0m, nina.AvgRating);
 
-        var note = await w.Db.Notifications.SingleAsync();
-        Assert.Equal(w.Nina.UserId, note.UserId);
-        Assert.Contains("4-star review for booking #" + b.BookingId, note.Message);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
     }
 
     [Fact]

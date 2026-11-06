@@ -246,25 +246,20 @@ public class ProviderManagementService : IProviderManagementService
         var stopsWorking = newStatus is AccountStatuses.Suspended or AccountStatuses.Deactivated;
         var cancelled = new List<Booking>();
         var stillOpen = new List<OpenBooking>();
+        // one moment for the cancellations and the ADMIN_ACTIONS row: that is how the customers' bells
+        // (dbo.usp_GetNotifications, database v2.3) know the booking was cancelled because of this suspension
+        var now = DateTime.UtcNow;
         if (stopsWorking)
         {
-            // Pending requests can never be accepted now: cancel them and tell each customer.
+            // Pending requests can never be accepted now: cancel them (each customer's bell says why).
             cancelled = await _db.Bookings.Include(b => b.Customer)
                 .Where(b => b.ProviderId == provider.ProviderId && b.Status == BookingStatuses.Pending)
                 .OrderBy(b => b.BookingId)
                 .ToListAsync(ct);
-            var now = DateTime.UtcNow;
             foreach (var b in cancelled)
             {
                 b.Status = BookingStatuses.Cancelled;
                 b.UpdatedAt = now;
-                _db.Notifications.Add(new Notification
-                {
-                    UserId = b.Customer.UserId,
-                    Message = $"Your booking #{b.BookingId} on {b.BookingDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)} was cancelled "
-                              + "because the service provider is no longer available. Please book another provider.",
-                    CreatedAt = now
-                });
             }
 
             // Accepted / In Progress jobs may already be paid: they are NOT changed, only shown to the administrator.
@@ -277,7 +272,9 @@ public class ProviderManagementService : IProviderManagementService
         }
 
         // the log points to the SERVICE_PROVIDER (database v2.2), like the approve / reject entries
-        _db.AdminActions.Add(AdminAction.ForProvider(adminUserId, "Account " + newStatus, provider.ProviderId, cleanReason));
+        var adminLog = AdminAction.ForProvider(adminUserId, "Account " + newStatus, provider.ProviderId, cleanReason);
+        adminLog.CreatedAt = now;
+        _db.AdminActions.Add(adminLog);
 
         try
         {

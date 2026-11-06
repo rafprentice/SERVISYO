@@ -31,7 +31,7 @@ else
         @foreach (var n in Model.Items)
         {
             <li>
-                <a class="sv-np__item @(n.IsRead ? "" : "is-unread")" asp-controller="Notifications" asp-action="Go" asp-route-id="@n.Id">
+                <a class="sv-np__item @(n.IsRead ? "" : "is-unread")" asp-controller="Notifications" asp-action="Go" asp-route-kind="@n.Kind">
                     <span class="sv-np__icon sv-np__icon--@n.Kind" aria-hidden="true">@Icons.Svg(n.Icon, 16)</span>
                     <span class="sv-np__body">
                         <span class="sv-np__title">@n.Title</span>

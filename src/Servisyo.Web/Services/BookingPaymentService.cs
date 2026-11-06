@@ -18,19 +18,19 @@ public interface IBookingPaymentService
 {
     /// DEMO payment ("Approve & Pay"): no money moves and no payment gateway is called.
     /// The customer accepts the provider's quotation and chooses how to pay:
-    ///   Cash on Service Completion -> a PAYMENTS row "PendingCollection" (+ CASH_PAYMENT_DETAILS); the booking stays Unpaid
-    ///                                 until the provider confirms the cash, but it is scheduled now.
-    ///   Mock E-Wallet (GCash/Maya)  -> a PAYMENTS row "Paid"; the booking's PAYMENT_STATUS becomes Paid.
+    ///   Cash on Service Completion -> a PAYMENTS_DTL row "PendingCollection" for PAYMENTS 1 (Cash on Completion); the
+    ///                                 booking stays Unpaid until the provider confirms the cash, but it is scheduled now.
+    ///   Mock E-Wallet (GCash/Maya)  -> a PAYMENTS_DTL row "Paid" for PAYMENTS 2 / 3; the booking's PAYMENT_STATUS becomes Paid.
     Task<PaymentResult> ApproveAndPayAsync(int userId, int bookingId, PaymentChoiceForm? choice, CancellationToken ct = default);
 
     /// "Confirm Cash Received": the assigned provider confirms the cash for a Completed Cash-on-Completion booking.
-    /// The cash record is marked collected, the payment and the booking become Paid.
+    /// The payment (PAYMENTS_DTL, with its PAID_AT) and the booking become Paid.
     Task<BookingActionResult> ConfirmCashReceivedAsync(int userId, int bookingId, CancellationToken ct = default);
 }
 
 /// The booking STATUS column keeps the six values from the project PDF (Pending, Accepted, Rejected, In Progress,
 /// Completed, Cancelled). Payment lives in BOOKINGS.PAYMENT_STATUS (Unpaid / Paid / Refunded, as in the PDF) plus the
-/// PAYMENTS record, so the progress meter reads both: Accepted + nothing chosen = Quotation, Accepted + paid or
+/// PAYMENTS_DTL record (database v2.3), so the progress meter reads both: Accepted + nothing chosen = Quotation, Accepted + paid or
 /// cash promised = Paid / Scheduled, then In Progress and Completed.
 public class BookingPaymentService : IBookingPaymentService
 {
@@ -79,7 +79,7 @@ public class BookingPaymentService : IBookingPaymentService
         // 3. the booking must be THIS customer's; someone else's looks exactly like a missing one
         var booking = await _db.Bookings
             .Include(b => b.Provider)
-            .Include(b => b.Payment)
+            .Include(b => b.PaymentDetail)
             .FirstOrDefaultAsync(b => b.BookingId == bookingId && b.CustomerId == customerId, ct);
         if (booking is null)
         {
@@ -88,8 +88,8 @@ public class BookingPaymentService : IBookingPaymentService
         }
 
         // 4. only a quotation the provider has given (Accepted) that has no payment yet
-        if (booking.Payment is not null)
-            return new(PaymentOutcome.AlreadyPaid, booking.Payment.PaymentMethod == PaymentMethods.CashOnCompletion
+        if (booking.PaymentDetail is not null)
+            return new(PaymentOutcome.AlreadyPaid, booking.PaymentDetail.PaymentId == PaymentIds.Cash
                 ? $"Booking #{bookingId} is already approved: you chose to pay in cash when the job is done."
                 : $"Booking #{bookingId} is already paid.");
         if (booking.PaymentStatus == PaymentStatuses.Paid)
@@ -99,7 +99,7 @@ public class BookingPaymentService : IBookingPaymentService
                 ? $"Booking #{bookingId} has no quotation yet. You can pay once the provider accepts it."
                 : $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}, so it can't be paid.");
 
-        // 5. the payment record. The amount always comes from the booking, never from the browser.
+        // 5. the payment record. The amount is the booking's TOTAL_FEE (not stored again), never from the browser.
         var now = _clock.GetUtcNow().UtcDateTime;
         var amount = PaymentNotes.Money(booking.TotalFee);
         var isCash = method == PaymentMethods.CashOnCompletion;
@@ -107,31 +107,21 @@ public class BookingPaymentService : IBookingPaymentService
             ? $"CASH-{now.AddHours(ManilaOffsetHours).Year}-{booking.BookingId:D4}"     // one payment per booking, so this is unique
             : await WalletReferenceAsync(wallet!, choice.Reference, ct);
 
-        var payment = new Payment
+        var payment = new PaymentDetail
         {
             BookingId = booking.BookingId,
-            Amount = booking.TotalFee,
-            PaymentMethod = method,
+            PaymentId = PaymentIds.For(method, wallet),                 // PAYMENTS: 1 Cash on Completion, 2 GCash, 3 Maya
             PaymentStatus = isCash ? PaymentRecordStatuses.PendingCollection : PaymentRecordStatuses.Paid,
             TransactionReference = reference,
             CreatedAt = now,
-            PaidAt = isCash ? null : now,
-            CashDetails = isCash ? new CashPaymentDetails { IsCollectedByProvider = false, CollectedAt = null } : null
+            PaidAt = isCash ? null : now
         };
-        booking.Payment = payment;
+        booking.PaymentDetail = payment;
         if (!isCash) booking.PaymentStatus = PaymentStatuses.Paid;   // the money is "in" at once (test e-wallet)
         booking.UpdatedAt = now;                                       // always touch the row: its concurrency token guards the change
+        // database v2.3: the provider's bell shows the approval from PAYMENTS_DTL itself (dbo.usp_GetNotifications)
 
-        _db.Notifications.Add(new Notification
-        {
-            UserId = booking.Provider.UserId,
-            Message = isCash
-                ? $"Booking #{booking.BookingId} was approved. The customer will pay {amount} in cash when the job is done. It is now scheduled."
-                : $"Booking #{booking.BookingId} was approved and paid by {wallet} (test, {amount}, ref {reference}). It is now scheduled.",
-            CreatedAt = now
-        });
-
-        // 6. booking + payment + notification: together or not at all (one SaveChanges = one transaction)
+        // 6. booking + payment: together or not at all (one SaveChanges = one transaction)
         try
         {
             await _db.SaveChangesAsync(ct);
@@ -144,9 +134,9 @@ public class BookingPaymentService : IBookingPaymentService
         }
         catch (DbUpdateException ex)
         {
-            // the unique index on PAYMENTS.BOOKING_ID: the same booking was paid a moment ago (two tabs, double click)
+            // the unique index on PAYMENTS_DTL.BOOKING_ID: the same booking was paid a moment ago (two tabs, double click)
             _db.ChangeTracker.Clear();
-            var paidMeanwhile = await _db.Payments.AsNoTracking().AnyAsync(p => p.BookingId == bookingId, ct);
+            var paidMeanwhile = await _db.PaymentDetails.AsNoTracking().AnyAsync(p => p.BookingId == bookingId, ct);
             _logger.LogWarning(ex, "Saving the payment for booking {BookingId} failed (paid meanwhile: {Paid}).", bookingId, paidMeanwhile);
             return paidMeanwhile
                 ? new(PaymentOutcome.AlreadyPaid, $"Booking #{bookingId} is already paid.")
@@ -174,13 +164,13 @@ public class BookingPaymentService : IBookingPaymentService
         var prefix = MockWallets.Prefix(wallet);
         var candidate = proposed?.Trim().ToUpperInvariant();
         if (candidate is not null && MockWallets.ReferencePattern.IsMatch(candidate) && candidate.StartsWith(prefix + "-", StringComparison.Ordinal)
-            && !await _db.Payments.AnyAsync(p => p.TransactionReference == candidate, ct))
+            && !await _db.PaymentDetails.AnyAsync(p => p.TransactionReference == candidate, ct))
             return candidate;
 
         for (var i = 0; i < 5; i++)
         {
             var made = prefix + "-" + RandomNumberGenerator.GetInt32(0, 100_000_000).ToString("D8", Inv);
-            if (!await _db.Payments.AnyAsync(p => p.TransactionReference == made, ct)) return made;
+            if (!await _db.PaymentDetails.AnyAsync(p => p.TransactionReference == made, ct)) return made;
         }
         return prefix + "-" + RandomNumberGenerator.GetInt32(0, 100_000_000).ToString("D8", Inv);   // the unique index is the last guard
     }
@@ -202,7 +192,7 @@ public class BookingPaymentService : IBookingPaymentService
         // 2. the booking must be THIS provider's; someone else's looks exactly like a missing one
         var booking = await _db.Bookings
             .Include(b => b.Customer)
-            .Include(b => b.Payment).ThenInclude(pay => pay!.CashDetails)
+            .Include(b => b.PaymentDetail)
             .FirstOrDefaultAsync(b => b.BookingId == bookingId && b.ProviderId == p.ProviderId, ct);
         if (booking is null)
         {
@@ -211,30 +201,24 @@ public class BookingPaymentService : IBookingPaymentService
         }
 
         // 3. only a Completed job whose customer chose cash, and only once
-        var payment = booking.Payment;
-        if (payment is null || payment.PaymentMethod != PaymentMethods.CashOnCompletion || payment.CashDetails is null)
+        var payment = booking.PaymentDetail;
+        if (payment is null || payment.PaymentId != PaymentIds.Cash)
             return new(ok, BookingActionOutcome.InvalidTransition, $"Booking #{bookingId} is not a cash-on-completion booking.");
-        if (payment.CashDetails.IsCollectedByProvider || payment.PaymentStatus != PaymentRecordStatuses.PendingCollection)
+        if (payment.PaymentStatus != PaymentRecordStatuses.PendingCollection)
             return new(ok, BookingActionOutcome.InvalidTransition, $"The cash for booking #{bookingId} was already confirmed.");
         if (booking.Status != BookingStatuses.Completed)
             return new(ok, BookingActionOutcome.InvalidTransition,
                 $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}. Confirm the cash after you mark the job completed.");
 
-        // 4. collected: the cash record, the payment and the booking, plus a note to the customer, together or not at all
+        // 4. collected: the payment and the booking, together or not at all. Database v2.3: "collected" is not stored
+        //    again (a cash payment that is Paid, at PAID_AT), and the customer's bell shows it from PAYMENTS_DTL. One
+        //    moment for both rows, so it is the booking's latest news.
         var now = _clock.GetUtcNow().UtcDateTime;
-        var amount = PaymentNotes.Money(payment.Amount);
-        payment.CashDetails.IsCollectedByProvider = true;
-        payment.CashDetails.CollectedAt = now;
+        var amount = PaymentNotes.Money(booking.TotalFee);
         payment.PaymentStatus = PaymentRecordStatuses.Paid;
         payment.PaidAt = now;
         booking.PaymentStatus = PaymentStatuses.Paid;
         booking.UpdatedAt = now;
-        _db.Notifications.Add(new Notification
-        {
-            UserId = booking.Customer.UserId,
-            Message = $"{p.BusinessName} confirmed receiving your {amount} cash payment for booking #{booking.BookingId} (ref {payment.TransactionReference}).",
-            CreatedAt = now
-        });
 
         try
         {

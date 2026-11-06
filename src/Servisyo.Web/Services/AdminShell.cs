@@ -28,7 +28,7 @@ public static class AdminShell
             FullName = admin.FirstName,
             Initials = NameFormat.Initials(admin.FirstName),
             Subtitle = "System Administrator",
-            UnreadNotifications = await db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct)
+            UnreadNotifications = await db.CountUnreadNotificationsAsync(userId, ct)
         };
     }
 }

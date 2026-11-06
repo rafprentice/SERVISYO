@@ -13,16 +13,10 @@ public static class NotificationKinds
     public const string Application = "application";
     public const string General = "general";
 
-    public static string Classify(string? message)
-    {
-        var m = (message ?? string.Empty).Trim();
-        if (m.StartsWith("You have a new booking request", StringComparison.OrdinalIgnoreCase)) return BookingNew;
-        if (m.Contains("was cancelled by the customer", StringComparison.OrdinalIgnoreCase)) return BookingCancelled;
-        if (m.StartsWith("Your booking #", StringComparison.OrdinalIgnoreCase)) return BookingUpdate;
-        if (m.StartsWith("New provider application", StringComparison.OrdinalIgnoreCase)) return ApplicationNew;
-        if (m.StartsWith("Your provider application", StringComparison.OrdinalIgnoreCase)) return Application;
-        return General;
-    }
+    public static readonly IReadOnlyList<string> All = new[] { BookingNew, BookingCancelled, BookingUpdate, ApplicationNew, Application, General };
+
+    /// The kind comes from dbo.usp_GetNotifications (database v2.3); anything unknown is shown as a general notification.
+    public static string Normalize(string? kind) => All.Contains(kind ?? string.Empty) ? kind! : General;
 
     public static string TitleOf(string kind) => kind switch
     {
@@ -71,6 +65,7 @@ public static class NotificationFormat
     }
 }
 
+/// Id is only the position in the list (1 = newest): notifications are worked out, not stored, so they have no key.
 public sealed record NotificationItem(int Id, string Kind, string Title, string Message, string TimeText, bool IsRead)
 {
     public string Icon => NotificationKinds.IconOf(Kind);

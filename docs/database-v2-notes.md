@@ -144,18 +144,34 @@ The sign-in and forgot-password pages keep the basic email check, so an account 
 2. Back up the database.
 3. Run `tools/add-admin-targets.ps1`, then `dotnet ef database update --project src\Servisyo.Web`.
 
-## Notification clean-up (keeps NOTIFICATIONS small)
+## Database v2.3: derived data instead of stored copies (migration DerivedData)
 
-- Once a day the website deletes **read** notifications older than **6 months**.
-- **Unread** notifications are never deleted, however old.
-- Each run that deletes something writes one SYSTEM_LOGS line: `System · DELETE · Notification · "Daily clean-up: N read notification(s) older than 6 months deleted ..."`.
-- It runs about 2 minutes after the website starts, then every 24 hours. If the host restarts the website (MonsterASP recycles it), it simply runs again after the restart.
-- A failure is logged and never stops the website.
-- Settings in `appsettings.json`, section `NotificationCleanup`:
-  - `Enabled` (true / false);
-  - `KeepReadMonths` (default 6, never less than 1);
-  - `FirstRunDelayMinutes`, `IntervalHours`.
-- The same clean-up by hand in SSMS:
-  ```sql
-  DELETE FROM dbo.NOTIFICATIONS WHERE IS_READ = 1 AND CREATED_AT < DATEADD(MONTH, -6, SYSUTCDATETIME());
-  ```
+**The rules (apply to every table)**
+1. **One fact, one place.** A value is never repeated in another table; it is referenced with a FOREIGN KEY.
+2. **Nothing is stored that can be calculated** from other rows.
+3. **A table that only holds derivable rows becomes a query** that shows the newest 25 (`SELECT TOP 25`), so the database does not grow with rows nobody needs.
+4. **Every feature keeps working.**
+
+**Removed tables and what replaces them**
+
+| Removed | Replaced by | Notes |
+|---|---|---|
+| `NOTIFICATIONS` | `dbo.usp_GetNotifications @UserId` (newest 25) | Built from BOOKINGS, PAYMENTS_DTL, REVIEWS, ADMIN_ACTIONS and Pending applications. Each booking shows only its latest news. Unread = newer than `USERS.NOTIFICATIONS_SEEN_AT`; opening the bell (or "Mark all as read") sets it. |
+| `BOOKING_REPORTS` | `dbo.usp_GetBookingsNeedingAttention` (newest 25 + `TotalCount`) | No screen ever filled BOOKING_REPORTS. The admin dashboard now shows "bookings need attention": a flagged or 1-2 star review, or a date that has passed while still Pending / Accepted. |
+| `EMAIL_OTPS` | a calculated code (`Services/OtpService.cs`) | HMAC-SHA256 of the user, the purpose, the current password hash and the 15-minute window. Valid 15-30 minutes; dies when the password changes. The 1-email-per-minute and 5-tries limits are in memory (30-minute lock). |
+| `CASH_PAYMENT_DETAILS` | calculated | "Collected by the provider" = a cash payment whose status is Paid; collected at `PAID_AT`. |
+
+**Payments: a lookup list and a bridge**
+- `PAYMENTS` = the list of payment methods: `1 Cash on Completion`, `2 GCash`, `3 Maya` (`METHOD_NAME` is unique).
+- `PAYMENTS_DTL` = each booking's payment: `BOOKING_ID` (unique: one payment per booking) and `PAYMENT_ID` (the method) are FOREIGN KEYS, plus `PAYMENT_STATUS`, `TRANSACTION_REFERENCE`, `CREATED_AT`, `PAID_AT`.
+- No `AMOUNT`: a booking's fee never changes after it is made, so the amount is the booking's `TOTAL_FEE`.
+- CHECK `CK_PAYMENTS_DTL_PENDING_CASH`: only cash (row 1) can be PendingCollection.
+- `trg_Payments_Audit` became `trg_PaymentsDtl_Audit` (same System Log lines).
+
+**Procedures that changed**: the ones that wrote NOTIFICATIONS no longer do (`usp_RegisterProvider`, `usp_ApproveProvider`, `usp_UpdateAccountStatus`, `usp_CreateBooking`, `usp_CancelBooking`, `usp_UpdateBookingStatus`, `usp_ApproveAndPay`, `usp_ConfirmCashReceived`, `usp_AddReview`); `usp_GetMonthlyReport`, `vw_BookingOverview` and `trg_Bookings_StatusFlow` read PAYMENTS_DTL.
+
+**Password reset secret** (not in Git): `dotnet user-secrets set "PasswordReset:CodeSecret" "<at least 32 random characters>" --project src/Servisyo.Web`. On the server put it in `appsettings.Production.json`. Without it the site still works, with a random key that changes when the site restarts (codes sent before a restart stop working).
+
+**Updating a database**
+1. Run `tools/add-derived-data.ps1`. It builds, runs the tests, creates the migration, checks SERVISYO (read-only), backs it up, tests everything on a copy (`SERVISYO_V23_TEST`: update, self-test, undo, redo) and only then, after you type YES, updates SERVISYO.
+2. `docs/sql/check-before-derived-data.sql` can also be run by hand in SSMS. It only reads. Grid 2 must be empty.

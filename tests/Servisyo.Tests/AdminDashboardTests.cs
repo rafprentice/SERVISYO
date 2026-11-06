@@ -50,8 +50,9 @@ public class AdminAttentionTests
         Assert.Equal("1 provider application waiting for review", rows[0].Text);
         Assert.Equal("1 flagged review needs moderation", rows[1].Text);
         Assert.Equal("1 suspended account requiring review", rows[2].Text);
-        Assert.Equal("1 reported booking issue pending resolution", rows[3].Text);
+        Assert.Equal("1 booking needs attention (low rating or date passed)", rows[3].Text);
         Assert.Equal("View Booking", rows[3].ActionLabel);
+        Assert.Equal(AdminAttentionAction.BookingList, rows[3].Action);
     }
 
     [Fact]
@@ -62,7 +63,7 @@ public class AdminAttentionTests
         Assert.Equal("2 provider applications waiting for review", rows[0].Text);
         Assert.Equal("3 flagged reviews need moderation", rows[1].Text);
         Assert.Equal("2 suspended accounts requiring review", rows[2].Text);
-        Assert.Equal("4 reported booking issues pending resolution", rows[3].Text);
+        Assert.Equal("4 bookings need attention (low ratings or dates passed)", rows[3].Text);
         Assert.Equal("View Bookings", rows[3].ActionLabel);
     }
 
@@ -204,9 +205,6 @@ public class AdminDashboardServiceTests
         db.Reviews.Add(new Review { Booking = done, Rating = 1, Comment = "x", Status = ReviewStatuses.Flagged });
         db.Reviews.Add(new Review { Booking = third, Rating = 5, Comment = "y", Status = ReviewStatuses.Visible });
 
-        // one open report and one resolved report: only the open one counts
-        db.BookingReports.Add(new BookingReport { Booking = other, ReportedBy = ana.User, Reason = "No show", Status = ReportStatuses.Open });
-        db.BookingReports.Add(new BookingReport { Booking = done, ReportedBy = ana.User, Reason = "Old", Status = ReportStatuses.Resolved });
         await db.SaveChangesAsync();
 
         var vm = (await svc.GetAsync(admin.UserId))!;
@@ -221,8 +219,9 @@ public class AdminDashboardServiceTests
         Assert.Collection(vm.Attention,
             a => Assert.Equal("2 provider applications waiting for review", a.Text),
             a => Assert.Equal("1 flagged review needs moderation", a.Text),
-            a => Assert.Equal("1 suspended account requiring review", a.Text),
-            a => Assert.Equal("1 reported booking issue pending resolution", a.Text));
+            a => Assert.Equal("1 suspended account requiring review", a.Text));
+        // database v2.3: "bookings that need attention" comes from usp_GetBookingsNeedingAttention (SQL self-test 33);
+        // the in-memory test database has no stored procedures, so that row is not here
     }
 
     [Fact]

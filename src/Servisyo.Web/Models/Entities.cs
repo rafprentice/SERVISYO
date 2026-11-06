@@ -16,6 +16,10 @@ public class User
     public string AccountStatus { get; set; } = AccountStatuses.Active;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    /// Database v2.3: the bell. Notifications are worked out by dbo.usp_GetNotifications (nothing is stored);
+    /// the ones newer than this moment are unread. Null = the bell was never opened.
+    public DateTime? NotificationsSeenAt { get; set; }
+
     public Customer? Customer { get; set; }
     public bool EmailVerificationPending { get; set; }
     public Provider? Provider { get; set; }
@@ -151,8 +155,7 @@ public class Booking
     public Provider Provider { get; set; } = null!;
     public ICollection<BookingService> Services { get; set; } = new List<BookingService>();
     public Review? Review { get; set; }
-    public Payment? Payment { get; set; }        // PAYMENTS (one per booking, made by Approve & Pay)
-    public ICollection<BookingReport> Reports { get; set; } = new List<BookingReport>();
+    public PaymentDetail? PaymentDetail { get; set; }   // PAYMENTS_DTL (one per booking, made by Approve & Pay)
 }
 
 // NEW: lets one booking contain one or more services.
@@ -191,17 +194,6 @@ public class Message
 
     public User Sender { get; set; } = null!;
     public User Receiver { get; set; } = null!;
-}
-
-public class Notification
-{
-    public int NotificationId { get; set; }
-    public int UserId { get; set; }
-    public string Message { get; set; } = string.Empty;
-    public bool IsRead { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    public User User { get; set; } = null!;
 }
 
 /// ADMIN_ACTIONS: one row per important administrator action. Database v2.2: the target is stored in the ONE column
@@ -248,21 +240,4 @@ public static class AdminTargetTypes
     public const string Category = "CATEGORY";
 
     public static readonly IReadOnlyList<string> All = new[] { Customer, ServiceProvider, Review, Category };
-}
-
-public class BookingReport
-{
-    public int ReportId { get; set; }
-    public int BookingId { get; set; }
-    public int ReportedByUserId { get; set; }
-    public string Reason { get; set; } = string.Empty;
-    public string Status { get; set; } = ReportStatuses.Open;
-    public int? ResolvedByUserId { get; set; }
-    public string? ResolutionNote { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? ResolvedAt { get; set; }
-
-    public Booking Booking { get; set; } = null!;
-    public User ReportedBy { get; set; } = null!;
-    public User? ResolvedBy { get; set; }
 }

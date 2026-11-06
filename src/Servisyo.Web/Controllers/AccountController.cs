@@ -164,7 +164,7 @@ public class AccountController : Controller
                 return RedirectToAction(nameof(Login));
 
             case PasswordResetStatus.TooManyAttempts:
-                ModelState.AddModelError(nameof(vm.Code), "Too many wrong tries. Please request a new code.");
+                ModelState.AddModelError(nameof(vm.Code), "Too many wrong tries. Please wait 30 minutes, then request a new code.");
                 break;
 
             default:

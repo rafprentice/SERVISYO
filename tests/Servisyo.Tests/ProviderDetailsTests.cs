@@ -296,9 +296,11 @@ public class ProviderDetailsTests
         Assert.Equal(BookingStatuses.Completed, await StatusOf(completed));
         Assert.Equal(BookingStatuses.Pending, await StatusOf(othersPending));   // another provider's booking is untouched
 
-        var notes = await db.Notifications.OrderBy(n => n.NotificationId).ToListAsync();
-        Assert.Equal(new[] { ana.UserId, ben.UserId }, notes.Select(n => n.UserId));
-        Assert.StartsWith($"Your booking #{pending1.BookingId} on Nov 10, 2026 was cancelled because the service provider is no longer available.", notes[0].Message);
+        // database v2.3: the customers' bells say why (usp_GetNotifications, SQL self-test 28): the cancellations
+        // and the ADMIN_ACTIONS row carry the same moment
+        var adminLog = await db.AdminActions.SingleAsync();
+        Assert.All(await db.Bookings.Where(b => b.Status == BookingStatuses.Cancelled).ToListAsync(),
+            b => Assert.Equal(adminLog.CreatedAt, b.UpdatedAt));
 
         Assert.Contains("2 pending bookings were cancelled and the customers were notified.", result.Message);
         Assert.Contains($"Still open, please follow up: #{accepted.BookingId} (Accepted, Nov 12, 2:00 PM).", result.Message);
@@ -322,7 +324,6 @@ public class ProviderDetailsTests
         db.ChangeTracker.Clear();
         Assert.Equal(AccountStatuses.Active, (await db.Providers.SingleAsync(x => x.ProviderId == p.ProviderId)).AccountStatus);
         Assert.Equal(BookingStatuses.Accepted, (await db.Bookings.SingleAsync()).Status);
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]

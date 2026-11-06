@@ -126,7 +126,7 @@ public class CustomerReviewService : ICustomerReviewService
                 FirstName = who.FirstName,
                 FullName = fullName,
                 Initials = NameFormat.Initials(fullName),
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             BookingId = booking!.BookingId,
@@ -185,13 +185,11 @@ public class CustomerReviewService : ICustomerReviewService
         provider.ReviewCount = visible.Count;
         provider.AvgRating = Math.Round((decimal)visible.Sum() / visible.Count, 1, MidpointRounding.AwayFromZero);
 
-        var customerName = NameFormat.ShortName(who.FirstName, who.LastName);
-        var text = $"{customerName} left a {form.Rating}-star review for booking #{bookingId}.";
-        _db.Notifications.Add(new Notification { UserId = booking!.ProviderUserId, Message = NameFormat.Truncate(text, 255), CreatedAt = now });
+        // database v2.3: the provider's bell shows the review from REVIEWS itself (dbo.usp_GetNotifications)
 
         try
         {
-            await _db.SaveChangesAsync(ct);   // review + provider rating + notification: one database transaction
+            await _db.SaveChangesAsync(ct);   // review + provider rating: one database transaction
         }
         catch (DbUpdateException ex)
         {
@@ -202,6 +200,6 @@ public class CustomerReviewService : ICustomerReviewService
 
         _logger.LogInformation("Customer {CustomerId} reviewed booking {BookingId} ({Rating} stars); provider {ProviderId} now has {Count} visible reviews.",
             who.CustomerId, bookingId, form.Rating, provider.ProviderId, provider.ReviewCount);
-        return new(SubmitReviewOutcome.Ok, $"Thank you! Your {form.Rating}-star review for {booking.ProviderName} was posted.");
+        return new(SubmitReviewOutcome.Ok, $"Thank you! Your {form.Rating}-star review for {booking!.ProviderName} was posted.");
     }
 }

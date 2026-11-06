@@ -11,18 +11,29 @@ public interface INotificationService
     /// The newest notifications and the unread number, for the bell's dropdown. Null when the account may not use the site.
     Task<NotificationPanel?> GetPanelAsync(int userId, CancellationToken ct = default);
 
-    /// The "all notifications" page (paged). Null when the account may not use the site.
+    /// The "all notifications" page (the newest 25, paged). Null when the account may not use the site.
     Task<NotificationsPageViewModel?> GetPageAsync(int userId, int page, CancellationToken ct = default);
 
-    /// Marks every unread notification of THIS user as read. Returns the new unread number (always 0), or null when not allowed.
+    /// Everything up to now counts as seen (USERS.NOTIFICATIONS_SEEN_AT). Returns the new unread number (always 0),
+    /// or null when not allowed.
     Task<int?> MarkAllReadAsync(int userId, CancellationToken ct = default);
-
-    /// Marks one notification of THIS user as read and returns it (null when it does not exist or belongs to someone else).
-    Task<NotificationOpenResult> OpenAsync(int userId, int notificationId, CancellationToken ct = default);
 }
 
-public sealed record NotificationOpenResult(bool Allowed, NotificationItem? Item);
+/// Where the rows come from. The real one runs dbo.usp_GetNotifications; tests can give their own rows.
+public interface INotificationSource
+{
+    Task<IReadOnlyList<NotificationRow>> GetAsync(int userId, CancellationToken ct = default);
+}
 
+public sealed class StoredProcedureNotificationSource : INotificationSource
+{
+    private readonly ServisyoDbContext _db;
+    public StoredProcedureNotificationSource(ServisyoDbContext db) => _db = db;
+    public Task<IReadOnlyList<NotificationRow>> GetAsync(int userId, CancellationToken ct = default) => _db.GetNotificationsAsync(userId, ct);
+}
+
+/// Database v2.3: nothing is stored per notification. dbo.usp_GetNotifications works out the newest 25 from the
+/// bookings, payments, reviews, administrator actions and applications; USERS.NOTIFICATIONS_SEEN_AT says which are new.
 public class NotificationService : INotificationService
 {
     public const int PanelSize = 8;
@@ -30,11 +41,13 @@ public class NotificationService : INotificationService
 
     private readonly ServisyoDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly INotificationSource _source;
 
-    public NotificationService(ServisyoDbContext db, TimeProvider? clock = null)
+    public NotificationService(ServisyoDbContext db, TimeProvider? clock = null, INotificationSource? source = null)
     {
         _db = db;
         _clock = clock ?? TimeProvider.System;
+        _source = source ?? new StoredProcedureNotificationSource(db);
     }
 
     private sealed record Me(string Role, string FirstName, string LastName, string? BusinessName);
@@ -47,26 +60,26 @@ public class NotificationService : INotificationService
             .Select(u => new Me(u.Role, u.FirstName, u.LastName, u.Provider != null ? u.Provider.BusinessName : null))
             .FirstOrDefaultAsync(ct);
 
-    private NotificationItem ToItem(int id, string message, bool isRead, DateTime createdUtc)
+    /// The rows, newest first (the procedure already sorts them; sorting again keeps the order certain).
+    private async Task<List<NotificationRow>> RowsAsync(int userId, CancellationToken ct) =>
+        (await _source.GetAsync(userId, ct))
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(DerivedQueries.Top)
+            .ToList();
+
+    private NotificationItem ToItem(int position, NotificationRow r)
     {
-        var kind = NotificationKinds.Classify(message);
-        return new NotificationItem(id, kind, NotificationKinds.TitleOf(kind), message,
-            NotificationFormat.TimeAgo(createdUtc, _clock.GetUtcNow()), isRead);
+        var kind = NotificationKinds.Normalize(r.Kind);
+        return new NotificationItem(position, kind, NotificationKinds.TitleOf(kind), r.Message,
+            NotificationFormat.TimeAgo(r.CreatedAt, _clock.GetUtcNow()), !r.IsUnread);
     }
 
     public async Task<NotificationPanel?> GetPanelAsync(int userId, CancellationToken ct = default)
     {
         if (await FindMeAsync(userId, ct) is null) return null;
 
-        var unread = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct);
-        var rows = await _db.Notifications.AsNoTracking()
-            .Where(n => n.UserId == userId)
-            .OrderByDescending(n => n.CreatedAt).ThenByDescending(n => n.NotificationId)
-            .Take(PanelSize)
-            .Select(n => new { n.NotificationId, n.Message, n.IsRead, n.CreatedAt })
-            .ToListAsync(ct);
-
-        return new NotificationPanel(unread, rows.Select(r => ToItem(r.NotificationId, r.Message, r.IsRead, r.CreatedAt)).ToList());
+        var rows = await RowsAsync(userId, ct);
+        return new NotificationPanel(rows.Count(r => r.IsUnread), rows.Take(PanelSize).Select((r, i) => ToItem(i + 1, r)).ToList());
     }
 
     public async Task<NotificationsPageViewModel?> GetPageAsync(int userId, int page, CancellationToken ct = default)
@@ -74,17 +87,11 @@ public class NotificationService : INotificationService
         var me = await FindMeAsync(userId, ct);
         if (me is null) return null;
 
-        var mine = _db.Notifications.AsNoTracking().Where(n => n.UserId == userId);
-        var total = await mine.CountAsync(ct);
-        var unread = await mine.CountAsync(n => !n.IsRead, ct);
+        var rows = await RowsAsync(userId, ct);
+        var total = rows.Count;
+        var unread = rows.Count(r => r.IsUnread);
         var pageCount = Math.Max(1, (int)Math.Ceiling(total / (double)PageSize));
         page = Math.Clamp(page, 1, pageCount);
-
-        var rows = await mine
-            .OrderByDescending(n => n.CreatedAt).ThenByDescending(n => n.NotificationId)
-            .Skip((page - 1) * PageSize).Take(PageSize)
-            .Select(n => new { n.NotificationId, n.Message, n.IsRead, n.CreatedAt })
-            .ToListAsync(ct);
 
         var fullName = $"{me.FirstName} {me.LastName}".Trim();
         var isAdmin = me.Role == Roles.Administrator;
@@ -106,7 +113,7 @@ public class NotificationService : INotificationService
             Total = total,
             Page = page,
             PageCount = pageCount,
-            Items = rows.Select(r => ToItem(r.NotificationId, r.Message, r.IsRead, r.CreatedAt)).ToList()
+            Items = rows.Select((r, i) => ToItem(i + 1, r)).Skip((page - 1) * PageSize).Take(PageSize).ToList()
         };
     }
 
@@ -114,25 +121,7 @@ public class NotificationService : INotificationService
     {
         if (await FindMeAsync(userId, ct) is null) return null;
 
-        var unread = await _db.Notifications.Where(n => n.UserId == userId && !n.IsRead).ToListAsync(ct);
-        foreach (var n in unread) n.IsRead = true;
-        if (unread.Count > 0) await _db.SaveChangesAsync(ct);
+        await _db.MarkNotificationsSeenAsync(userId, _clock.GetUtcNow().UtcDateTime, ct);
         return 0;
-    }
-
-    public async Task<NotificationOpenResult> OpenAsync(int userId, int notificationId, CancellationToken ct = default)
-    {
-        if (await FindMeAsync(userId, ct) is null) return new(false, null);
-
-        // the owner is part of the lookup: somebody else's notification is simply "not found"
-        var n = await _db.Notifications.FirstOrDefaultAsync(x => x.NotificationId == notificationId && x.UserId == userId, ct);
-        if (n is null) return new(true, null);
-
-        if (!n.IsRead)
-        {
-            n.IsRead = true;
-            await _db.SaveChangesAsync(ct);
-        }
-        return new(true, ToItem(n.NotificationId, n.Message, true, n.CreatedAt));
     }
 }

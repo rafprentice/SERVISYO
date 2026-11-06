@@ -114,9 +114,9 @@ public class ProviderBookingsService : IProviderBookingsService
                 ServiceLocation = b.ServiceLocation,
                 ServiceDescription = b.ServiceDescription,
                 TotalFee = b.TotalFee,
-                PayMethod = b.Payment != null ? b.Payment.PaymentMethod : null,
-                PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
-                PayReference = b.Payment != null ? b.Payment.TransactionReference : null
+                PayMethod = b.PaymentDetail != null ? (b.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
+                PayStatus = b.PaymentDetail != null ? b.PaymentDetail.PaymentStatus : null,
+                PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null
             })
             .ToListAsync(ct);
 
@@ -145,7 +145,7 @@ public class ProviderBookingsService : IProviderBookingsService
                 FullName = fullName,
                 Initials = NameFormat.Initials(fullName),
                 Subtitle = who.BusinessName,
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             ActiveTab = activeTab.Key,
@@ -192,13 +192,13 @@ public class ProviderBookingsService : IProviderBookingsService
         _ => "marked completed"
     };
 
-    private static string SuccessText(int bookingId, BookingAction action, Payment? payment) => action switch
+    private static string SuccessText(int bookingId, BookingAction action, PaymentDetail? payment, decimal totalFee) => action switch
     {
         BookingAction.Accept => $"Booking #{bookingId} accepted. The customer has been notified.",
         BookingAction.Reject => $"Booking #{bookingId} rejected. The customer has been notified.",
         BookingAction.Start => $"Booking #{bookingId} is now in progress.",
         _ when payment is { PaymentStatus: PaymentRecordStatuses.PendingCollection } =>
-            $"Booking #{bookingId} marked as completed. When the customer hands you the {PaymentNotes.Money(payment.Amount)} cash, press Confirm Cash Received.",
+            $"Booking #{bookingId} marked as completed. When the customer hands you the {PaymentNotes.Money(totalFee)} cash, press Confirm Cash Received.",
         _ => $"Booking #{bookingId} marked as completed."
     };
 
@@ -226,7 +226,7 @@ public class ProviderBookingsService : IProviderBookingsService
         // 3. the booking must belong to THIS provider; someone else's booking looks exactly like a missing one
         var booking = await _db.Bookings
             .Include(b => b.Customer)
-            .Include(b => b.Payment)
+            .Include(b => b.PaymentDetail)
             .FirstOrDefaultAsync(b => b.BookingId == bookingId && b.ProviderId == who.ProviderId, ct);
         if (booking is null)
         {
@@ -245,7 +245,7 @@ public class ProviderBookingsService : IProviderBookingsService
 
         // 4b. the job can only start once the customer has approved the quotation and paid it, or chosen
         //     cash on completion (Paid -> Scheduled -> In Progress)
-        var payment = PaymentProgress.Effective(booking.PaymentStatus, booking.Payment?.PaymentStatus);
+        var payment = PaymentProgress.Effective(booking.PaymentStatus, booking.PaymentDetail?.PaymentStatus);
         if (action == BookingAction.Start && !PaymentProgress.IsArranged(payment))
         {
             _logger.LogInformation("Booking {BookingId} is not paid yet; start refused.", bookingId);
@@ -283,16 +283,10 @@ public class ProviderBookingsService : IProviderBookingsService
             }
         }
 
-        // 6. change the status and tell the customer, together or not at all
+        // 6. change the status (database v2.3: the customer's bell shows "Your booking #N is now ..." from BOOKINGS itself)
         var now = _clock.GetUtcNow().UtcDateTime;
         booking.Status = info.ToStatus;
         booking.UpdatedAt = now;
-        _db.Notifications.Add(new Notification
-        {
-            UserId = booking.Customer.UserId,
-            Message = $"Your booking #{booking.BookingId} is now {info.ToStatus}.",     // same wording as usp_UpdateBookingStatus
-            CreatedAt = now
-        });
 
         try
         {
@@ -314,6 +308,6 @@ public class ProviderBookingsService : IProviderBookingsService
         if (_live is not null)
             await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, payment, action.ToString().ToLowerInvariant()),
                 booking.Customer.UserId, userId);
-        return new(access, BookingActionOutcome.Success, SuccessText(bookingId, action, booking.Payment));
+        return new(access, BookingActionOutcome.Success, SuccessText(bookingId, action, booking.PaymentDetail, booking.TotalFee));
     }
 }

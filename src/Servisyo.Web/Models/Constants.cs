@@ -45,9 +45,3 @@ public static class ReviewStatuses
     public const string Removed = "Removed";
 }
 
-public static class ReportStatuses
-{
-    public const string Open = "Open";
-    public const string UnderReview = "Under Review";
-    public const string Resolved = "Resolved";
-}

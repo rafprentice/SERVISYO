@@ -48,10 +48,10 @@ public class BookingMonitorService : IBookingMonitorService
                 CustomerEmail = x.Customer.User.Email, CustomerPhone = x.Customer.User.PhoneNumber,
                 ProviderFirst = x.Provider.User.FirstName, ProviderLast = x.Provider.User.LastName,
                 x.Provider.BusinessName, ProviderEmail = x.Provider.User.Email, ProviderPhone = x.Provider.User.PhoneNumber,
-                PayAmount = x.Payment != null ? (decimal?)x.Payment.Amount : null,
-                PayMethod = x.Payment != null ? x.Payment.PaymentMethod : null,
-                PayReference = x.Payment != null ? x.Payment.TransactionReference : null,
-                PayStatus = x.Payment != null ? x.Payment.PaymentStatus : null
+                PayAmount = x.PaymentDetail != null ? (decimal?)x.TotalFee : null,     // v2.3: the payment's amount IS the booking fee
+                PayMethod = x.PaymentDetail != null ? (x.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
+                PayReference = x.PaymentDetail != null ? x.PaymentDetail.TransactionReference : null,
+                PayStatus = x.PaymentDetail != null ? x.PaymentDetail.PaymentStatus : null
             })
             .FirstOrDefaultAsync(ct);
         if (b is null) return new(true, null);
@@ -141,7 +141,7 @@ public class BookingMonitorService : IBookingMonitorService
             .Select(b => new
             {
                 b.BookingId, b.BookingDate, b.BookingTime, b.Status, b.PaymentStatus,
-                PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
+                PayStatus = b.PaymentDetail != null ? b.PaymentDetail.PaymentStatus : null,
                 CustomerFirst = b.Customer.User.FirstName, CustomerLast = b.Customer.User.LastName,
                 ProviderFirst = b.Provider.User.FirstName, ProviderLast = b.Provider.User.LastName
             })

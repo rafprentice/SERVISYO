@@ -2,35 +2,59 @@ using System.Text.RegularExpressions;
 
 namespace Servisyo.Web.Models;
 
-/// PAYMENTS: one payment record per booking, made when the customer approves the quotation ("Approve & Pay").
-/// DEMO ONLY: no money moves and no real GCash / Maya account is called.
-///   CashOnCompletion -> PendingCollection, then Paid when the provider confirms the cash after the job
-///   MockEWallet      -> Paid at once (test GCash / Maya)
-/// BOOKINGS.PAYMENT_STATUS keeps the three values from the project PDF (Unpaid, Paid, Refunded); it becomes Paid when
-/// the money is really in (e-wallet at once, cash when the provider confirms it).
+/// Database v2.3 - PAYMENTS: the list of payment methods (a lookup table). Fixed rows: 1 Cash on Completion,
+/// 2 GCash, 3 Maya (see PaymentIds). DEMO ONLY: no money moves and no real GCash / Maya account is called.
 public class Payment
 {
     public int PaymentId { get; set; }
+    public string MethodName { get; set; } = string.Empty;
+
+    public ICollection<PaymentDetail> Details { get; set; } = new List<PaymentDetail>();
+}
+
+/// Database v2.3 - PAYMENTS_DTL: the bridge between BOOKINGS and PAYMENTS: one booking's payment (one per booking),
+/// made when the customer approves the quotation ("Approve & Pay").
+///   Cash on Completion -> PendingCollection, then Paid (PAID_AT) when the provider confirms the cash after the job
+///   GCash / Maya       -> Paid at once (test e-wallet)
+/// Not stored again (rules: one fact in one place, nothing that can be calculated):
+///   the amount           = the booking's TOTAL_FEE
+///   "cash collected"     = a cash payment whose status is Paid, collected at PAID_AT (was CASH_PAYMENT_DETAILS)
+/// BOOKINGS.PAYMENT_STATUS keeps the three values from the project PDF (Unpaid, Paid, Refunded).
+public class PaymentDetail
+{
+    public int PaymentDtlId { get; set; }
     public int BookingId { get; set; }
-    public decimal Amount { get; set; }                                        // copied from the booking's fee on the server
-    public string PaymentMethod { get; set; } = PaymentMethods.CashOnCompletion;
+    public int PaymentId { get; set; }                                        // PAYMENTS: the method
     public string PaymentStatus { get; set; } = PaymentRecordStatuses.PendingCollection;
     public string TransactionReference { get; set; } = string.Empty;          // "CASH-2026-0042" or "GCASH-48213907"
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? PaidAt { get; set; }                                      // null while cash is still to be collected
 
     public Booking Booking { get; set; } = null!;
-    public CashPaymentDetails? CashDetails { get; set; }                       // only for CashOnCompletion
+    public Payment Payment { get; set; } = null!;
 }
 
-/// CASH_PAYMENT_DETAILS: the cash side of a payment (one-to-one with PAYMENTS, same key).
-public class CashPaymentDetails
+/// The fixed rows of PAYMENTS (seeded by the DerivedData migration; CK_PAYMENTS_DTL_PENDING_CASH uses row 1).
+public static class PaymentIds
 {
-    public int PaymentId { get; set; }
-    public bool IsCollectedByProvider { get; set; }
-    public DateTime? CollectedAt { get; set; }
+    public const int Cash = 1;
+    public const int GCash = 2;
+    public const int Maya = 3;
 
-    public Payment Payment { get; set; } = null!;
+    public const string CashName = "Cash on Completion";
+    public const string GCashName = "GCash";
+    public const string MayaName = "Maya";
+
+    public static readonly IReadOnlyList<(int Id, string Name)> All = new[] { (Cash, CashName), (GCash, GCashName), (Maya, MayaName) };
+
+    /// The row for what the customer chose: cash, or the test e-wallet with GCash / Maya.
+    public static int For(string method, string? wallet) =>
+        method == PaymentMethods.CashOnCompletion ? Cash : wallet == MockWallets.Maya ? Maya : GCash;
+
+    /// The two choices of the payment window ("CashOnCompletion" / "MockEWallet"), as the screens and messages use them.
+    public static string MethodOf(int paymentId) => paymentId == Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet;
+
+    public static string? WalletOf(int paymentId) => paymentId switch { GCash => MockWallets.GCash, Maya => MockWallets.Maya, _ => null };
 }
 
 public static class PaymentMethods

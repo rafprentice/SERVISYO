@@ -93,7 +93,7 @@ public class ProviderOfferingsService : IProviderOfferingsService
                 FullName = fullName,
                 Initials = NameFormat.Initials(fullName),
                 Subtitle = who.BusinessName,
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             Cards = rows.Select(r => new ServiceCardViewModel

@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Servisyo.Web.Data;
@@ -11,22 +13,25 @@ namespace Servisyo.Tests;
 public class NotificationKindTests
 {
     [Theory]
-    [InlineData("You have a new booking request (Booking #5).", NotificationKinds.BookingNew)]
-    [InlineData("Booking #5 was cancelled by the customer.", NotificationKinds.BookingCancelled)]
-    [InlineData("Your booking #5 is now Accepted.", NotificationKinds.BookingUpdate)]
-    [InlineData("New provider application from Juan Plumbing (Juan Dela Cruz).", NotificationKinds.ApplicationNew)]
-    [InlineData("Your provider application was Approved.", NotificationKinds.Application)]
-    [InlineData("Something else entirely", NotificationKinds.General)]
-    [InlineData("", NotificationKinds.General)]
-    [InlineData(null, NotificationKinds.General)]
-    public void Classify_UsesTheWordingTheSystemWrites(string? message, string expected)
-        => Assert.Equal(expected, NotificationKinds.Classify(message));
+    [InlineData(NotificationKinds.BookingNew)]
+    [InlineData(NotificationKinds.BookingCancelled)]
+    [InlineData(NotificationKinds.BookingUpdate)]
+    [InlineData(NotificationKinds.ApplicationNew)]
+    [InlineData(NotificationKinds.Application)]
+    [InlineData(NotificationKinds.General)]
+    public void Normalize_KeepsTheKindsTheProcedureReturns(string kind) => Assert.Equal(kind, NotificationKinds.Normalize(kind));
+
+    [Theory]
+    [InlineData("something-else")]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("https://evil.example")]
+    public void Normalize_TurnsAnythingElseIntoGeneral(string? kind) => Assert.Equal(NotificationKinds.General, NotificationKinds.Normalize(kind));
 
     [Fact]
     public void EveryKind_HasATitleAndAnIcon()
     {
-        foreach (var kind in new[] { NotificationKinds.BookingNew, NotificationKinds.BookingCancelled, NotificationKinds.BookingUpdate,
-                                     NotificationKinds.ApplicationNew, NotificationKinds.Application, NotificationKinds.General })
+        foreach (var kind in NotificationKinds.All)
         {
             Assert.False(string.IsNullOrWhiteSpace(NotificationKinds.TitleOf(kind)));
             Assert.Contains(NotificationKinds.IconOf(kind), new[] { "calendar", "user", "bell" });
@@ -59,6 +64,8 @@ public class NotificationKindTests
     }
 }
 
+/// Database v2.3: the rows come from dbo.usp_GetNotifications (tested by the SQL self-test 30/31); here a stand-in
+/// source gives the rows, so the panel, the page, the unread number and "mark all as read" can be tested.
 public class NotificationServiceTests
 {
     private sealed class FixedClock : TimeProvider
@@ -66,12 +73,20 @@ public class NotificationServiceTests
         public override DateTimeOffset GetUtcNow() => new(2026, 10, 14, 2, 0, 0, TimeSpan.Zero);
     }
 
+    private sealed class FakeSource : INotificationSource
+    {
+        public Dictionary<int, List<NotificationRow>> Rows { get; } = new();
+        public Task<IReadOnlyList<NotificationRow>> GetAsync(int userId, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<NotificationRow>>(Rows.TryGetValue(userId, out var r) ? r : new List<NotificationRow>());
+    }
+
     private static readonly DateTime NowUtc = new(2026, 10, 14, 2, 0, 0);
 
-    private static (NotificationService svc, ServisyoDbContext db) Create()
+    private static (NotificationService svc, ServisyoDbContext db, FakeSource source) Create()
     {
         var db = new ServisyoDbContext(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        return (new NotificationService(db, new FixedClock()), db);
+        var source = new FakeSource();
+        return (new NotificationService(db, new FixedClock(), source), db, source);
     }
 
     private static async Task<User> AddUserAsync(ServisyoDbContext db, string role, string first = "Ana", string status = AccountStatuses.Active)
@@ -83,33 +98,26 @@ public class NotificationServiceTests
         return u;
     }
 
-    private static async Task<Notification> NotifyAsync(ServisyoDbContext db, User to, string message, bool read = false, int minutesAgo = 5)
-    {
-        var n = new Notification { UserId = to.UserId, Message = message, IsRead = read, CreatedAt = NowUtc.AddMinutes(-minutesAgo) };
-        db.Notifications.Add(n);
-        await db.SaveChangesAsync();
-        return n;
-    }
-
-    // ------------------------------------------------------------------ the dropdown
+    private static NotificationRow Row(string message, int minutesAgo, bool unread = true, string kind = NotificationKinds.BookingUpdate) =>
+        new() { Kind = kind, Message = message, CreatedAt = NowUtc.AddMinutes(-minutesAgo), IsUnread = unread };
 
     [Fact]
-    public async Task Panel_ShowsOnlyMyNotifications_NewestFirst_WithTheUnreadNumber()
+    public async Task Panel_ShowsMyRows_NewestFirst_WithTheUnreadNumber()
     {
-        var (svc, db) = Create();
+        var (svc, db, source) = Create();
         var me = await AddUserAsync(db, Roles.Customer);
-        var other = await AddUserAsync(db, Roles.Customer, "Ben");
-        await NotifyAsync(db, me, "Your booking #1 is now Accepted.", read: true, minutesAgo: 120);
-        await NotifyAsync(db, me, "Your booking #2 is now Rejected.", minutesAgo: 10);
-        await NotifyAsync(db, me, "Your booking #3 is now Completed.", minutesAgo: 1);
-        await NotifyAsync(db, other, "Your booking #9 is now Accepted.");
+        source.Rows[me.UserId] = new()
+        {
+            Row("Your booking #1 is now Accepted.", 120, unread: false),
+            Row("Your booking #3 is now Completed.", 1),
+            Row("Your booking #2 is now Rejected.", 10)
+        };
 
-        var panel = await svc.GetPanelAsync(me.UserId);
+        var panel = (await svc.GetPanelAsync(me.UserId))!;
 
-        Assert.NotNull(panel);
-        Assert.Equal(2, panel!.Unread);
+        Assert.Equal(2, panel.Unread);
         Assert.Equal(new[] { "Your booking #3 is now Completed.", "Your booking #2 is now Rejected.", "Your booking #1 is now Accepted." },
-            panel.Items.Select(i => i.Message).ToArray());
+            panel.Items.Select(i => i.Message));
         Assert.Equal("Booking Update", panel.Items[0].Title);
         Assert.Equal("1 min ago", panel.Items[0].TimeText);
         Assert.Equal("2 hrs ago", panel.Items[2].TimeText);
@@ -120,21 +128,53 @@ public class NotificationServiceTests
     [Fact]
     public async Task Panel_ShowsEight_ButTheNumberCountsEveryUnreadOne()
     {
-        var (svc, db) = Create();
+        var (svc, db, source) = Create();
         var me = await AddUserAsync(db, Roles.ServiceProvider, "Marco");
-        for (var i = 1; i <= 12; i++) await NotifyAsync(db, me, $"You have a new booking request (Booking #{i}).", minutesAgo: i);
+        source.Rows[me.UserId] = Enumerable.Range(1, 12)
+            .Select(i => Row($"You have a new booking request (Booking #{i}).", i, kind: NotificationKinds.BookingNew)).ToList();
 
         var panel = (await svc.GetPanelAsync(me.UserId))!;
 
         Assert.Equal(12, panel.Unread);
         Assert.Equal(NotificationService.PanelSize, panel.Items.Count);
         Assert.Equal("You have a new booking request (Booking #1).", panel.Items[0].Message);
+        Assert.Equal("New Booking Request", panel.Items[0].Title);
+    }
+
+    [Fact]
+    public async Task NeverMoreThanTwentyFive_EvenIfTheSourceGivesMore()
+    {
+        var (svc, db, source) = Create();
+        var me = await AddUserAsync(db, Roles.ServiceProvider, "Marco");
+        source.Rows[me.UserId] = Enumerable.Range(1, 40).Select(i => Row($"Booking #{i}", i)).ToList();
+
+        var page = (await svc.GetPageAsync(me.UserId, 1))!;
+
+        Assert.Equal(DerivedQueries.Top, page.Total);
+        Assert.Equal(DerivedQueries.Top, page.Unread);
+        Assert.Equal(2, page.PageCount);                   // 25 rows, 15 a page
+    }
+
+    [Fact]
+    public async Task Page_IsPaged_AndClampsTheNumber()
+    {
+        var (svc, db, source) = Create();
+        var me = await AddUserAsync(db, Roles.Customer);
+        source.Rows[me.UserId] = Enumerable.Range(1, 20).Select(i => Row($"Your booking #{i} is now Accepted.", i)).ToList();
+
+        var page2 = (await svc.GetPageAsync(me.UserId, 2))!;
+        Assert.Equal(2, page2.Page);
+        Assert.Equal(5, page2.Items.Count);
+        Assert.Equal("Your booking #16 is now Accepted.", page2.Items[0].Message);
+
+        Assert.Equal(2, (await svc.GetPageAsync(me.UserId, 99))!.Page);
+        Assert.Equal(1, (await svc.GetPageAsync(me.UserId, -3))!.Page);
     }
 
     [Fact]
     public async Task Panel_IsEmptyForSomeoneWithNoNotifications()
     {
-        var (svc, db) = Create();
+        var (svc, db, _) = Create();
         var me = await AddUserAsync(db, Roles.Administrator, "Ada");
 
         var panel = (await svc.GetPanelAsync(me.UserId))!;
@@ -144,98 +184,47 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task UnknownKinds_AreShownAsGeneral()
+    {
+        var (svc, db, source) = Create();
+        var me = await AddUserAsync(db, Roles.Customer);
+        source.Rows[me.UserId] = new() { Row("Hello", 1, kind: "not-a-kind") };
+
+        var item = Assert.Single((await svc.GetPanelAsync(me.UserId))!.Items);
+
+        Assert.Equal(NotificationKinds.General, item.Kind);
+        Assert.Equal("bell", item.Icon);
+    }
+
+    [Fact]
     public async Task SuspendedDeactivatedOrUnknownAccounts_GetNothing()
     {
-        var (svc, db) = Create();
+        var (svc, db, source) = Create();
         var suspended = await AddUserAsync(db, Roles.Customer, "Sus", AccountStatuses.Suspended);
         var deactivated = await AddUserAsync(db, Roles.ServiceProvider, "Dea", AccountStatuses.Deactivated);
-        await NotifyAsync(db, suspended, "Your booking #1 is now Accepted.");
+        source.Rows[suspended.UserId] = new() { Row("Your booking #1 is now Accepted.", 1) };
 
         foreach (var id in new[] { suspended.UserId, deactivated.UserId, 9999 })
         {
             Assert.Null(await svc.GetPanelAsync(id));
             Assert.Null(await svc.GetPageAsync(id, 1));
             Assert.Null(await svc.MarkAllReadAsync(id));
-            Assert.False((await svc.OpenAsync(id, 1)).Allowed);
         }
+        Assert.Null((await db.Users.SingleAsync(u => u.UserId == suspended.UserId)).NotificationsSeenAt);
     }
 
-    // ------------------------------------------------------------------ marking read
-
     [Fact]
-    public async Task MarkAllRead_OnlyTouchesMyNotifications()
+    public async Task MarkAllRead_OnlyMarksMyBellAsSeen()
     {
-        var (svc, db) = Create();
+        var (svc, db, _) = Create();
         var me = await AddUserAsync(db, Roles.Customer);
         var other = await AddUserAsync(db, Roles.Customer, "Ben");
-        await NotifyAsync(db, me, "Your booking #1 is now Accepted.");
-        await NotifyAsync(db, me, "Your booking #2 is now Accepted.");
-        await NotifyAsync(db, other, "Your booking #3 is now Accepted.");
 
         var unread = await svc.MarkAllReadAsync(me.UserId);
 
         Assert.Equal(0, unread);
-        Assert.All(db.Notifications.Where(n => n.UserId == me.UserId), n => Assert.True(n.IsRead));
-        Assert.All(db.Notifications.Where(n => n.UserId == other.UserId), n => Assert.False(n.IsRead));
-        Assert.Equal(0, (await svc.GetPanelAsync(me.UserId))!.Unread);
-        Assert.Equal(1, (await svc.GetPanelAsync(other.UserId))!.Unread);
-    }
-
-    [Fact]
-    public async Task Open_MarksOneReadAndReturnsIt()
-    {
-        var (svc, db) = Create();
-        var me = await AddUserAsync(db, Roles.ServiceProvider, "Marco");
-        var first = await NotifyAsync(db, me, "You have a new booking request (Booking #1).");
-        var second = await NotifyAsync(db, me, "You have a new booking request (Booking #2).");
-
-        var result = await svc.OpenAsync(me.UserId, first.NotificationId);
-
-        Assert.True(result.Allowed);
-        Assert.Equal(NotificationKinds.BookingNew, result.Item!.Kind);
-        Assert.True((await db.Notifications.FindAsync(first.NotificationId))!.IsRead);
-        Assert.False((await db.Notifications.FindAsync(second.NotificationId))!.IsRead);
-    }
-
-    [Fact]
-    public async Task Open_SomeoneElsesNotification_IsNotFound_AndStaysUnread()
-    {
-        var (svc, db) = Create();
-        var me = await AddUserAsync(db, Roles.Customer);
-        var other = await AddUserAsync(db, Roles.Customer, "Ben");
-        var theirs = await NotifyAsync(db, other, "Your booking #1 is now Accepted.");
-
-        var result = await svc.OpenAsync(me.UserId, theirs.NotificationId);
-        var missing = await svc.OpenAsync(me.UserId, 9999);
-
-        Assert.True(result.Allowed);
-        Assert.Null(result.Item);
-        Assert.Null(missing.Item);
-        Assert.False((await db.Notifications.FindAsync(theirs.NotificationId))!.IsRead);
-    }
-
-    // ------------------------------------------------------------------ the full page
-
-    [Fact]
-    public async Task Page_IsPaged_AndClampsTheNumber()
-    {
-        var (svc, db) = Create();
-        var me = await AddUserAsync(db, Roles.Customer);
-        for (var i = 1; i <= 20; i++) await NotifyAsync(db, me, $"Your booking #{i} is now Accepted.", minutesAgo: i);
-
-        var first = (await svc.GetPageAsync(me.UserId, 1))!;
-        var second = (await svc.GetPageAsync(me.UserId, 2))!;
-        var beyond = (await svc.GetPageAsync(me.UserId, 99))!;
-        var below = (await svc.GetPageAsync(me.UserId, -3))!;
-
-        Assert.Equal(20, first.Total);
-        Assert.Equal(2, first.PageCount);
-        Assert.Equal(NotificationService.PageSize, first.Items.Count);
-        Assert.Equal(5, second.Items.Count);
-        Assert.Equal(2, beyond.Page);
-        Assert.Equal(1, below.Page);
-        Assert.Equal(20, first.Unread);
-        Assert.Equal(20, first.Shell.UnreadNotifications);
+        Assert.Equal(NowUtc, (await db.Users.AsNoTracking().SingleAsync(u => u.UserId == me.UserId)).NotificationsSeenAt);
+        Assert.Null((await db.Users.AsNoTracking().SingleAsync(u => u.UserId == other.UserId)).NotificationsSeenAt);
     }
 
     [Theory]
@@ -244,100 +233,95 @@ public class NotificationServiceTests
     [InlineData(Roles.Administrator, "Admin", "System Administrator")]
     public async Task Page_HasTheRightSidebarForEachRole(string role, string shellRole, string subtitle)
     {
-        var (svc, db) = Create();
+        var (svc, db, source) = Create();
         var me = await AddUserAsync(db, role);
+        source.Rows[me.UserId] = new() { Row("x", 1), Row("y", 2, unread: false) };
 
         var page = (await svc.GetPageAsync(me.UserId, 1))!;
 
         Assert.Equal(shellRole, page.Shell.Role);
         Assert.Equal(subtitle, page.Shell.Subtitle);
+        Assert.Equal(1, page.Shell.UnreadNotifications);
+    }
+
+    [Fact]
+    public async Task TheRealSource_ReturnsNothing_OnTheInMemoryTestDatabase()
+    {
+        var (_, db, _) = Create();
+        var me = await AddUserAsync(db, Roles.Customer);
+
+        Assert.Empty(await new StoredProcedureNotificationSource(db).GetAsync(me.UserId));
+        Assert.Equal(0, await db.CountUnreadNotificationsAsync(me.UserId));
+        Assert.Empty(await db.GetBookingsNeedingAttentionAsync());
     }
 }
 
+/// The stored procedures and the C# classes that read them must use the same column names (EF matches them by name).
+public class DerivedQueryColumnTests
+{
+    private static string ProcedureText(string name)
+    {
+        var sql = Assert.Single(DerivedDataSql.CreateAll, s => s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\n")
+                                                            || s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\r\n"));
+        return sql.Replace("''", "'");
+    }
+
+    private static List<string> FinalAliases(string sql)
+    {
+        // the last SELECT TOP (@Top) ... FROM of the procedure: its "AS Name" aliases
+        var last = sql.LastIndexOf("SELECT TOP (@Top)", StringComparison.Ordinal);
+        Assert.True(last >= 0);
+        var from = sql.IndexOf("\n    FROM ", last, StringComparison.Ordinal);
+        return Regex.Matches(sql[last..from], @"\bAS ([A-Za-z]+)\s*(?:,|$)", RegexOptions.Multiline).Select(m => m.Groups[1].Value).ToList();
+    }
+
+    private static IEnumerable<string> Properties<T>() => typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name);
+
+    [Fact]
+    public void Notifications_ColumnsMatchNotificationRow()
+    {
+        var sql = ProcedureText("usp_GetNotifications");
+        Assert.Equal(Properties<NotificationRow>().OrderBy(x => x), FinalAliases(sql).Distinct().OrderBy(x => x));
+        Assert.Contains("SELECT TOP (@Top)", sql);
+        Assert.Contains("IF @Top IS NULL OR @Top < 1 OR @Top > 25 SET @Top = 25;", sql);     // never more than 25
+    }
+
+    [Fact]
+    public void Attention_ColumnsMatchAttentionRow()
+    {
+        var sql = ProcedureText("usp_GetBookingsNeedingAttention");
+        Assert.Equal(Properties<AttentionRow>().OrderBy(x => x), FinalAliases(sql).Distinct().OrderBy(x => x));
+        Assert.Contains("IF @Top IS NULL OR @Top < 1 OR @Top > 25 SET @Top = 25;", sql);
+    }
+
+    [Fact]
+    public void TheNotificationKinds_OfTheProcedure_AreTheOnesTheAppKnows()
+    {
+        var sql = ProcedureText("usp_GetNotifications");
+        var kinds = Regex.Matches(sql, @"N'(booking-[a-z]+|application(?:-new)?|general)'").Select(m => m.Groups[1].Value).Distinct();
+        Assert.All(kinds, k => Assert.Contains(k, NotificationKinds.All));
+        Assert.Equal(NotificationKinds.All.OrderBy(x => x), kinds.OrderBy(x => x));
+    }
+}
+
+/// Registration no longer writes anything for the administrators' bell: a Pending application IS the notification.
 public class AdminApplicationNotificationTests
 {
-    private static (AuthService svc, ServisyoDbContext db) Create()
+    [Fact]
+    public async Task ANewProviderApplication_IsPending_AndNothingElseIsStored()
     {
         var db = new ServisyoDbContext(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
-        return (new AuthService(db, new PasswordHasher<User>()), db);
-    }
+        var svc = new AuthService(db, new PasswordHasher<User>());
 
-    private static RegisterProviderViewModel Provider(string business = "Juan Plumbing Services", string email = "juan@email.com") => new()
-    {
-        FirstName = "Juan", MiddleName = "Reyes", LastName = "Dela Cruz", Email = email, PhoneNumber = "09171234567",
-        Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", BusinessName = business,
-        Description = "Pipe repair and installation.", Address = "Lahug, Cebu City", BaseFee = 500m
-    };
-
-    private static User Admin(string status = AccountStatuses.Active) =>
-        new() { FirstName = "Ada", LastName = "Admin", Email = $"{Guid.NewGuid():N}@test.com", PasswordHash = "x", Role = Roles.Administrator, AccountStatus = status };
-
-    [Fact]
-    public async Task ANewProviderApplication_NotifiesEveryActiveAdministrator()
-    {
-        var (svc, db) = Create();
-        var a1 = Admin(); var a2 = Admin(); var gone = Admin(AccountStatuses.Suspended);
-        db.Users.AddRange(a1, a2, gone);
-        await db.SaveChangesAsync();
-
-        var result = await svc.RegisterProviderAsync(Provider());
-
-        Assert.True(result.Succeeded);
-        var notes = await db.Notifications.ToListAsync();
-        Assert.Equal(2, notes.Count);
-        Assert.Equal(new[] { a1.UserId, a2.UserId }.OrderBy(x => x), notes.Select(n => n.UserId).OrderBy(x => x));
-        Assert.All(notes, n =>
+        var result = await svc.RegisterProviderAsync(new RegisterProviderViewModel
         {
-            Assert.Equal("New provider application from Juan Plumbing Services (Juan Dela Cruz).", n.Message);
-            Assert.False(n.IsRead);
-            Assert.Equal(NotificationKinds.ApplicationNew, NotificationKinds.Classify(n.Message));
+            FirstName = "Juan", MiddleName = "Reyes", LastName = "Dela Cruz", Email = "juan@email.com", PhoneNumber = "09171234567",
+            Password = "Passw0rd1", ConfirmPassword = "Passw0rd1", BusinessName = "Juan Plumbing Services",
+            Description = "Pipe repair and installation.", Address = "Lahug, Cebu City", BaseFee = 500m
         });
-    }
-
-    [Fact]
-    public async Task WithoutAnyAdministrator_RegistrationStillWorks()
-    {
-        var (svc, db) = Create();
-
-        var result = await svc.RegisterProviderAsync(Provider());
 
         Assert.True(result.Succeeded);
-        Assert.Empty(db.Notifications);
-    }
-
-    [Fact]
-    public async Task ALongBusinessName_IsCutToFitTheColumn()
-    {
-        var (svc, db) = Create();
-        db.Users.Add(Admin());
-        await db.SaveChangesAsync();
-
-        var result = await svc.RegisterProviderAsync(Provider(new string('B', 155)));
-
-        Assert.True(result.Succeeded);
-        var message = (await db.Notifications.SingleAsync()).Message;
-        Assert.True(message.Length <= 255);
-        Assert.StartsWith("New provider application from BBB", message);
-    }
-
-    [Fact]
-    public async Task CustomerSignUps_AndFailedSignUps_NotifyNobody()
-    {
-        var (svc, db) = Create();
-        db.Users.Add(Admin());
-        await db.SaveChangesAsync();
-
-        await svc.RegisterCustomerAsync(new RegisterCustomerViewModel
-        {
-            FirstName = "Maria", MiddleName = "Lopez", LastName = "Santos", Email = "maria@email.com", PhoneNumber = "09171234567",
-            Address = "123 Rizal St., Brgy. Lahug", Password = "Passw0rd1", ConfirmPassword = "Passw0rd1"
-        });
-        await svc.RegisterProviderAsync(Provider(email: "dup@email.com"));
-        db.Notifications.RemoveRange(db.Notifications);
-        await db.SaveChangesAsync();
-        var duplicate = await svc.RegisterProviderAsync(Provider(email: "dup@email.com"));      // same email: refused
-
-        Assert.False(duplicate.Succeeded);
-        Assert.Empty(db.Notifications);
+        Assert.Equal(ApprovalStatuses.Pending, (await db.Providers.SingleAsync()).ApprovalStatus);
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), e => e.GetTableName() is "NOTIFICATIONS" or "BOOKING_REPORTS");
     }
 }

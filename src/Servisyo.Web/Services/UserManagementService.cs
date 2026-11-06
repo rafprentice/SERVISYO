@@ -81,7 +81,7 @@ public class UserManagementService : IUserManagementService
                 FullName = admin.FirstName,
                 Initials = NameFormat.Initials(admin.FirstName),
                 Subtitle = "System Administrator",
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == adminUserId && !n.IsRead, ct)
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(adminUserId, ct)
             },
             Q = search,
             Status = status,

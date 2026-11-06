@@ -104,9 +104,7 @@ public class PaymentAndLiveTests
         Assert.Equal(PaymentStatuses.Paid, saved.PaymentStatus);
         Assert.Equal(NowUtc, saved.UpdatedAt);
 
-        var note = await w.Db.Notifications.SingleAsync();
-        Assert.Equal(w.Mary.UserId, note.UserId);
-        Assert.Contains("₱650", note.Message);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
 
         var (change, users) = Assert.Single(w.Live.Sent);
         Assert.Equal(b.BookingId, change.BookingId);
@@ -144,7 +142,7 @@ public class PaymentAndLiveTests
 
         Assert.Equal(PaymentOutcome.NotPayable, result.Outcome);
         Assert.Equal(PaymentStatuses.Unpaid, (await w.Db.Bookings.AsNoTracking().SingleAsync()).PaymentStatus);
-        Assert.Empty(w.Db.Notifications);
+        Assert.Empty(w.Db.PaymentDetails);
         Assert.Empty(w.Live.Sent);
     }
 
@@ -156,7 +154,7 @@ public class PaymentAndLiveTests
 
         Assert.True((await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet)).Succeeded);
         Assert.Equal(PaymentOutcome.AlreadyPaid, (await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet)).Outcome);
-        Assert.Single(w.Db.Notifications);
+        Assert.Single(w.Db.PaymentDetails);                // still one payment
     }
 
     [Fact]

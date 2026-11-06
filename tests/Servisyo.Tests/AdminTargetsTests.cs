@@ -146,6 +146,6 @@ public class AdminTargetsTests
 
         var design = File.ReadAllText(Path.Combine(dir!.FullName, "docs", "sql", "DatabaseDesign-v2.sql"));
         Assert.Contains("CONSTRAINT CK_ADMIN_ACTIONS_TARGET CHECK (" + ServisyoDbContext.AdminActionTargetCheck + ")", design);
-        Assert.Contains("DATABASE DESIGN v2.2", design);
+        Assert.Contains("WHAT CHANGED IN v2.2 (EF migration \"AdminTargets\")", design);     // the design file is v2.3 now
     }
 }

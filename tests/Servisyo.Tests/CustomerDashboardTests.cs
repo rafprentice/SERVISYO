@@ -317,17 +317,15 @@ public class CustomerDashboardServiceTests
         var ana = NewCustomer("Ana", "ana@test.com");
         var ben = NewCustomer("Ben", "ben@test.com");
         db.Customers.AddRange(ana, ben);
-        db.Notifications.AddRange(
-            new Notification { User = ana.User, Message = "unread 1" },
-            new Notification { User = ana.User, Message = "unread 2" },
-            new Notification { User = ana.User, Message = "read", IsRead = true },
-            new Notification { User = ben.User, Message = "someone else's" });
         db.Messages.Add(new Message { Sender = ben.User, Receiver = ana.User, MessageText = "hi" });
+        db.Messages.Add(new Message { Sender = ana.User, Receiver = ben.User, MessageText = "hello" });
         await db.SaveChangesAsync();
 
         var vm = await svc.GetAsync(ana.UserId);
 
-        Assert.Equal(2, vm!.Shell.UnreadNotifications);
-        Assert.Equal(1, vm.Shell.UnreadMessages);
+        Assert.Equal(1, vm!.Shell.UnreadMessages);
+        // database v2.3: the bell number comes from usp_GetNotifications (SQL self-test 31); the in-memory
+        // test database has no stored procedures, so it is 0 here
+        Assert.Equal(0, vm.Shell.UnreadNotifications);
     }
 }

@@ -208,68 +208,6 @@ namespace Servisyo.Web.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
-            modelBuilder.Entity("Servisyo.Web.Models.BookingReport", b =>
-                {
-                    b.Property<int>("ReportId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasColumnName("REPORT_ID");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("ReportId"));
-
-                    b.Property<int>("BookingId")
-                        .HasColumnType("int")
-                        .HasColumnName("BOOKING_ID");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasColumnName("CREATED_AT")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("REASON");
-
-                    b.Property<int>("ReportedByUserId")
-                        .HasColumnType("int")
-                        .HasColumnName("REPORTED_BY_USER_ID");
-
-                    b.Property<string>("ResolutionNote")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("RESOLUTION_NOTE");
-
-                    b.Property<DateTime?>("ResolvedAt")
-                        .HasColumnType("datetime2")
-                        .HasColumnName("RESOLVED_AT");
-
-                    b.Property<int?>("ResolvedByUserId")
-                        .HasColumnType("int")
-                        .HasColumnName("RESOLVED_BY_USER_ID");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)")
-                        .HasColumnName("STATUS");
-
-                    b.HasKey("ReportId");
-
-                    b.HasIndex("BookingId");
-
-                    b.HasIndex("ReportedByUserId");
-
-                    b.HasIndex("ResolvedByUserId");
-
-                    b.ToTable("BOOKING_REPORTS", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_REPORTS_STATUS", "[STATUS] IN ('Open','Under Review','Resolved')");
-                        });
-                });
-
             modelBuilder.Entity("Servisyo.Web.Models.BookingService", b =>
                 {
                     b.Property<int>("BookingServiceId")
@@ -304,30 +242,6 @@ namespace Servisyo.Web.Migrations
                         .IsUnique();
 
                     b.ToTable("BOOKING_SERVICES", (string)null);
-                });
-
-            modelBuilder.Entity("Servisyo.Web.Models.CashPaymentDetails", b =>
-                {
-                    b.Property<int>("PaymentId")
-                        .HasColumnType("int")
-                        .HasColumnName("PAYMENT_ID");
-
-                    b.Property<DateTime?>("CollectedAt")
-                        .HasColumnType("datetime2")
-                        .HasColumnName("COLLECTED_AT");
-
-                    b.Property<bool>("IsCollectedByProvider")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(false)
-                        .HasColumnName("IS_COLLECTED_BY_PROVIDER");
-
-                    b.HasKey("PaymentId");
-
-                    b.ToTable("CASH_PAYMENT_DETAILS", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_CASH_COLLECTED", "([IS_COLLECTED_BY_PROVIDER] = 0 AND [COLLECTED_AT] IS NULL) OR ([IS_COLLECTED_BY_PROVIDER] = 1 AND [COLLECTED_AT] IS NOT NULL)");
-                        });
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Customer", b =>
@@ -376,56 +290,6 @@ namespace Servisyo.Web.Migrations
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
-            modelBuilder.Entity("Servisyo.Web.Models.EmailOtp", b =>
-                {
-                    b.Property<int>("EmailOtpId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasColumnName("EMAIL_OTP_ID");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("EmailOtpId"));
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("int")
-                        .HasColumnName("ATTEMPTS");
-
-                    b.Property<string>("CodeHash")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("CODE_HASH");
-
-                    b.Property<DateTime?>("ConsumedAt")
-                        .HasColumnType("datetime2")
-                        .HasColumnName("CONSUMED_AT");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasColumnName("CREATED_AT")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2")
-                        .HasColumnName("EXPIRES_AT");
-
-                    b.Property<string>("Purpose")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("nvarchar(30)")
-                        .HasColumnName("PURPOSE");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("int")
-                        .HasColumnName("USER_ID");
-
-                    b.HasKey("EmailOtpId");
-
-                    b.HasIndex("UserId", "Purpose");
-
-                    b.ToTable("EMAIL_OTPS", (string)null);
-                });
-
             modelBuilder.Entity("Servisyo.Web.Models.Message", b =>
                 {
                     b.Property<int>("MessageId")
@@ -469,43 +333,6 @@ namespace Servisyo.Web.Migrations
                     b.ToTable("MESSAGES", (string)null);
                 });
 
-            modelBuilder.Entity("Servisyo.Web.Models.Notification", b =>
-                {
-                    b.Property<int>("NotificationId")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasColumnName("NOTIFICATION_ID");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("NotificationId"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime2")
-                        .HasColumnName("CREATED_AT")
-                        .HasDefaultValueSql("SYSUTCDATETIME()");
-
-                    b.Property<bool>("IsRead")
-                        .HasColumnType("bit")
-                        .HasColumnName("IS_READ");
-
-                    b.Property<string>("Message")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("MESSAGE");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("int")
-                        .HasColumnName("USER_ID");
-
-                    b.HasKey("NotificationId");
-
-                    b.HasIndex("UserId", "IsRead")
-                        .HasDatabaseName("IX_NOTIFICATIONS_USER_UNREAD");
-
-                    b.ToTable("NOTIFICATIONS", (string)null);
-                });
-
             modelBuilder.Entity("Servisyo.Web.Models.Payment", b =>
                 {
                     b.Property<int>("PaymentId")
@@ -515,10 +342,45 @@ namespace Servisyo.Web.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("PaymentId"));
 
-                    b.Property<decimal>("Amount")
-                        .HasPrecision(10, 2)
-                        .HasColumnType("decimal(10,2)")
-                        .HasColumnName("AMOUNT");
+                    b.Property<string>("MethodName")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("METHOD_NAME");
+
+                    b.HasKey("PaymentId");
+
+                    b.HasIndex("MethodName")
+                        .IsUnique();
+
+                    b.ToTable("PAYMENTS", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            PaymentId = 1,
+                            MethodName = "Cash on Completion"
+                        },
+                        new
+                        {
+                            PaymentId = 2,
+                            MethodName = "GCash"
+                        },
+                        new
+                        {
+                            PaymentId = 3,
+                            MethodName = "Maya"
+                        });
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.PaymentDetail", b =>
+                {
+                    b.Property<int>("PaymentDtlId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("PAYMENT_DTL_ID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("PaymentDtlId"));
 
                     b.Property<int>("BookingId")
                         .HasColumnType("int")
@@ -534,11 +396,9 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("PAID_AT");
 
-                    b.Property<string>("PaymentMethod")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("nvarchar(50)")
-                        .HasColumnName("PAYMENT_METHOD");
+                    b.Property<int>("PaymentId")
+                        .HasColumnType("int")
+                        .HasColumnName("PAYMENT_ID");
 
                     b.Property<string>("PaymentStatus")
                         .IsRequired()
@@ -552,27 +412,25 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("nvarchar(50)")
                         .HasColumnName("TRANSACTION_REFERENCE");
 
-                    b.HasKey("PaymentId");
+                    b.HasKey("PaymentDtlId");
 
                     b.HasIndex("BookingId")
                         .IsUnique();
 
+                    b.HasIndex("PaymentId");
+
                     b.HasIndex("TransactionReference")
                         .IsUnique();
 
-                    b.ToTable("PAYMENTS", null, t =>
+                    b.ToTable("PAYMENTS_DTL", null, t =>
                         {
-                            t.HasTrigger("trg_Payments_Audit");
+                            t.HasTrigger("trg_PaymentsDtl_Audit");
 
-                            t.HasCheckConstraint("CK_PAYMENTS_AMOUNT", "[AMOUNT] >= 0");
+                            t.HasCheckConstraint("CK_PAYMENTS_DTL_PAID_AT", "[PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL");
 
-                            t.HasCheckConstraint("CK_PAYMENTS_METHOD", "[PAYMENT_METHOD] IN ('CashOnCompletion','MockEWallet')");
+                            t.HasCheckConstraint("CK_PAYMENTS_DTL_PENDING_CASH", "[PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_ID] = 1");
 
-                            t.HasCheckConstraint("CK_PAYMENTS_PAID_AT", "[PAYMENT_STATUS] = 'PendingCollection' OR [PAID_AT] IS NOT NULL");
-
-                            t.HasCheckConstraint("CK_PAYMENTS_PENDING_CASH", "[PAYMENT_STATUS] <> 'PendingCollection' OR [PAYMENT_METHOD] = 'CashOnCompletion'");
-
-                            t.HasCheckConstraint("CK_PAYMENTS_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
+                            t.HasCheckConstraint("CK_PAYMENTS_DTL_STATUS", "[PAYMENT_STATUS] IN ('PendingCollection','Paid','Refunded')");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -1057,6 +915,10 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("MIDDLE_NAME");
 
+                    b.Property<DateTime?>("NotificationsSeenAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("NOTIFICATIONS_SEEN_AT");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(255)
@@ -1151,32 +1013,6 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Provider");
                 });
 
-            modelBuilder.Entity("Servisyo.Web.Models.BookingReport", b =>
-                {
-                    b.HasOne("Servisyo.Web.Models.Booking", "Booking")
-                        .WithMany("Reports")
-                        .HasForeignKey("BookingId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Servisyo.Web.Models.User", "ReportedBy")
-                        .WithMany()
-                        .HasForeignKey("ReportedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Servisyo.Web.Models.User", "ResolvedBy")
-                        .WithMany()
-                        .HasForeignKey("ResolvedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Booking");
-
-                    b.Navigation("ReportedBy");
-
-                    b.Navigation("ResolvedBy");
-                });
-
             modelBuilder.Entity("Servisyo.Web.Models.BookingService", b =>
                 {
                     b.HasOne("Servisyo.Web.Models.Booking", "Booking")
@@ -1196,33 +1032,11 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Service");
                 });
 
-            modelBuilder.Entity("Servisyo.Web.Models.CashPaymentDetails", b =>
-                {
-                    b.HasOne("Servisyo.Web.Models.Payment", "Payment")
-                        .WithOne("CashDetails")
-                        .HasForeignKey("Servisyo.Web.Models.CashPaymentDetails", "PaymentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Payment");
-                });
-
             modelBuilder.Entity("Servisyo.Web.Models.Customer", b =>
                 {
                     b.HasOne("Servisyo.Web.Models.User", "User")
                         .WithOne("Customer")
                         .HasForeignKey("Servisyo.Web.Models.Customer", "UserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Servisyo.Web.Models.EmailOtp", b =>
-                {
-                    b.HasOne("Servisyo.Web.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -1248,26 +1062,23 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Sender");
                 });
 
-            modelBuilder.Entity("Servisyo.Web.Models.Notification", b =>
+            modelBuilder.Entity("Servisyo.Web.Models.PaymentDetail", b =>
                 {
-                    b.HasOne("Servisyo.Web.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
+                    b.HasOne("Servisyo.Web.Models.Booking", "Booking")
+                        .WithOne("PaymentDetail")
+                        .HasForeignKey("Servisyo.Web.Models.PaymentDetail", "BookingId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("Servisyo.Web.Models.Payment", b =>
-                {
-                    b.HasOne("Servisyo.Web.Models.Booking", "Booking")
-                        .WithOne("Payment")
-                        .HasForeignKey("Servisyo.Web.Models.Payment", "BookingId")
+                    b.HasOne("Servisyo.Web.Models.Payment", "Payment")
+                        .WithMany("Details")
+                        .HasForeignKey("PaymentId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("Booking");
+
+                    b.Navigation("Payment");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Provider", b =>
@@ -1365,9 +1176,7 @@ namespace Servisyo.Web.Migrations
 
             modelBuilder.Entity("Servisyo.Web.Models.Booking", b =>
                 {
-                    b.Navigation("Payment");
-
-                    b.Navigation("Reports");
+                    b.Navigation("PaymentDetail");
 
                     b.Navigation("Review");
 
@@ -1381,7 +1190,7 @@ namespace Servisyo.Web.Migrations
 
             modelBuilder.Entity("Servisyo.Web.Models.Payment", b =>
                 {
-                    b.Navigation("CashDetails");
+                    b.Navigation("Details");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Provider", b =>

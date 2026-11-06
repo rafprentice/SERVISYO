@@ -112,7 +112,7 @@ public class SystemLogService : ISystemLogService
                 FullName = admin.FirstName,
                 Initials = NameFormat.Initials(admin.FirstName),
                 Subtitle = "System Administrator",
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == adminUserId && !n.IsRead, ct)
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(adminUserId, ct)
             },
             Query = new SystemLogQuery { From = from, To = to, Action = action, Role = role, Q = search, Page = page },
             Page = page,

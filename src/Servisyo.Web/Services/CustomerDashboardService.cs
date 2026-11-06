@@ -59,9 +59,9 @@ public class CustomerDashboardService : ICustomerDashboardService
         ProviderName = b.Provider.BusinessName,
         ProviderUserId = b.Provider.UserId,
         ProviderId = b.ProviderId,
-        PayMethod = b.Payment != null ? b.Payment.PaymentMethod : null,
-        PayStatus = b.Payment != null ? b.Payment.PaymentStatus : null,
-        PayReference = b.Payment != null ? b.Payment.TransactionReference : null
+        PayMethod = b.PaymentDetail != null ? (b.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
+        PayStatus = b.PaymentDetail != null ? b.PaymentDetail.PaymentStatus : null,
+        PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null
     };
 
     public async Task<CustomerDashboardViewModel?> GetAsync(int userId, CancellationToken ct = default)
@@ -127,7 +127,7 @@ public class CustomerDashboardService : ICustomerDashboardService
                 FirstName = customer.FirstName,
                 FullName = $"{customer.FirstName} {customer.LastName}",
                 Initials = NameFormat.Initials($"{customer.FirstName} {customer.LastName}"),
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await _db.Messages.CountAsync(m => m.ReceiverId == userId && !m.IsRead, ct)
             },
             Recent = recentRows.Select(r => new RecentBookingViewModel

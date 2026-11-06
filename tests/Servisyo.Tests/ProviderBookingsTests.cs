@@ -245,8 +245,6 @@ public class ProviderBookingsServiceTests
             Assert.Equal(access, result.Access);
             Assert.Equal(BookingStatuses.Pending, await StatusOf(db, booking.BookingId));
         }
-
-        Assert.Empty(await db.Notifications.ToListAsync());
     }
 
     // -------------------------------------------------------------------- list
@@ -468,11 +466,7 @@ public class ProviderBookingsServiceTests
         Assert.Equal(to, saved.Status);
         Assert.Equal(NowUtc, saved.UpdatedAt);
 
-        // same wording as usp_UpdateBookingStatus in the PDF, sent to the customer's user account
-        var note = Assert.Single(await db.Notifications.AsNoTracking().ToListAsync());
-        Assert.Equal(customer.UserId, note.UserId);
-        Assert.Equal($"Your booking #{booking.BookingId} is now {to}.", note.Message);
-        Assert.False(note.IsRead);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
     }
 
     [Fact]
@@ -513,7 +507,6 @@ public class ProviderBookingsServiceTests
         }
 
         Assert.Equal(6 * 4 - 4, tried);
-        Assert.Empty(await db.Notifications.ToListAsync());
     }
 
     [Fact]
@@ -542,7 +535,6 @@ public class ProviderBookingsServiceTests
 
         Assert.True(first.Succeeded);
         Assert.Equal(BookingActionOutcome.InvalidTransition, second.Outcome);
-        Assert.Single(await db.Notifications.ToListAsync());               // the customer is told once
     }
 
     [Fact]
@@ -581,7 +573,6 @@ public class ProviderBookingsServiceTests
         }
 
         Assert.Equal(BookingStatuses.Pending, await StatusOf(db, booking.BookingId));
-        Assert.Empty(await db.Notifications.ToListAsync());
     }
 
     [Fact]
@@ -641,7 +632,6 @@ public class ProviderBookingsServiceTests
         Assert.Contains("9:00 AM", result.Message);
         Assert.Contains("10:00 AM", result.Message);
         Assert.Equal(BookingStatuses.Pending, await StatusOf(db, request.BookingId));
-        Assert.Empty(await db.Notifications.ToListAsync());
     }
 
     [Fact]

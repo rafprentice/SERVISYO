@@ -75,13 +75,13 @@ public class AdminAttentionLinkTests
     }
 
     [Fact]
-    public void FlaggedReviews_GoToModeration_AndUnbuiltScreensStayDisabled()
+    public void FlaggedReviews_GoToModeration_BookingsGoToAdminBookings_AndUnbuiltScreensStayDisabled()
     {
         var rows = AdminAttention.Build(0, 1, 1, 1);
 
         Assert.Equal(AdminAttentionAction.ModerateReviews, rows[0].Action);
-        Assert.Equal(AdminAttentionAction.None, rows[1].Action);     // suspended accounts
-        Assert.Equal(AdminAttentionAction.None, rows[2].Action);     // reported issues
+        Assert.Equal(AdminAttentionAction.None, rows[1].Action);         // suspended accounts: no screen yet, the button stays disabled
+        Assert.Equal(AdminAttentionAction.BookingList, rows[2].Action);  // database v2.3: bookings that need attention open Admin Bookings
     }
 }
 
@@ -261,10 +261,7 @@ public class ProviderApprovalServiceTests
         Assert.Null(log.TargetCategoryId);
         Assert.Equal("ID checked", log.Reason);
 
-        var note = await db.Notifications.AsNoTracking().SingleAsync();
-        Assert.Equal(p.UserId, note.UserId);
-        Assert.Equal("Your provider application was Approved.", note.Message);
-        Assert.False(note.IsRead);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
     }
 
     [Fact]
@@ -341,8 +338,7 @@ public class ProviderApprovalServiceTests
         Assert.Equal("SERVICE_PROVIDER", log.TargetType);
         Assert.Null(log.Reason);                      // a blank note is stored as "no note"
 
-        var note = await db.Notifications.AsNoTracking().SingleAsync();
-        Assert.Equal("Your provider application was Rejected.", note.Message);
+        // database v2.3: no NOTIFICATIONS row; the bell is worked out by usp_GetNotifications (SQL self-test 30/31)
     }
 
     // ---------------------------------------------------------------- the rules
@@ -366,8 +362,7 @@ public class ProviderApprovalServiceTests
 
         var saved = await db.Providers.AsNoTracking().SingleAsync(x => x.ProviderId == p.ProviderId);
         Assert.Equal(current, saved.ApprovalStatus);
-        Assert.Empty(db.AdminActions);                // no log entry, no second notification
-        Assert.Empty(db.Notifications);
+        Assert.Empty(db.AdminActions);                // no log entry (so no second notification on the bell)
     }
 
     [Fact]
@@ -384,7 +379,6 @@ public class ProviderApprovalServiceTests
         Assert.Equal(ApprovalOutcome.NotPending, second.Outcome);
         Assert.Equal(ApprovalStatuses.Approved, (await db.Providers.AsNoTracking().SingleAsync()).ApprovalStatus);
         Assert.Single(db.AdminActions);
-        Assert.Single(db.Notifications);
     }
 
     [Fact]
@@ -397,7 +391,6 @@ public class ProviderApprovalServiceTests
 
         Assert.Equal(ApprovalOutcome.NotFound, result.Outcome);
         Assert.Empty(db.AdminActions);
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]
@@ -421,7 +414,6 @@ public class ProviderApprovalServiceTests
         var saved = await db.Providers.AsNoTracking().SingleAsync(x => x.ProviderId == p.ProviderId);
         Assert.Equal(ApprovalStatuses.Pending, saved.ApprovalStatus);
         Assert.Empty(db.AdminActions);
-        Assert.Empty(db.Notifications);
     }
 
     [Fact]

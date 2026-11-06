@@ -129,33 +129,8 @@ public class AuthService : IAuthService
 
         _db.Users.Add(user);
         var result = await SaveAsync(user);
-        if (result.Succeeded) await NotifyAdminsAsync(user, user.Provider!.BusinessName);
+        // database v2.3: the administrators' bell shows every Pending application (dbo.usp_GetNotifications); nothing is stored
         return result;
-    }
-
-    /// Tells every ACTIVE administrator (their bell) that a provider applied. The registration itself is already saved,
-    /// so a problem here is only logged: it must never make a successful sign-up look like a failure.
-    private async Task NotifyAdminsAsync(User applicant, string businessName)
-    {
-        try
-        {
-            var adminIds = await _db.Users.AsNoTracking()
-                .Where(u => u.Role == Roles.Administrator && u.AccountStatus == AccountStatuses.Active)
-                .Select(u => u.UserId)
-                .ToListAsync();
-            if (adminIds.Count == 0) return;
-
-            var text = $"New provider application from {businessName} ({applicant.FirstName} {applicant.LastName}).";
-            if (text.Length > 255) text = text[..252] + "...";
-
-            foreach (var id in adminIds)
-                _db.Notifications.Add(new Notification { UserId = id, Message = text });
-            await _db.SaveChangesAsync();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not notify the administrators about the new provider application of user {UserId}.", applicant.UserId);
-        }
     }
 
     public async Task<AuthResult> ValidateLoginAsync(string email, string password)

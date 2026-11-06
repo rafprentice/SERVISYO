@@ -19,7 +19,7 @@ public sealed record AdminBookingDisplay(string Badge, string Tone)
 }
 
 /// What a button in the "Needs Admin Attention" list does. None = the screen is not built yet (button stays greyed out).
-public enum AdminAttentionAction { None, ReviewApplication, ApplicationList, ModerateReviews }
+public enum AdminAttentionAction { None, ReviewApplication, ApplicationList, ModerateReviews, BookingList }
 
 /// One row of "Needs Admin Attention": the shared row (text, colour, button label) plus where its button goes.
 public class AdminAttentionItem : AttentionItemViewModel
@@ -34,7 +34,7 @@ public static class AdminAttention
     /// so the list never shows something that is not really waiting.
     /// firstPendingProviderId = the oldest waiting application: "Review Applications" opens that one first (fair queue).
     public static List<AdminAttentionItem> Build(
-        int pendingApplications, int flaggedReviews, int suspendedAccounts, int openReports,
+        int pendingApplications, int flaggedReviews, int suspendedAccounts, int bookingsNeedingAttention,
         int? firstPendingProviderId = null)
     {
         var rows = new List<AdminAttentionItem>();
@@ -68,12 +68,17 @@ public static class AdminAttention
                 ActionLabel = "View Accounts"
             });
 
-        if (openReports > 0)
+        // database v2.3 (replaces BOOKING_REPORTS): dbo.usp_GetBookingsNeedingAttention - a flagged or 1-2 star review,
+        // or a date that has passed while the booking is still Pending or Accepted
+        if (bookingsNeedingAttention > 0)
             rows.Add(new()
             {
                 Tone = "violet",
-                Text = $"{Plural.Of(openReports, "reported booking issue")} pending resolution",
-                ActionLabel = openReports == 1 ? "View Booking" : "View Bookings"
+                Text = bookingsNeedingAttention == 1
+                    ? "1 booking needs attention (low rating or date passed)"
+                    : $"{bookingsNeedingAttention} bookings need attention (low ratings or dates passed)",
+                ActionLabel = bookingsNeedingAttention == 1 ? "View Booking" : "View Bookings",
+                Action = AdminAttentionAction.BookingList
             });
 
         return rows;

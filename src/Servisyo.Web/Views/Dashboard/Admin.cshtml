@@ -32,7 +32,7 @@
     </div>
     @if (Model.Attention.Count == 0)
     {
-        <p class="sv-panel__empty">All clear. Applications, flagged reviews, suspended accounts and reported issues that need you will show up here.</p>
+        <p class="sv-panel__empty">All clear. Applications, flagged reviews, suspended accounts and bookings that need you will show up here.</p>
     }
     else
     {
@@ -60,6 +60,7 @@
                             AdminAttentionAction.ReviewApplication => Url.Action("Review", "AdminApplications", new { providerId = a.TargetId, returnTo = "dashboard" }),
                             AdminAttentionAction.ApplicationList => Url.Action("Index", "AdminProviders", new { status = "Pending" }),
                             AdminAttentionAction.ModerateReviews => Url.Action("Index", "AdminReviews", new { status = "Flagged" }),
+                            AdminAttentionAction.BookingList => Url.Action("Index", "AdminBookings"),
                             _ => null
                         };
                     }

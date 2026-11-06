@@ -34,7 +34,11 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IFindServicesService, FindServicesService>();
 builder.Services.AddScoped<IMessagingService, MessagingService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
-builder.Services.AddScoped<IOtpService, OtpService>();
+// database v2.3: the reset code is calculated, not stored (no EMAIL_OTPS table). Secret: user-secrets "PasswordReset:CodeSecret"
+builder.Services.Configure<OtpOptions>(builder.Configuration.GetSection(OtpOptions.SectionName));
+builder.Services.AddSingleton<IOtpService, OtpService>();
+// database v2.3: notifications are worked out by dbo.usp_GetNotifications (no NOTIFICATIONS table)
+builder.Services.AddScoped<INotificationSource, StoredProcedureNotificationSource>();
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 builder.Services.AddScoped<IProviderApprovalService, ProviderApprovalService>();
 builder.Services.AddScoped<IProviderAvailabilityService, ProviderAvailabilityService>();
@@ -49,10 +53,6 @@ builder.Services.AddScoped<IAdminDashboardService, AdminDashboardService>();
 builder.Services.AddScoped<IUserManagementService, UserManagementService>();
 builder.Services.AddScoped<IProviderManagementService, ProviderManagementService>();
 builder.Services.AddScoped<IBookingMonitorService, BookingMonitorService>();
-// once a day: delete READ notifications older than 6 months (appsettings.json "NotificationCleanup"); unread ones are kept
-builder.Services.Configure<NotificationCleanupOptions>(builder.Configuration.GetSection(NotificationCleanupOptions.SectionName));
-builder.Services.AddScoped<INotificationCleanupService, NotificationCleanupService>();
-builder.Services.AddHostedService<NotificationCleanupWorker>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(o =>
     {

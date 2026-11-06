@@ -31,7 +31,7 @@ public class BookingDetailsTests
     }
 
     /// A booking with two services (Plumbing), made Nov 3, 2026 10:15 UTC (= 6:15 PM in Cebu), for Nov 20 at 9:00 for 90 minutes.
-    private static async Task<Booking> AddBookingAsync(ServisyoDbContext db, Payment? payment = null, string status = BookingStatuses.Accepted,
+    private static async Task<Booking> AddBookingAsync(ServisyoDbContext db, PaymentDetail? payment = null, string status = BookingStatuses.Accepted,
         string bookingPayment = PaymentStatuses.Unpaid)
     {
         var plumbing = new ServiceCategory { CategoryName = "Plumbing" };
@@ -47,7 +47,7 @@ public class BookingDetailsTests
             TotalDurationMinutes = 90, TotalFee = 1350m, Status = status, PaymentStatus = bookingPayment,
             ServiceLocation = "Salinas Drive, Brgy. Lahug, Cebu City", ServiceDescription = "Kitchen sink leaks under the cabinet.",
             CreatedAt = new DateTime(2026, 11, 3, 10, 15, 0, DateTimeKind.Utc), RowVersion = new byte[] { 1 },
-            Payment = payment
+            PaymentDetail = payment
         };
         booking.Services.Add(new BookingService
         {
@@ -99,9 +99,9 @@ public class BookingDetailsTests
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
-        var booking = await AddBookingAsync(db, new Payment
+        var booking = await AddBookingAsync(db, new PaymentDetail
         {
-            Amount = 1350m, PaymentMethod = PaymentMethods.MockEWallet, PaymentStatus = PaymentRecordStatuses.Paid,
+            PaymentId = PaymentIds.GCash, PaymentStatus = PaymentRecordStatuses.Paid,
             TransactionReference = "GCASH-48213907", CreatedAt = DateTime.UtcNow, PaidAt = DateTime.UtcNow
         }, bookingPayment: PaymentStatuses.Paid);
 
@@ -145,9 +145,9 @@ public class BookingDetailsTests
     {
         var (svc, db) = Create();
         var admin = await AddAdminAsync(db);
-        var booking = await AddBookingAsync(db, new Payment
+        var booking = await AddBookingAsync(db, new PaymentDetail
         {
-            Amount = 1350m, PaymentMethod = PaymentMethods.CashOnCompletion, PaymentStatus = PaymentRecordStatuses.PendingCollection,
+            PaymentId = PaymentIds.Cash, PaymentStatus = PaymentRecordStatuses.PendingCollection,
             TransactionReference = "CASH-2026-0042", CreatedAt = DateTime.UtcNow
         });
 

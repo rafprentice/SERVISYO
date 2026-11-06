@@ -40,7 +40,8 @@ public class AdminDashboardService : IAdminDashboardService
         var flagged = await _db.Reviews.CountAsync(r => r.Status == ReviewStatuses.Flagged, ct);
         var suspended = await _db.Users.CountAsync(
             u => u.AccountStatus == AccountStatuses.Suspended && u.Role != Roles.Administrator, ct);
-        var openReports = await _db.BookingReports.CountAsync(r => r.Status != ReportStatuses.Resolved, ct);
+        // database v2.3: worked out by dbo.usp_GetBookingsNeedingAttention (TotalCount = all of them, not only the 25 rows)
+        var needAttention = (await _db.GetBookingsNeedingAttentionAsync(ct)).Select(r => r.TotalCount).FirstOrDefault();
 
         // ---- Recent bookings (newest first) ----
         var bookingRows = await _db.Bookings.AsNoTracking()
@@ -85,7 +86,7 @@ public class AdminDashboardService : IAdminDashboardService
                 FullName = admin.FirstName,
                 Initials = NameFormat.Initials(admin.FirstName),
                 Subtitle = "System Administrator",
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = 0
             },
             TotalUsers = customers + providers,
@@ -94,7 +95,7 @@ public class AdminDashboardService : IAdminDashboardService
             PendingApprovals = pending,
             TotalBookings = totalBookings,
             FlaggedReviews = flagged,
-            Attention = AdminAttention.Build(pending, flagged, suspended, openReports,
+            Attention = AdminAttention.Build(pending, flagged, suspended, needAttention,
                 firstPendingProviderId: applicationRows.Select(a => (int?)a.ProviderId).FirstOrDefault()),
             RecentBookings = bookingRows.Select(r => new AdminBookingRowViewModel
             {

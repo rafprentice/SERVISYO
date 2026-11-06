@@ -265,7 +265,7 @@ public class MessagingService : IMessagingService
                 FirstName = me.FirstName,
                 FullName = fullName,
                 Initials = NameFormat.Initials(fullName),
-                UnreadNotifications = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead, ct),
+                UnreadNotifications = await _db.CountUnreadNotificationsAsync(userId, ct),
                 UnreadMessages = await UnreadTotalAsync(userId, ct)
             },
             Conversations = conversations,
