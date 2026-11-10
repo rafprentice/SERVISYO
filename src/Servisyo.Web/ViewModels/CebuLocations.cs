@@ -16,6 +16,8 @@ public sealed record CebuLocation(string Street, string Barangay)
 /// address keeps working; the street, barangay and city are split out here when they are needed separately.
 public static class CebuLocations
 {
+    public const string NotInListMessage = "Please choose one of the addresses in the list.";
+
     public static readonly IReadOnlyList<CebuLocation> All = new[]
     {
         new CebuLocation("Osmeña Blvd", "Capitol Site"),
@@ -37,7 +39,7 @@ public static class CebuLocations
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class CebuLocationAttribute : ValidationAttribute
 {
-    public CebuLocationAttribute() : base("Please choose one of the addresses in the list.") { }
+    public CebuLocationAttribute() : base(CebuLocations.NotInListMessage) { }
 
     public override bool IsValid(object? value) =>
         value is null || (value is string s && (s.Trim().Length == 0 || CebuLocations.Find(s) is not null));

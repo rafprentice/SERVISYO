@@ -40,6 +40,23 @@ public class AddServiceForm
     public int? DurationMinutes { get; set; } = ServiceDurations.Default;
 }
 
+/// The values posted by the "Edit Service" dialog. The duration is not edited here (it is kept as it is).
+/// Nothing here says WHICH provider: that is the signed-in user; the service id is in the address.
+public class EditServiceForm
+{
+    public string? ServiceName { get; set; }
+    public string? Description { get; set; }
+    public int? CategoryId { get; set; }
+    public decimal? Price { get; set; }
+}
+
+/// A service that is part of an active booking (Pending, Accepted or In Progress: ActiveBookingRules) cannot be edited,
+/// so its price cannot change while a customer is waiting for, or getting, the job.
+public static class ServiceEditRules
+{
+    public const string LockedMessage = "Editing is locked while there are active bookings for this service to prevent price tampering.";
+}
+
 /// The value posted by the Activate / Deactivate button. "Activate" is the state the provider WANTS,
 /// so pressing a button twice (or in two tabs) cannot flip the service back and forth.
 public class ServiceStatusForm
@@ -54,8 +71,12 @@ public class ServiceCardViewModel
     public string? Description { get; set; }
     public decimal Price { get; set; }
     public int DurationMinutes { get; set; }
+    public int CategoryId { get; set; }
     public string CategoryName { get; set; } = string.Empty;
     public bool IsActive { get; set; }
+
+    /// True while the service has an active booking: the Edit button is locked (ServiceEditRules).
+    public bool EditLocked { get; set; }
 
     public string StatusText => IsActive ? "Active" : "Inactive";
     public string StatusTone => IsActive ? "completed" : "muted";        // green / grey
@@ -82,10 +103,18 @@ public class ServicesPageViewModel
     public IReadOnlyDictionary<string, string> FieldErrors { get; set; } = new Dictionary<string, string>();
     public string? FormError { get; set; }
 
+    // the Edit dialog: closed normally; open again for EditServiceId when the server rejected the changes
+    public int? EditServiceId { get; set; }
+    public EditServiceForm EditForm { get; set; } = new();
+    public IReadOnlyDictionary<string, string> EditErrors { get; set; } = new Dictionary<string, string>();
+    public string? EditFormError { get; set; }
+    public bool ShowEditDialog => EditServiceId is not null;
+
     public string? FlashMessage { get; set; }
     public bool FlashIsError { get; set; }
 
     public string? ErrorFor(string field) => FieldErrors.TryGetValue(field, out var e) ? e : null;
+    public string? EditErrorFor(string field) => EditErrors.TryGetValue(field, out var e) ? e : null;
 }
 
 public sealed record ServicesPageResult(ProviderDashboardAccess Access, ServicesPageViewModel? Page);
@@ -98,4 +127,12 @@ public enum ServiceStatusOutcome { Success, NotFound, NoChange }
 public sealed record ServiceStatusResult(ProviderDashboardAccess Access, ServiceStatusOutcome Outcome, string Message)
 {
     public bool Succeeded => Outcome == ServiceStatusOutcome.Success;
+}
+
+public enum EditServiceOutcome { Saved, NoChange, Invalid, Locked, NotFound, Failed }
+
+/// Saved / NoChange: done. Invalid: FieldErrors says which boxes need fixing. Locked: the service has an active booking.
+public sealed record EditServiceResult(ProviderDashboardAccess Access, EditServiceOutcome Outcome, IReadOnlyDictionary<string, string> FieldErrors, string Message)
+{
+    public bool Succeeded => Outcome is EditServiceOutcome.Saved or EditServiceOutcome.NoChange;
 }

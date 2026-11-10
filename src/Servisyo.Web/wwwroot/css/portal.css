@@ -441,7 +441,23 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-av__break { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .sv-av__breaklabel { width: 40px; font-size: .6875rem; color: var(--color-text-muted); }
 .sv-av__addbreak { margin: 8px 0 0 76px; padding: 0; border: 0; background: none; font: .6875rem var(--font-body); color: var(--color-text-muted); cursor: pointer; }
-.sv-av__addbreak:hover { color: var(--color-primary); }
+.sv-av__addbreak:hover:not([disabled]) { color: var(--color-primary); }
+.sv-av__addbreak[disabled] { opacity: .5; cursor: not-allowed; }
+.sv-av__breakbar { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.sv-av__breakbar .sv-av__addbreak { margin-right: 0; }
+.sv-av__breaknote { font-size: .6875rem; color: #92400E; }
+.sv-av__breaknote[hidden] { display: none; }
+.sv-av__breakend { min-width: 58px; font-size: .8125rem; }
+.sv-av__breaklen { font-size: .6875rem; color: var(--color-text-muted); }
+.sv-av__break.is-disabled select, .sv-av__break.is-disabled .sv-av__breakend { opacity: .5; }
+.sv-av__breakwarn { flex-basis: 100%; margin: 0 0 0 48px; font-size: .6875rem; color: #92400E; }
+.sv-av__day.is-off .sv-av__breakbar { display: none; }
+.sv-av__dateerr { margin: 0; padding: 10px 18px; border-bottom: 1px solid #FECACA; background: #FEF2F2; font-size: .75rem; color: #991B1B; }
+.sv-av__dateerr[hidden] { display: none; }
+.sv-av__dateedit input[aria-invalid="true"] { border-color: #DC2626; }
+.sv-av__dateout { display: block; font-size: .6875rem; font-style: normal; color: #991B1B; }
+.sv-av__date.is-out { background: #FEF2F2; }
+.sv-av__dateok { display: block; font-size: .6875rem; font-style: normal; color: #3730A3; }
 .sv-av__x { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: #94A3B8; font-size: .75rem; cursor: pointer; }
 .sv-av__x:hover { background: #FEE2E2; color: #991B1B; }
 
@@ -486,6 +502,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 @media (max-width: 720px) {
     .sv-av__settings { grid-template-columns: 1fr; }
     .sv-av__breaks, .sv-av__addbreak { margin-left: 0; }
+    .sv-av__breakwarn { margin-left: 0; }
     .sv-av__name { width: auto; min-width: 84px; }
 }
 
@@ -574,6 +591,17 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-svc .sv-act { padding: 6px 14px; font-size: .75rem; }
 .sv-svc .is-busy .sv-act, .sv-svc form.is-busy { opacity: .6; pointer-events: none; }
 .sv-svc__empty { margin-top: 20px; }
+.sv-svc__actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sv-svc__actions .sv-inline-form { margin: 0; }
+.sv-act.is-locked { opacity: .55; cursor: not-allowed; }
+.sv-act.is-locked:hover { filter: none; }
+/* a small tooltip for a locked button (hover, keyboard focus, or a tap that adds .is-open) */
+.sv-tip { position: relative; display: inline-flex; }
+.sv-tip::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: max-content; max-width: min(280px, 80vw);
+    padding: 8px 10px; border-radius: 6px; background: #1E2235; color: #fff; font-size: .6875rem; line-height: 1.35; text-align: left;
+    box-shadow: 0 6px 18px rgba(18, 20, 38, .25); opacity: 0; visibility: hidden; transition: opacity .12s; pointer-events: none; }
+.sv-tip:hover::after, .sv-tip:focus-within::after, .sv-tip.is-open::after { opacity: 1; visibility: visible; }
+.sv-svcform__note { margin: -6px 0 0; font-size: .6875rem; color: var(--color-text-muted); }
 
 /* Add New Service dialog */
 .sv-svcform { gap: 14px; }
@@ -602,6 +630,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 @media (max-width: 520px) {
     .sv-svc { flex-direction: column; }
     .sv-svcform__row { grid-template-columns: 1fr; }
+    .sv-tip::after { right: auto; left: 0; }          /* the buttons sit on the left on a phone */
 }
 
 /* ================= Provider > Booking Requests ================= */
@@ -863,9 +892,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-cp__itemname { display: flex; align-items: center; gap: 6px; font-size: .8125rem; font-weight: 600; }
 .sv-cp__badge { padding: 1px 7px; border-radius: 4px; background: var(--color-primary); color: #fff; font-size: .625rem; font-weight: 600; }
 .sv-cp__itemtext { margin-top: 2px; font-size: .75rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
-.sv-cp__trashform { margin: 0; }
-.sv-cp__trash { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #94A3B8; cursor: pointer; }
-.sv-cp__trash:hover { background: #FEE2E2; color: #B91C1C; }
+.sv-cp__hint { margin: 6px 0 0; font-size: .6875rem; color: var(--color-text-muted); }
 .sv-cp__empty { margin: 0; font-size: .8125rem; color: var(--color-text-muted); }
 
 .sv-cp__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; }
@@ -970,6 +997,17 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-pd__sprice { flex: none; font-weight: 600; }
 .sv-pd__sprice span { font-weight: 400; color: var(--color-text-muted); }
 .sv-pd__form { padding-top: 16px; }
+.sv-pd__daysoff { margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-border); border-radius: 6px; }
+.sv-pd__daysoff li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px; font-size: .8125rem; border-bottom: 1px solid #EEF1F7; }
+.sv-pd__daysoff li:last-child { border-bottom: 0; }
+.sv-pd__dodate { flex: none; font-weight: 600; }
+.sv-pd__doreason { flex: 1 1 120px; min-width: 0; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.sv-pd__dayoff { margin-top: 10px; }
+.sv-pd__dohint { margin: 0 0 6px; font-size: .6875rem; color: var(--color-text-muted); }
+.sv-pd__dorow { display: flex; flex-wrap: wrap; gap: 8px; }
+.sv-pd__dorow input { padding: 7px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: #fff; font: .8125rem var(--font-body); }
+.sv-pd__dorow input[type="text"] { flex: 1 1 180px; min-width: 0; }
+.sv-pd__dayoff.is-busy .sv-btn { opacity: .6; pointer-events: none; }
 @media (max-width: 520px) { .sv-pd__grid { grid-template-columns: 1fr; } }
 
 /* ================= Notification bell ================= */

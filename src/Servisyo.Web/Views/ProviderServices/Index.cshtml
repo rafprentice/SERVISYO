@@ -17,6 +17,14 @@
     var descError = Model.ErrorFor("Description");
     var priceError = Model.ErrorFor("Price");
     var durError = Model.ErrorFor("DurationMinutes");
+
+    // the Edit dialog (open again only when the server rejected the changes)
+    var edit = Model.EditForm;
+    var editCard = Model.ShowEditDialog ? Model.Cards.FirstOrDefault(c => c.ServiceId == Model.EditServiceId) : null;
+    var eNameError = Model.EditErrorFor("ServiceName");
+    var eCatError = Model.EditErrorFor("CategoryId");
+    var eDescError = Model.EditErrorFor("Description");
+    var ePriceError = Model.EditErrorFor("Price");
 }
 
 <div class="sv-pagehead">
@@ -58,12 +66,33 @@ else
                     <p class="sv-svc__meta"><strong class="sv-svc__price">@c.PriceText</strong> <span>· @c.MetaText</span></p>
                 </div>
 
-                <form method="post" asp-controller="ProviderServices" asp-action="SetStatus" asp-route-serviceId="@c.ServiceId"
-                      class="sv-inline-form" data-sv-once>
-                    <input type="hidden" name="Activate" value="@(c.IsActive ? "false" : "true")" />
-                    <button type="submit" class="sv-act @(c.IsActive ? "sv-act--warn" : "sv-act--ok")"
-                            aria-label="@(c.IsActive ? "Deactivate" : "Activate") @c.Name">@(c.IsActive ? "Deactivate" : "Activate")</button>
-                </form>
+                <div class="sv-svc__actions">
+                    @if (c.EditLocked)
+                    {
+                        @* aria-disabled (not disabled) so the tooltip can still be reached by mouse, keyboard and touch;
+                           the server refuses the change anyway (ServiceEditRules) *@
+                        <span class="sv-tip" data-tip="@ServiceEditRules.LockedMessage">
+                            <button type="button" class="sv-act sv-act--view is-locked" aria-disabled="true" data-svc-locked
+                                    aria-describedby="sv-svc-lock-@c.ServiceId">Edit Service</button>
+                            <span class="sv-sr-only" id="sv-svc-lock-@c.ServiceId">@ServiceEditRules.LockedMessage</span>
+                        </span>
+                    }
+                    else
+                    {
+                        <button type="button" class="sv-act sv-act--view" data-svc-edit
+                                data-edit-url="@Url.Action("Edit", "ProviderServices", new { serviceId = c.ServiceId })"
+                                data-name="@c.Name" data-category-id="@c.CategoryId" data-category-name="@c.CategoryName"
+                                data-description="@c.Description" data-price="@c.Price.ToString("0.##", inv)"
+                                aria-haspopup="dialog" aria-controls="sv-svc-edit" aria-label="Edit @c.Name">Edit Service</button>
+                    }
+
+                    <form method="post" asp-controller="ProviderServices" asp-action="SetStatus" asp-route-serviceId="@c.ServiceId"
+                          class="sv-inline-form" data-sv-once>
+                        <input type="hidden" name="Activate" value="@(c.IsActive ? "false" : "true")" />
+                        <button type="submit" class="sv-act @(c.IsActive ? "sv-act--warn" : "sv-act--ok")"
+                                aria-label="@(c.IsActive ? "Deactivate" : "Activate") @c.Name">@(c.IsActive ? "Deactivate" : "Activate")</button>
+                    </form>
+                </div>
             </li>
         }
     </ul>
@@ -139,6 +168,68 @@ else
         <div class="sv-dialog__buttons">
             <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
             <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" disabled="@(noCategories ? "disabled" : null)">Add Service</button>
+        </div>
+    </form>
+</dialog>
+
+<!-- Edit Service: opened by a card's "Edit Service" button (provider-services.js fills in that service's values).
+     It opens again by itself when the server rejected the changes. The duration is not edited here. -->
+<dialog id="sv-svc-edit" class="sv-dialog" aria-labelledby="sv-svc-edit-title" data-open="@(editCard is not null ? "true" : null)">
+    @* the address (which service) is set by provider-services.js when the dialog opens; asp-antiforgery adds the token *@
+    <form method="post" action="@(editCard is not null ? Url.Action("Edit", "ProviderServices", new { serviceId = editCard.ServiceId }) : null)"
+          asp-antiforgery="true" class="sv-dialog__form sv-svcform" data-edit-form>
+        <div class="sv-svcform__head">
+            <h2 id="sv-svc-edit-title" class="sv-dialog__title">Edit Service</h2>
+            <button type="button" class="sv-svcform__x" data-sv-close aria-label="Close">&times;</button>
+        </div>
+        <p class="sv-svcform__note">Customers with finished bookings keep the price they booked at.</p>
+
+        @if (!string.IsNullOrEmpty(Model.EditFormError))
+        {
+            <p class="sv-formerr" role="alert">@Model.EditFormError</p>
+        }
+
+        <div class="sv-fld">
+            <label for="sv-edit-name">Service Title <span aria-hidden="true">*</span></label>
+            <input id="sv-edit-name" name="ServiceName" type="text" value="@edit.ServiceName" required maxlength="100"
+                   aria-invalid="@(eNameError is null ? null : "true")" />
+            @if (eNameError is not null) { <p class="sv-fld__err" role="alert">@eNameError</p> }
+        </div>
+
+        <div class="sv-fld">
+            <label for="sv-edit-cat">Category <span aria-hidden="true">*</span></label>
+            <select id="sv-edit-cat" name="CategoryId" required aria-invalid="@(eCatError is null ? null : "true")">
+                <option value="">Choose a category</option>
+                @foreach (var cat in Model.Categories)
+                {
+                    <option value="@cat.CategoryId" selected="@(edit.CategoryId == cat.CategoryId ? "selected" : null)">@cat.Name</option>
+                }
+                @if (editCard is not null && !Model.Categories.Any(x => x.CategoryId == editCard.CategoryId))
+                {
+                    @* the service's current category was deactivated by an administrator: it may be kept *@
+                    <option value="@editCard.CategoryId" selected="@(edit.CategoryId == editCard.CategoryId ? "selected" : null)" data-current>@editCard.CategoryName</option>
+                }
+            </select>
+            @if (eCatError is not null) { <p class="sv-fld__err" role="alert">@eCatError</p> }
+        </div>
+
+        <div class="sv-fld">
+            <label for="sv-edit-desc">Description <span class="sv-fld__opt">(optional)</span></label>
+            <textarea id="sv-edit-desc" name="Description" rows="3" maxlength="255"
+                      aria-invalid="@(eDescError is null ? null : "true")">@edit.Description</textarea>
+            @if (eDescError is not null) { <p class="sv-fld__err" role="alert">@eDescError</p> }
+        </div>
+
+        <div class="sv-fld">
+            <label for="sv-edit-price">Price (₱) <span aria-hidden="true">*</span></label>
+            <input id="sv-edit-price" name="Price" type="number" inputmode="decimal" min="0" max="99999999.99" step="0.01" required
+                   value="@(edit.Price?.ToString("0.##", inv))" aria-invalid="@(ePriceError is null ? null : "true")" />
+            @if (ePriceError is not null) { <p class="sv-fld__err" role="alert">@ePriceError</p> }
+        </div>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Save Changes</button>
         </div>
     </form>
 </dialog>

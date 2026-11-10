@@ -1,3 +1,4 @@
+@using Servisyo.Web.Controllers
 @using Servisyo.Web.Helpers
 @using Servisyo.Web.ViewModels
 @model CustomerProfilePageViewModel
@@ -21,6 +22,8 @@
     var confirmError = Model.PasswordErrorFor("ConfirmPassword");
 
     var hasAddress = Model.SavedAddress is not null;
+    // the option to pre-select: what the customer just picked (form sent back with a problem) or the saved address
+    var pickedAddress = Model.AddressForm.Address?.Trim();
 }
 
 <div class="sv-cp">
@@ -83,8 +86,10 @@
                         </div>
                         <div class="sv-fld">
                             <label for="cp-phone">Phone Number</label>
-                            <input id="cp-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" maxlength="13" inputmode="tel" pattern="(09[0-9]{9}|\+639[0-9]{9})" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" autocomplete="tel" placeholder="e.g. 09171234567"
-                                   aria-invalid="@(phoneError is null ? null : "true")" />
+                            @* required: the provider must be able to contact the customer (checked again on the server) *@
+                            <input id="cp-phone" name="PhoneNumber" type="tel" value="@form.PhoneNumber" required maxlength="13" inputmode="tel" pattern="(09[0-9]{9}|\+639[0-9]{9})" title="11-digit mobile number like 09171234567 (or +639171234567), digits only" autocomplete="tel" placeholder="e.g. 09171234567"
+                                   aria-describedby="cp-phone-note" aria-invalid="@(phoneError is null ? null : "true")" />
+                            <p class="sv-cp__hint" id="cp-phone-note">Required so your provider can contact you.</p>
                             @if (phoneError is not null) { <p class="sv-fld__err" role="alert">@phoneError</p> }
                         </div>
                     </div>
@@ -103,37 +108,40 @@
                         <h2 id="cp-addr-title" class="sv-cp__title">Saved Address</h2>
                         <p class="sv-cp__sub">Pre-filled when creating a new booking</p>
                     </div>
-                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" data-cp-open hidden>@(hasAddress ? "Edit Address" : "+ Add Address")</button>
+                    <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" data-cp-open data-cp-address-open hidden>@(hasAddress ? "Edit Address" : "+ Add Address")</button>
                 </div>
 
-                @if (hasAddress)
-                {
-                    <div class="sv-cp__item">
-                        <span class="sv-cp__itemicon" aria-hidden="true">@Icons.Svg("map-pin", 14)</span>
-                        <div class="sv-cp__itembody">
-                            <div class="sv-cp__itemname">Home <span class="sv-cp__badge">Default</span></div>
-                            <div class="sv-cp__itemtext">@Model.SavedAddress</div>
-                        </div>
-                        <form method="post" asp-controller="CustomerProfile" asp-action="SaveAddress" class="sv-cp__trashform"
-                              data-sv-once data-confirm="Remove your saved address?">
-                            <input type="hidden" name="Address" value="" />
-                            <button type="submit" class="sv-cp__trash" aria-label="Remove saved address" title="Remove saved address">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                            </button>
-                        </form>
+                @* A saved address can be changed but not removed, so the card has no delete button (see SavedAddressRules). *@
+                <div class="sv-cp__item" data-cp-address-card hidden="@(!hasAddress)">
+                    <span class="sv-cp__itemicon" aria-hidden="true">@Icons.Svg("map-pin", 14)</span>
+                    <div class="sv-cp__itembody">
+                        <div class="sv-cp__itemname">Home <span class="sv-cp__badge">Default</span></div>
+                        <div class="sv-cp__itemtext" data-cp-address-text>@Model.SavedAddress</div>
                     </div>
-                }
-                else
-                {
-                    <p class="sv-cp__empty">No address saved yet.</p>
-                }
+                </div>
+                <p class="sv-cp__empty" data-cp-address-empty hidden="@hasAddress">No address saved yet.</p>
 
-                <form method="post" asp-controller="CustomerProfile" asp-action="SaveAddress" class="sv-cp__form sv-cp__inline" data-sv-once data-cp-form data-cp-panel>
+                @* With JavaScript this is sent to PUT /api/profile/address (no page reload); without it, it is a normal form. *@
+                <form method="post" asp-controller="CustomerProfile" asp-action="SaveAddress" class="sv-cp__form sv-cp__inline"
+                      data-cp-form data-cp-panel data-cp-api="@(Url.Content("~/" + CustomerAddressApiController.RoutePath))">
                     <div class="sv-fld">
                         <label for="cp-address">Address</label>
-                        <input id="cp-address" name="Address" type="text" value="@Model.AddressForm.Address" maxlength="255" autocomplete="street-address"
-                               placeholder="House no., street, barangay, city"
-                               aria-invalid="@(Model.AddressHasProblem ? "true" : null)" />
+                        <select id="cp-address" name="Address" required autocomplete="street-address" aria-describedby="cp-address-note"
+                                aria-invalid="@(Model.AddressHasProblem ? "true" : null)">
+                            <option value="">Choose your address</option>
+                            @foreach (var loc in CebuLocations.All)
+                            {
+                                if (loc.Full == pickedAddress)
+                                {
+                                    <option value="@loc.Full" selected>@loc.Full</option>
+                                }
+                                else
+                                {
+                                    <option value="@loc.Full">@loc.Full</option>
+                                }
+                            }
+                        </select>
+                        <p class="sv-cp__hint" id="cp-address-note">SERVISYO is available in Cebu City only.</p>
                         @if (Model.AddressHasProblem) { <p class="sv-fld__err" role="alert">@Model.AddressError</p> }
                     </div>
                     <div class="sv-cp__actions">

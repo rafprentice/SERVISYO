@@ -42,6 +42,8 @@ builder.Services.AddScoped<INotificationSource, StoredProcedureNotificationSourc
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 builder.Services.AddScoped<IProviderApprovalService, ProviderApprovalService>();
 builder.Services.AddScoped<IProviderAvailabilityService, ProviderAvailabilityService>();
+// January 1 (Philippine time): last year's unavailable dates are deleted (runs at start-up and then every hour)
+builder.Services.AddHostedService<UnavailableDatesResetService>();
 builder.Services.AddScoped<IProviderBookingsService, ProviderBookingsService>();
 builder.Services.AddScoped<IProviderOfferingsService, ProviderOfferingsService>();
 builder.Services.AddScoped<IProviderProfileService, ProviderProfileService>();
@@ -62,6 +64,23 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         o.Cookie.SameSite = SameSiteMode.Lax;
         o.ExpireTimeSpan = TimeSpan.FromHours(8);
         o.SlidingExpiration = true;
+
+        // /api/... is called by scripts: answer 401 (not signed in) / 403 (wrong role) instead of sending the
+        // login page; every other page still goes to the login / access-denied page as before
+        var toLogin = o.Events.OnRedirectToLogin;
+        var toDenied = o.Events.OnRedirectToAccessDenied;
+        o.Events.OnRedirectToLogin = ctx =>
+        {
+            if (!Servisyo.Web.Controllers.ApiPaths.IsApi(ctx.Request)) return toLogin(ctx);
+            ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        o.Events.OnRedirectToAccessDenied = ctx =>
+        {
+            if (!Servisyo.Web.Controllers.ApiPaths.IsApi(ctx.Request)) return toDenied(ctx);
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
     });
 builder.Services.AddAuthorization();
 

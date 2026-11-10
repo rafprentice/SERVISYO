@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Servisyo.Web.Data;
@@ -19,6 +20,12 @@ public interface IProviderManagementService
     /// Suspending or deactivating also cancels the provider's Pending bookings (the customers are notified) and lists
     /// their Accepted / In Progress bookings in the message so the administrator can follow them up.
     Task<ChangeStatusResult> ChangeStatusAsync(int adminUserId, int providerId, AccountAction action, string? reason, CancellationToken ct = default);
+
+    /// An emergency (for example the provider is sick) beyond the provider's 5 days off a month: the administrator
+    /// marks the day off for them. The ADMIN_ACTIONS row (who, when, why) and the PROVIDER_UNAVAILABLE_DATES row that
+    /// points to it are saved together; that day does not count toward the provider's 5. Refused on a day with an
+    /// active booking, like the provider's own days off.
+    Task<ExtraDayOffResult> ApproveExtraDayOffAsync(int adminUserId, int providerId, DateOnly? date, string? reason, CancellationToken ct = default);
 }
 
 public class ProviderManagementService : IProviderManagementService
@@ -34,14 +41,24 @@ public class ProviderManagementService : IProviderManagementService
     /// How many still-open bookings the message lists by number (the rest are counted).
     private const int OpenBookingsListed = 5;
 
+    /// ADMIN_ACTIONS.ACTION_TYPE of an approved extra day off.
+    public const string ExtraDayOffActionType = "Extra Day Off Approved";
+
+    /// The reason is also written to ADMIN_ACTIONS.REASON (255) after the date ("Nov 20, 2026: "), so it is kept shorter.
+    public const int MaxExtraDayReasonLength = 200;
+
     private readonly ServisyoDbContext _db;
+    private readonly TimeProvider _clock;
     private readonly ILogger<ProviderManagementService> _logger;
 
-    public ProviderManagementService(ServisyoDbContext db, ILogger<ProviderManagementService>? logger = null)
+    public ProviderManagementService(ServisyoDbContext db, ILogger<ProviderManagementService>? logger = null, TimeProvider? clock = null)
     {
         _db = db;
+        _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ProviderManagementService>.Instance;
     }
+
+    private DateOnly TodayInCebu() => DateOnly.FromDateTime(_clock.GetUtcNow().ToOffset(TimeSpan.FromHours(ManilaOffsetHours)).DateTime);
 
     public async Task<ProvidersPageViewModel?> GetProvidersAsync(int adminUserId, ProviderListQuery query, CancellationToken ct = default)
     {
@@ -171,6 +188,14 @@ public class ProviderManagementService : IProviderManagementService
         var completed = await _db.Bookings.AsNoTracking()
             .CountAsync(b => b.ProviderId == providerId && b.Status == BookingStatuses.Completed, ct);
 
+        var today = TodayInCebu();
+        var lastDay = UnavailableDateRules.LastAllowed(today);
+        var daysOff = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId == providerId && d.UnavailableDate >= today && d.UnavailableDate <= lastDay)
+            .OrderBy(d => d.UnavailableDate)
+            .Select(d => new { d.UnavailableDate, d.Reason, Approved = d.ApprovedByActionId != null })
+            .ToListAsync(ct);
+
         var name = $"{p.First} {p.Last}".Trim();
         var category = declared ?? services.Select(s => s.Category).FirstOrDefault();
         var where = new[] { category }.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
@@ -200,8 +225,102 @@ public class ProviderManagementService : IProviderManagementService
             ReviewCount = p.ReviewCount,
             Services = services.Select(s => new ProviderServiceLine(
                 s.ServiceName, s.Category, ServiceFormat.Peso(s.Price), ServiceFormat.Duration(s.DurationMinutes))).ToList(),
-            Actions = AccountTransitions.AvailableFor(p.Account).Select(UserActionInfo.For).ToList()
+            Actions = AccountTransitions.AvailableFor(p.Account).Select(UserActionInfo.For).ToList(),
+            DaysOff = daysOff.Select(d => new ProviderDayOffLine(
+                d.UnavailableDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture), d.Reason, d.Approved)).ToList(),
+            CanApproveDayOff = p.ApprovalStatus == ApprovalStatuses.Approved,
+            DayOffMin = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DayOffMax = lastDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
         });
+    }
+
+    // ------------------------------------------------------------------ approve an extra day off
+
+    public async Task<ExtraDayOffResult> ApproveExtraDayOffAsync(int adminUserId, int providerId, DateOnly? date, string? reason, CancellationToken ct = default)
+    {
+        // 1. The actor must be an Active administrator (checked in the database, not trusted from the browser).
+        var isAdmin = await _db.Users.AsNoTracking().AnyAsync(u => u.UserId == adminUserId
+            && u.Role == Roles.Administrator && u.AccountStatus == AccountStatuses.Active, ct);
+        if (!isAdmin)
+        {
+            _logger.LogWarning("Extra day off refused: user {UserId} is not an active administrator.", adminUserId);
+            return new(ExtraDayOffOutcome.NotAllowed, "You don't have permission to do that.");
+        }
+
+        // 2. The form: a reason (it is an exception, so it is always explained) and a day from today to December 31.
+        var cleanReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        if (cleanReason is null)
+            return new(ExtraDayOffOutcome.Invalid, "Please give the reason for the extra day off (for example: sick, family emergency).");
+        if (cleanReason.Length > MaxExtraDayReasonLength)
+            return new(ExtraDayOffOutcome.Invalid, $"The reason can be at most {MaxExtraDayReasonLength} characters.");
+        if (date is null)
+            return new(ExtraDayOffOutcome.Invalid, "Please choose the day off.");
+
+        var day = date.Value;
+        var today = TodayInCebu();
+        var label = day.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+        if (day < today)
+            return new(ExtraDayOffOutcome.Invalid, $"{label} is in the past. Choose today or a later date.");
+        if (day > UnavailableDateRules.LastAllowed(today))
+            return new(ExtraDayOffOutcome.Invalid, $"{label} is not in {today.Year}. Extra days off can only be approved until December 31, {today.Year}.");
+
+        // Serializable: the checks below and the save are ONE step, so a customer cannot book that day in between.
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+
+        // 3. The target must be an APPROVED provider.
+        var provider = await _db.Providers.Include(p => p.User)
+            .FirstOrDefaultAsync(p => p.ProviderId == providerId && p.User.Role == Roles.ServiceProvider, ct);
+        if (provider is null)
+            return new(ExtraDayOffOutcome.NotFound, "That provider was not found.");
+        var name = $"{provider.User.FirstName} {provider.User.LastName}".Trim();
+        if (provider.ApprovalStatus != ApprovalStatuses.Approved)
+            return new(ExtraDayOffOutcome.Invalid, $"{name} is not an approved provider, so there is no schedule to change.");
+
+        // 4. Not a day that is already off, and not a day with an active booking (a customer is waiting for them).
+        var existing = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId == providerId && d.UnavailableDate == day)
+            .Select(d => new { Approved = d.ApprovedByActionId != null })
+            .FirstOrDefaultAsync(ct);
+        if (existing is not null)
+            return new(ExtraDayOffOutcome.Invalid, existing.Approved
+                ? $"An extra day off on {label} was already approved for {name}."
+                : $"{name} has already marked {label} as a day off.");
+
+        var job = await _db.Bookings.AsNoTracking()
+            .Where(b => b.ProviderId == providerId && b.BookingDate == day && ActiveBookingRules.Statuses.Contains(b.Status))
+            .OrderBy(b => b.BookingTime)
+            .Select(b => new { b.BookingId, b.Status })
+            .FirstOrDefaultAsync(ct);
+        if (job is not null)
+            return new(ExtraDayOffOutcome.Invalid,
+                $"{name} has booking #{job.BookingId} ({job.Status}) on {label}. That booking has to be settled first, so the customer is not left without a provider.");
+
+        // 5. The admin log entry and the day off that points to it: one SaveChanges = one database transaction.
+        var adminLog = AdminAction.ForProvider(adminUserId, ExtraDayOffActionType, providerId, $"{label}: {cleanReason}");
+        adminLog.CreatedAt = DateTime.UtcNow;
+        _db.AdminActions.Add(adminLog);
+        _db.ProviderUnavailableDates.Add(new ProviderUnavailableDate
+        {
+            ProviderId = providerId, UnavailableDate = day, Reason = cleanReason, ApprovedBy = adminLog
+        });
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            // e.g. the provider marked the same day at the same moment (the unique index caught it): nothing was saved
+            _db.ChangeTracker.Clear();
+            _logger.LogWarning(ex, "Extra day off for provider {ProviderId} on {Date} was not saved.", providerId, day);
+            return new(ExtraDayOffOutcome.Invalid, $"The extra day off for {name} could not be saved. Please open the provider again and retry.");
+        }
+
+        _logger.LogInformation("Admin {AdminUserId} approved an extra day off for provider {ProviderId} on {Date}.", adminUserId, providerId, day);
+        return new(ExtraDayOffOutcome.Success,
+            $"Extra day off approved for {name} on {label}. It does not count toward their {UnavailableDateRules.MaxPerMonth} days that month.");
     }
 
     // ------------------------------------------------------------------ suspend / deactivate / ...

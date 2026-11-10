@@ -97,7 +97,13 @@ public class ProviderUnavailableDate
     public DateOnly UnavailableDate { get; set; }
     public string? Reason { get; set; }
 
+    /// Database v2.4: set when an ADMINISTRATOR approved this day as an extra day off (an emergency beyond the
+    /// 5 a month). It points to the ADMIN_ACTIONS row that says who approved it, when and why; such a day does not
+    /// count toward the provider's 5. Null for the provider's own days off.
+    public int? ApprovedByActionId { get; set; }
+
     public Provider Provider { get; set; } = null!;
+    public AdminAction? ApprovedBy { get; set; }
 }
 
 public class ServiceCategory

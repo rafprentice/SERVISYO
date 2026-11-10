@@ -79,20 +79,51 @@
                         <span class="sv-av__off">Unavailable</span>
                     </div>
 
+                    @{
+                        // one 1-hour break, only on a shift of 8 hours or more (BreakRules); the page sends only its start
+                        var allows = BreakRules.AllowsBreak(d.Start, d.End);
+                        var options = BreakRules.StartOptions(d.Start, d.End);
+                        var shown = d.Breaks.Where(x => x.Start is not null).Take(BreakRules.MaxBreaksPerDay).ToList();
+                    }
                     <div class="sv-av__breaks" data-breaks>
-                        @for (var k = 0; k < d.Breaks.Count; k++)
+                        @for (var k = 0; k < shown.Count; k++)
                         {
-                            var b = d.Breaks[k];
-                            <div class="sv-av__break" data-break>
+                            var b = shown[k];
+                            var pick = BreakRules.Nearest(b.Start!.Value, d.Start, d.End);
+                            var moved = pick is not null && pick != b.Start;
+                            <div class="sv-av__break @(allows ? "" : "is-disabled")" data-break>
                                 <span class="sv-av__breaklabel">Break</span>
-                                <input type="time" class="sv-av__time" name="Days[@i].Breaks[@k].Start" value="@T(b.Start)" aria-label="@name break start" data-b-start />
+                                <select class="sv-av__time" name="Days[@i].Breaks[@k].Start" aria-label="@name break start (1 hour)" data-b-start data-saved="@T(b.Start)" disabled="@(!allows)">
+                                    @foreach (var o in options)
+                                    {
+                                        <option value="@T(o)" selected="@(o == pick)">@BreakRules.Clock(o)</option>
+                                    }
+                                    @if (!allows)
+                                    {
+                                        @* shown greyed out (a disabled box is not sent, so the break is dropped on save) *@
+                                        <option value="@T(b.Start)" selected>@BreakRules.Clock(b.Start!.Value)</option>
+                                    }
+                                </select>
                                 <span class="sv-av__to">to</span>
-                                <input type="time" class="sv-av__time" name="Days[@i].Breaks[@k].End" value="@T(b.End)" aria-label="@name break end" data-b-end />
+                                <span class="sv-av__breakend" data-b-end>@BreakRules.Clock(BreakRules.EndOf(pick ?? b.Start!.Value))</span>
+                                <span class="sv-av__breaklen">(1 hour)</span>
                                 <button type="button" class="sv-av__x" data-remove-break aria-label="Remove break">✕</button>
+                                @if (moved)
+                                {
+                                    <p class="sv-av__breakwarn" data-b-warn="moved">Your saved break (@BreakRules.Clock(b.Start!.Value)@(b.End is null ? "" : " – " + BreakRules.Clock(b.End.Value))) does not fit the 1-hour rule, so the nearest start is selected. It changes when you save.</p>
+                                }
+                                else if (!allows)
+                                {
+                                    <p class="sv-av__breakwarn" data-b-warn="short">This break is removed when you save: the shift is shorter than 8 hours.</p>
+                                }
                             </div>
                         }
                     </div>
-                    <button type="button" class="sv-av__addbreak" data-add-break>+ Add break</button>
+                    <div class="sv-av__breakbar">
+                        <button type="button" class="sv-av__addbreak" data-add-break disabled="@(!allows || shown.Count >= BreakRules.MaxBreaksPerDay)"
+                                aria-describedby="sv-av-bnote-@i">+ Add break</button>
+                        <span class="sv-av__breaknote" id="sv-av-bnote-@i" data-break-note hidden="@allows">@BreakRules.ShortShiftMessage</span>
+                    </div>
                 </li>
             }
         </ul>
@@ -103,24 +134,36 @@
         <div class="sv-panel__head">
             <div>
                 <h2 id="av-dates-title" class="sv-panel__title">Unavailable Dates</h2>
-                <p class="sv-av__hint">Mark specific dates when you are not available.</p>
+                <p class="sv-av__hint">Mark specific dates when you are not available: up to @UnavailableDateRules.MaxPerMonth days a month, until Dec 31, @Model.Today.Year. Days with an active booking cannot be marked. For an emergency beyond that, contact an administrator. The list starts empty again every January 1.</p>
             </div>
             <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" id="sv-av-add-date">+ Add date</button>
         </div>
 
-        <ul class="sv-av__dates" id="sv-av-dates">
+        <p class="sv-av__dateerr" id="sv-av-dates-error" role="alert" hidden></p>
+        <ul class="sv-av__dates" id="sv-av-dates" data-today="@Model.Today.ToString("yyyy-MM-dd", inv)" data-last="@Model.LastDate.ToString("yyyy-MM-dd", inv)"
+            data-past-this-month="@Model.PastDaysThisMonth" data-max-per-month="@UnavailableDateRules.MaxPerMonth"
+            data-month-message="@UnavailableDateRules.MonthlyLimitMessage">
             @for (var j = 0; j < form.Dates.Count; j++)
             {
                 var dt = form.Dates[j];
                 var saved = dt.Date is not null && !hasErrors;
-                <li class="sv-av__date @(saved ? "is-saved" : "")" data-date-row>
+                var outOfYear = dt.Date is not null && dt.Date > Model.LastDate;      // saved before the "this year only" rule
+                <li class="sv-av__date @(saved ? "is-saved" : "") @(outOfYear ? "is-out" : "")" data-date-row data-approved="@(dt.ApprovedByAdmin ? "true" : null)">
                     <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
                     <div class="sv-av__dateview">
                         <strong>@(dt.Date?.ToString("MMM d, yyyy", inv))</strong>
                         <span>@(string.IsNullOrWhiteSpace(dt.Reason) ? "No reason given" : dt.Reason)</span>
+                        @if (outOfYear)
+                        {
+                            <em class="sv-av__dateout">Only dates in @Model.Today.Year can be set. Remove this date before saving.</em>
+                        }
+                        @if (dt.ApprovedByAdmin)
+                        {
+                            <em class="sv-av__dateok">@UnavailableDateRules.ApprovedNote</em>
+                        }
                     </div>
                     <div class="sv-av__dateedit">
-                        <input type="date" name="Dates[@j].Date" value="@(dt.Date?.ToString("yyyy-MM-dd", inv))" min="@Model.Today.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
+                        <input type="date" name="Dates[@j].Date" value="@(dt.Date?.ToString("yyyy-MM-dd", inv))" min="@Model.Today.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
                         <input type="text" name="Dates[@j].Reason" value="@dt.Reason" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
                     </div>
                     <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>
@@ -173,9 +216,10 @@
 <template id="sv-break-tpl">
     <div class="sv-av__break" data-break>
         <span class="sv-av__breaklabel">Break</span>
-        <input type="time" class="sv-av__time" value="12:00" aria-label="Break start" data-b-start />
+        <select class="sv-av__time" aria-label="Break start (1 hour)" data-b-start></select>
         <span class="sv-av__to">to</span>
-        <input type="time" class="sv-av__time" value="13:00" aria-label="Break end" data-b-end />
+        <span class="sv-av__breakend" data-b-end></span>
+        <span class="sv-av__breaklen">(1 hour)</span>
         <button type="button" class="sv-av__x" data-remove-break aria-label="Remove break">✕</button>
     </div>
 </template>
@@ -185,7 +229,7 @@
         <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
         <div class="sv-av__dateview"><strong></strong><span></span></div>
         <div class="sv-av__dateedit">
-            <input type="date" min="@Model.Today.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
+            <input type="date" min="@Model.Today.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
             <input type="text" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
         </div>
         <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>

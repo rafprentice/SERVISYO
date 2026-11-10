@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Servisyo.Web.Data;
 using Servisyo.Web.Helpers;
@@ -17,7 +18,7 @@ public interface IProviderAvailabilityService
 
 public class ProviderAvailabilityService : IProviderAvailabilityService
 {
-    public const int MaxBreaksPerDay = 5;
+    public const int MaxBreaksPerDay = BreakRules.MaxBreaksPerDay;
     public const int MaxUnavailableDates = 100;
     public const int MaxNoticeDays = 30;
     public const int MaxJobsLimit = 50;
@@ -110,16 +111,22 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             form.Dates = (await _db.ProviderUnavailableDates.AsNoTracking()
                     .Where(d => d.ProviderId == who.ProviderId && d.UnavailableDate >= today)
                     .OrderBy(d => d.UnavailableDate)
-                    .Select(d => new { d.UnavailableDate, d.Reason })
+                    .Select(d => new { d.UnavailableDate, d.Reason, Approved = d.ApprovedByActionId != null })
                     .ToListAsync(ct))
-                .Select(d => new UnavailableDateForm { Date = d.UnavailableDate, Reason = d.Reason })
+                .Select(d => new UnavailableDateForm { Date = d.UnavailableDate, Reason = d.Reason, ApprovedByAdmin = d.Approved })
                 .ToList();
         }
         else
         {
             // a rejected form: show the days in the usual order even if the browser sent them differently
             form.Days = form.Days.OrderBy(d => Array.IndexOf(AvailabilityDays.DisplayOrder, d.DayOfWeek)).ToList();
+
+            // which listed days an administrator approved comes from the database, never from the browser
+            var approved = (await SavedDatesAsync(who.ProviderId, today, ct)).Where(x => x.Value).Select(x => x.Key).ToHashSet();
+            foreach (var d in form.Dates) d.ApprovedByAdmin = d.Date is { } day && approved.Contains(day);
         }
+
+        var pastThisMonth = await CountPastDaysThisMonthAsync(who.ProviderId, today, ct);
 
         var options = NoticeChoices.Contains(form.MinNoticeDays) ? NoticeChoices : NoticeChoices.Append(form.MinNoticeDays).OrderBy(x => x).ToArray();
 
@@ -139,6 +146,7 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             Form = form,
             IsSuggested = suggested,
             Today = today,
+            PastDaysThisMonth = pastThisMonth,
             NoticeOptions = options.Select(v => (v, v == 0 ? "Same day" : Plural.Of(v, "day"))).ToList()
         });
     }
@@ -151,9 +159,18 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         if (who is null) return new(access, false, Array.Empty<string>(), string.Empty);
 
         var today = TodayInCebu();
+
+        // Serializable: "no active booking on this day" is checked and the day off is saved as ONE step, so a customer
+        // cannot book the provider for that day in between (BookProviderService checks the other way round the same way).
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+
         var errors = new List<string>();
         var days = ValidateDays(form, errors);
-        var dates = ValidateDates(form, today, errors);
+        var saved = await SavedDatesAsync(who.ProviderId, today, ct);
+        var booked = await ActiveBookingDaysAsync(who.ProviderId,
+            form.Dates.Where(d => d.Date is { } day && day >= today && !saved.ContainsKey(day)).Select(d => d.Date!.Value).Distinct().ToList(), ct);
+        var dates = ValidateDates(form, today, await CountPastDaysThisMonthAsync(who.ProviderId, today, ct), saved, booked, errors);
 
         if (form.MinNoticeDays < 0 || form.MinNoticeDays > MaxNoticeDays)
             errors.Add($"Minimum booking notice must be between 0 and {MaxNoticeDays} days.");
@@ -210,6 +227,7 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             provider.MaxJobsPerDay = form.MaxJobsPerDay;
 
             await _db.SaveChangesAsync(ct);          // everything above is one database transaction
+            if (tx is not null) await tx.CommitAsync(ct);
         }
         catch (DbUpdateException ex)
         {
@@ -223,6 +241,35 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         _logger.LogInformation("Provider {ProviderId} saved their schedule ({Open} open days, {Dates} unavailable dates).",
             who.ProviderId, days.Count(d => d.IsAvailable), dates.Count);
         return new(ProviderDashboardAccess.Allowed, true, Array.Empty<string>(), "Your schedule was saved.");
+    }
+
+    /// The provider's OWN unavailable days of this month before today (extra days approved by an administrator do not
+    /// count): they are not on the page any more but count toward the 5 per month.
+    private Task<int> CountPastDaysThisMonthAsync(int providerId, DateOnly today, CancellationToken ct)
+    {
+        var firstOfMonth = UnavailableDateRules.FirstOfMonth(today);
+        return _db.ProviderUnavailableDates.CountAsync(d => d.ProviderId == providerId && d.UnavailableDate >= firstOfMonth
+                                                          && d.UnavailableDate < today && d.ApprovedByActionId == null, ct);
+    }
+
+    /// The saved days off from today on: date -> true when an administrator approved it as an extra day.
+    private async Task<Dictionary<DateOnly, bool>> SavedDatesAsync(int providerId, DateOnly today, CancellationToken ct) =>
+        (await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId == providerId && d.UnavailableDate >= today)
+            .Select(d => new { d.UnavailableDate, Approved = d.ApprovedByActionId != null })
+            .ToListAsync(ct))
+        .ToDictionary(d => d.UnavailableDate, d => d.Approved);
+
+    /// For each of these days: the provider's first active booking on it (Pending, Accepted or In Progress), if any.
+    private async Task<Dictionary<DateOnly, (int BookingId, string Status)>> ActiveBookingDaysAsync(int providerId, List<DateOnly> days, CancellationToken ct)
+    {
+        if (days.Count == 0) return new();
+        var rows = await _db.Bookings.AsNoTracking()
+            .Where(b => b.ProviderId == providerId && days.Contains(b.BookingDate) && ActiveBookingRules.Statuses.Contains(b.Status))
+            .OrderBy(b => b.BookingDate).ThenBy(b => b.BookingTime)
+            .Select(b => new { b.BookingDate, b.BookingId, b.Status })
+            .ToListAsync(ct);
+        return rows.GroupBy(r => r.BookingDate).ToDictionary(g => g.Key, g => (g.First().BookingId, g.First().Status));
     }
 
     // ------------------------------------------------------------ validation
@@ -270,29 +317,36 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             var breaks = new List<(TimeOnly Start, TimeOnly End)>();
             var ownErrors = 0;
 
-            foreach (var b in d.Breaks)
+            // ---- the break: one, exactly 1 hour, only on a shift of 8 hours or more (BreakRules) ----
+            // The page sends only the start (the end is always start + 1 hour); an end that is sent must agree.
+            var wanted = d.Breaks.Where(x => x.Start is not null || x.End is not null).ToList();    // empty rows are ignored
+            if (wanted.Count > 0)
             {
-                if (b.Start is null && b.End is null) continue;          // an empty row: ignore it
-                if (b.Start is null || b.End is null) { errors.Add($"{name}: every break needs a start time and an end time."); ownErrors++; continue; }
-                if (b.End <= b.Start) { errors.Add($"{name}: a break must end after it starts."); ownErrors++; continue; }
-                if (b.Start < start || b.End > end) { errors.Add($"{name}: breaks must be inside your working hours."); ownErrors++; continue; }
-                breaks.Add((b.Start.Value, b.End.Value));
-            }
-
-            if (breaks.Count > MaxBreaksPerDay)
-            {
-                errors.Add($"{name}: you can add at most {MaxBreaksPerDay} breaks.");
-                ownErrors++;
-            }
-
-            breaks = breaks.OrderBy(b => b.Start).ToList();
-            for (var i = 1; i < breaks.Count; i++)
-            {
-                if (breaks[i].Start < breaks[i - 1].End)
+                var b = wanted[0];
+                if (!BreakRules.AllowsBreak(start, end))
                 {
-                    errors.Add($"{name}: breaks cannot overlap.");
+                    errors.Add($"{name}: {BreakRules.ShortShiftMessage}"); ownErrors++;
+                }
+                else if (wanted.Count > MaxBreaksPerDay)
+                {
+                    errors.Add($"{name}: you can add only one 1-hour break."); ownErrors++;
+                }
+                else if (b.Start is null)
+                {
+                    errors.Add($"{name}: choose when your break starts."); ownErrors++;
+                }
+                else if (b.End is not null && BreakRules.Minutes(b.End.Value) - BreakRules.Minutes(b.Start.Value) != BreakRules.BreakMinutes)
+                {
+                    errors.Add($"{name}: a break must be exactly 1 hour long."); ownErrors++;
+                }
+                else if (!BreakRules.Fits(b.Start.Value, start, end))
+                {
+                    errors.Add($"{name}: the break must start between {BreakRules.Clock(start)} and {BreakRules.Clock(BreakRules.LatestStart(end))}.");
                     ownErrors++;
-                    break;
+                }
+                else
+                {
+                    breaks.Add((b.Start.Value, BreakRules.EndOf(b.Start.Value)));
                 }
             }
 
@@ -302,10 +356,14 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         return result;
     }
 
-    private static List<CleanDate> ValidateDates(AvailabilityForm form, DateOnly today, List<string> errors)
+    /// saved: the days off already saved from today on (true = approved by an administrator: not counted in the 5).
+    /// booked: NEW days that have an active booking (they are refused). Days that were already saved are left alone.
+    private static List<CleanDate> ValidateDates(AvailabilityForm form, DateOnly today, int pastDaysThisMonth,
+        IReadOnlyDictionary<DateOnly, bool> saved, IReadOnlyDictionary<DateOnly, (int BookingId, string Status)> booked, List<string> errors)
     {
         var result = new List<CleanDate>();
         var seen = new HashSet<DateOnly>();
+        var last = UnavailableDateRules.LastAllowed(today);
 
         foreach (var row in form.Dates)
         {
@@ -321,14 +379,35 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             var label = date.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
 
             if (date < today) { errors.Add($"{label} is in the past. Choose today or a later date."); continue; }
+            if (date > last)
+            {
+                errors.Add($"{label} is not in {today.Year}. You can only mark unavailable days until December 31, {today.Year}.");
+                continue;
+            }
             if (!seen.Add(date)) { errors.Add($"{label} is listed more than once."); continue; }
             if (reason is { Length: > MaxReasonLength }) { errors.Add($"{label}: the reason can be at most {MaxReasonLength} characters."); continue; }
+            if (booked.TryGetValue(date, out var job)) { errors.Add(UnavailableDateRules.BookedMessage(label, job.BookingId, job.Status)); continue; }
 
             result.Add(new(date, reason));
         }
 
         if (result.Count > MaxUnavailableDates)
             errors.Add($"You can list at most {MaxUnavailableDates} unavailable dates.");
+
+        // ---- at most 5 per calendar month (this month's days that already passed count too;
+        //      extra days approved by an administrator do not) ----
+        foreach (var month in result.Where(x => !(saved.TryGetValue(x.Date, out var approved) && approved))
+                                    .GroupBy(x => (x.Date.Year, x.Date.Month)).OrderBy(g => g.Key))
+        {
+            var past = month.Key == (today.Year, today.Month) ? pastDaysThisMonth : 0;
+            var total = month.Count() + past;
+            if (total <= UnavailableDateRules.MaxPerMonth) continue;
+
+            var name = new DateOnly(month.Key.Year, month.Key.Month, 1).ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            errors.Add(past > 0
+                ? $"{UnavailableDateRules.MonthlyLimitMessage} {name} would have {total} ({past} of them already passed)."
+                : $"{UnavailableDateRules.MonthlyLimitMessage} {name} would have {total}.");
+        }
 
         return result;
     }

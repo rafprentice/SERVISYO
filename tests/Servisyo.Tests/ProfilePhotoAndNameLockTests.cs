@@ -215,7 +215,7 @@ public class NameLockTests
     }
 
     private static CustomerProfileForm AnaForm(Customer ana, string name) =>
-        new() { FullName = name, Email = ana.User.Email, PhoneNumber = null };
+        new() { FullName = name, Email = ana.User.Email, PhoneNumber = "09171112222" };   // the phone number is required
 
     [Theory]
     [InlineData(BookingStatuses.Pending)]

@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.3  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.4  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -13,7 +13,8 @@
      PART 7  Examples and subqueries for the defense
 
    HOW THIS FILE IS USED
-     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup", "AdminTargets" and "DerivedData" (dotnet ef database update):
+     - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup", "AdminTargets" and "DerivedData" (dotnet ef database update);
+       "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY (PART 1), no procedures:
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -76,6 +77,16 @@
        and dates. The amount is not stored again: it is the booking's TOTAL_FEE.
      - CASH_PAYMENT_DETAILS was removed: "collected by the provider" is a cash payment whose status is Paid, at PAID_AT.
      - The procedures that used to write NOTIFICATIONS no longer do; trg_Payments_Audit became trg_PaymentsDtl_Audit.
+
+   WHAT CHANGED IN v2.4 (EF migration "ExtraDayOff") - extra days off approved by an administrator
+     - A provider may mark at most 5 days off per calendar month (checked by the app). For an emergency beyond that,
+       an administrator approves an extra day: an ADMIN_ACTIONS row (ACTION_TYPE 'Extra Day Off Approved', who, when,
+       why) and the PROVIDER_UNAVAILABLE_DATES row, which REFERENCES it through the new nullable column
+       APPROVED_BY_ACTION_ID (FOREIGN KEY -> ADMIN_ACTIONS, no cascade). Rows with it filled do not count toward the 5.
+       Nothing is copied: who/when/why stay in ADMIN_ACTIONS only.
+     - A day with an active booking (Pending, Accepted, In Progress) cannot be marked off (checked by the app in a
+       SERIALIZABLE transaction, like usp_CreateBooking checks unavailable dates the other way round).
+     - Unavailable dates are only for the current year; last year's rows are deleted on January 1 (by the app).
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -210,6 +221,7 @@ CREATE INDEX IX_PROVIDER_BREAKS_AVAILABILITY_ID ON PROVIDER_BREAKS (AVAILABILITY
 
 CREATE TABLE PROVIDER_UNAVAILABLE_DATES (
     UNAVAILABLE_ID               INT             IDENTITY(1,1) NOT NULL,
+    APPROVED_BY_ACTION_ID        INT             NULL,              -- v2.4: an extra day approved by an administrator
     PROVIDER_ID                  INT             NOT NULL,
     REASON                       NVARCHAR(255)   NULL,
     UNAVAILABLE_DATE             DATE            NOT NULL,
@@ -217,6 +229,8 @@ CREATE TABLE PROVIDER_UNAVAILABLE_DATES (
     CONSTRAINT FK_PROVIDER_UNAVAILABLE_DATES_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID)
 );
 CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_PROVIDER_ID_UNAVAILABLE_DATE ON PROVIDER_UNAVAILABLE_DATES (PROVIDER_ID, UNAVAILABLE_DATE);
+CREATE INDEX IX_PROVIDER_UNAVAILABLE_DATES_APPROVED_BY_ACTION_ID ON PROVIDER_UNAVAILABLE_DATES (APPROVED_BY_ACTION_ID);
+-- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
 CREATE TABLE SERVICE_CATEGORIES (
     CATEGORY_ID                  INT             IDENTITY(1,1) NOT NULL,
@@ -379,6 +393,9 @@ CREATE INDEX IX_ADMIN_ACTIONS_TARGET_CATEGORY_ID ON ADMIN_ACTIONS (TARGET_CATEGO
 CREATE INDEX IX_ADMIN_ACTIONS_TARGET_CUSTOMER_ID ON ADMIN_ACTIONS (TARGET_CUSTOMER_ID);
 CREATE INDEX IX_ADMIN_ACTIONS_TARGET_PROVIDER_ID ON ADMIN_ACTIONS (TARGET_PROVIDER_ID);
 CREATE INDEX IX_ADMIN_ACTIONS_TARGET_REVIEW_ID ON ADMIN_ACTIONS (TARGET_REVIEW_ID);
+-- v2.4 (EF migration "ExtraDayOff")
+ALTER TABLE PROVIDER_UNAVAILABLE_DATES ADD CONSTRAINT FK_PROVIDER_UNAVAILABLE_DATES_ADMIN_ACTIONS_APPROVED_BY_ACTION_ID
+    FOREIGN KEY (APPROVED_BY_ACTION_ID) REFERENCES ADMIN_ACTIONS(ACTION_ID);
 
 CREATE TABLE SYSTEM_LOGS (
     SYSTEM_LOG_ID                INT             IDENTITY(1,1) NOT NULL,

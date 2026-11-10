@@ -13,6 +13,7 @@ namespace Servisyo.Web.Controllers;
 /// GET  admin/providers                    -> the provider cards
 /// GET  admin/providers/{id}               -> details page (or just the pop-up contents with ?partial=true)
 /// POST admin/providers/{id}/status        -> suspend / deactivate / reactivate / restore the account
+/// POST admin/providers/{id}/extra-day-off -> approve an extra day off (an emergency beyond the 5 a month)
 [Authorize(Roles = Roles.Administrator)]
 [Route("admin/providers")]
 public class AdminProvidersController : Controller
@@ -72,6 +73,19 @@ public class AdminProvidersController : Controller
         if (result.Outcome == ChangeStatusOutcome.NotAllowed) return await EndSessionAsync();
 
         return RedirectWithToast(result.Outcome == ChangeStatusOutcome.Success ? "ok" : "error", result.Message, form.ReturnStatus, form.ReturnPage);
+    }
+
+    [HttpPost("{providerId:int}/extra-day-off")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ApproveExtraDayOff(int providerId, ExtraDayOffForm form, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var adminId)) return Forbid();
+
+        // The administrator comes from the sign-in cookie; the browser only says WHICH day and why (the provider is in the address).
+        var result = await _providers.ApproveExtraDayOffAsync(adminId, providerId, form.Date, form.Reason, ct);
+        if (result.Outcome == ExtraDayOffOutcome.NotAllowed) return await EndSessionAsync();
+
+        return RedirectWithToast(result.Outcome == ExtraDayOffOutcome.Success ? "ok" : "error", result.Message, form.ReturnStatus, form.ReturnPage);
     }
 
     private IActionResult RedirectWithToast(string kind, string message, string? status, int page)

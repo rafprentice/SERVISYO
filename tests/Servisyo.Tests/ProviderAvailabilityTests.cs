@@ -127,13 +127,13 @@ public class ProviderAvailabilityServiceTests
     }
 
     [Fact]
-    public async Task SavedSchedule_IsShownBack_WithBreaksInOrder_AndOnlyUpcomingDates()
+    public async Task SavedSchedule_IsShownBack_WithTheBreaks_AndOnlyUpcomingDates()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = ValidForm();
-        Day(form, 1).Breaks.Add(new BreakForm { Start = T(15), End = T(15, 30) });
         Day(form, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(13) });
+        Day(form, 2).Breaks.Add(new BreakForm { Start = T(15) });             // the page sends only the start
         form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 25), Reason = "Personal Leave" });
         form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 20), Reason = null });
         Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
@@ -144,8 +144,10 @@ public class ProviderAvailabilityServiceTests
         var page = (await svc.GetAsync(p.UserId)).Page!;
 
         Assert.False(page.IsSuggested);
-        var monday = Day(page.Form, 1);
-        Assert.Equal(new[] { T(12), T(15) }, monday.Breaks.Select(b => b.Start!.Value));
+        var monday = Assert.Single(Day(page.Form, 1).Breaks);
+        Assert.Equal((T(12), T(13)), (monday.Start!.Value, monday.End!.Value));
+        var tuesday = Assert.Single(Day(page.Form, 2).Breaks);
+        Assert.Equal((T(15), T(16)), (tuesday.Start!.Value, tuesday.End!.Value));   // the end is start + 1 hour
         Assert.Equal(new[] { new DateOnly(2026, 10, 20), new DateOnly(2026, 10, 25) }, page.Form.Dates.Select(d => d.Date!.Value));
         Assert.Equal("Personal Leave", page.Form.Dates[1].Reason);
         Assert.False(Day(page.Form, 6).IsAvailable);
@@ -246,7 +248,7 @@ public class ProviderAvailabilityServiceTests
 
         var second = ValidForm();
         Day(second, 1).Start = T(9);
-        Day(second, 1).Breaks.Add(new BreakForm { Start = T(11), End = T(11, 45) });
+        Day(second, 1).Breaks.Add(new BreakForm { Start = T(11), End = T(12) });           // 9:00-17:00 is exactly 8 hours: a break is allowed
         Day(second, 6).IsAvailable = true;                      // Saturday opens
         Assert.True((await svc.SaveAsync(p.UserId, second)).Saved);
 
@@ -288,21 +290,21 @@ public class ProviderAvailabilityServiceTests
     }
 
     [Fact]
-    public async Task EmptyBreakAndDateRows_AreIgnored_AndBackToBackBreaksAreAllowed()
+    public async Task EmptyBreakAndDateRows_AreIgnored_AndTheBreakEndIsWorkedOut()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = ValidForm();
         var monday = Day(form, 1);
-        monday.Breaks.Add(new BreakForm());                                              // nothing typed
-        monday.Breaks.Add(new BreakForm { Start = T(12), End = T(12, 30) });
-        monday.Breaks.Add(new BreakForm { Start = T(12, 30), End = T(13) });             // starts exactly when the other ends
+        monday.Breaks.Add(new BreakForm());                                              // nothing chosen
+        monday.Breaks.Add(new BreakForm { Start = T(12, 30) });                          // the dropdown sends only the start
         form.Dates.Add(new UnavailableDateForm());                                       // nothing typed
 
         var result = await svc.SaveAsync(p.UserId, form);
 
         Assert.True(result.Saved);
-        Assert.Equal(2, await db.ProviderBreaks.CountAsync());
+        var brk = await db.ProviderBreaks.SingleAsync();
+        Assert.Equal((T(12, 30), T(13, 30)), (brk.BreakStart, brk.BreakEnd));
         Assert.Empty(db.ProviderUnavailableDates);
     }
 
@@ -316,16 +318,25 @@ public class ProviderAvailabilityServiceTests
             case "endEqualsStart": Day(f, 1).End = T(8); break;
             case "noStart": Day(f, 1).Start = null; break;
             case "noEnd": Day(f, 1).End = null; break;
-            case "breakOutside": Day(f, 1).Breaks.Add(new BreakForm { Start = T(16, 30), End = T(17, 30) }); break;
-            case "breakBeforeOpening": Day(f, 1).Breaks.Add(new BreakForm { Start = T(7), End = T(9) }); break;
+            case "breakOutside": Day(f, 1).Breaks.Add(new BreakForm { Start = T(16, 30) }); break;           // would end 17:30
+            case "breakBeforeOpening": Day(f, 1).Breaks.Add(new BreakForm { Start = T(7, 30) }); break;
             case "breakBackwards": Day(f, 1).Breaks.Add(new BreakForm { Start = T(13), End = T(12) }); break;
-            case "breakOneSided": Day(f, 1).Breaks.Add(new BreakForm { Start = T(12), End = null }); break;
-            case "breaksOverlap":
-                Day(f, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(13) });
-                Day(f, 1).Breaks.Add(new BreakForm { Start = T(12, 30), End = T(14) });
+            case "breakTooShort": Day(f, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(12, 30) }); break;
+            case "breakTooLong": Day(f, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(14) }); break;
+            case "breakEndOnly": Day(f, 1).Breaks.Add(new BreakForm { End = T(13) }); break;
+            case "twoBreaks":
+                Day(f, 1).Breaks.Add(new BreakForm { Start = T(10) });
+                Day(f, 1).Breaks.Add(new BreakForm { Start = T(14) });
                 break;
-            case "sixBreaks":
-                for (var i = 0; i < 6; i++) Day(f, 1).Breaks.Add(new BreakForm { Start = T(9 + i), End = T(9 + i, 30) });
+            case "shortShiftBreak":                                                         // 9:00-16:30 = 7.5 hours
+                Day(f, 1).Start = T(9);
+                Day(f, 1).End = T(16, 30);
+                Day(f, 1).Breaks.Add(new BreakForm { Start = T(12) });
+                break;
+            case "dateNextYear": f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2027, 1, 5) }); break;
+            case "date2030": f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2030, 11, 11), Reason = "Sick" }); break;
+            case "sixInAMonth":
+                for (var day = 2; day <= 7; day++) f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 11, day) });
                 break;
             case "missingDay": f.Days.RemoveAll(d => d.DayOfWeek == 0); break;
             case "duplicateDay": f.Days[6].DayOfWeek = 1; break;
@@ -350,12 +361,17 @@ public class ProviderAvailabilityServiceTests
     [InlineData("endEqualsStart", "Monday: the end time must be after the start time.")]
     [InlineData("noStart", "Monday: please enter a start time and an end time.")]
     [InlineData("noEnd", "Monday: please enter a start time and an end time.")]
-    [InlineData("breakOutside", "Monday: breaks must be inside your working hours.")]
-    [InlineData("breakBeforeOpening", "Monday: breaks must be inside your working hours.")]
-    [InlineData("breakBackwards", "Monday: a break must end after it starts.")]
-    [InlineData("breakOneSided", "Monday: every break needs a start time and an end time.")]
-    [InlineData("breaksOverlap", "Monday: breaks cannot overlap.")]
-    [InlineData("sixBreaks", "Monday: you can add at most 5 breaks.")]
+    [InlineData("breakOutside", "Monday: the break must start between 8:00 am and 4:00 pm.")]
+    [InlineData("breakBeforeOpening", "Monday: the break must start between 8:00 am and 4:00 pm.")]
+    [InlineData("breakBackwards", "Monday: a break must be exactly 1 hour long.")]
+    [InlineData("breakTooShort", "Monday: a break must be exactly 1 hour long.")]
+    [InlineData("breakTooLong", "Monday: a break must be exactly 1 hour long.")]
+    [InlineData("breakEndOnly", "Monday: choose when your break starts.")]
+    [InlineData("twoBreaks", "Monday: you can add only one 1-hour break.")]
+    [InlineData("shortShiftBreak", "Monday: Break is only available for work shifts longer than 8 hours.")]
+    [InlineData("dateNextYear", "Jan 5, 2027 is not in 2026. You can only mark unavailable days until December 31, 2026.")]
+    [InlineData("date2030", "Nov 11, 2030 is not in 2026.")]
+    [InlineData("sixInAMonth", "You can only set up to 5 unavailable days per month. November 2026 would have 6.")]
     [InlineData("missingDay", "The weekly schedule was incomplete.")]
     [InlineData("duplicateDay", "The weekly schedule was incomplete.")]
     [InlineData("dayOutOfRange", "The weekly schedule was incomplete.")]
@@ -502,5 +518,165 @@ public class ProviderAvailabilityServiceTests
         Assert.Equal(1, await db.ProviderUnavailableDates.CountAsync(d => d.ProviderId == liza.ProviderId));
         Assert.Equal(0, await db.ProviderUnavailableDates.CountAsync(d => d.ProviderId == marco.ProviderId));
         Assert.Equal(7, await db.ProviderAvailabilities.CountAsync(a => a.ProviderId == marco.ProviderId));
+    }
+
+    // ------------------------------------------------------- the 1-hour break
+
+    [Theory]
+    [InlineData(8, 0, 16, 0, true)]          // exactly 8 hours
+    [InlineData(7, 0, 17, 0, true)]          // 10 hours (the example in the rules)
+    [InlineData(9, 0, 16, 30, false)]        // 7.5 hours
+    [InlineData(9, 0, 16, 59, false)]        // one minute short
+    public async Task ABreak_IsOnlyAllowed_OnAShiftOf8HoursOrMore(int sh, int sm, int eh, int em, bool allowed)
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = ValidForm();
+        Day(form, 1).Start = T(sh, sm);
+        Day(form, 1).End = T(eh, em);
+        Day(form, 1).Breaks.Add(new BreakForm { Start = T(12) });
+
+        var result = await svc.SaveAsync(p.UserId, form);
+
+        Assert.Equal(allowed, result.Saved);
+        Assert.Equal(allowed, BreakRules.AllowsBreak(T(sh, sm), T(eh, em)));
+        if (!allowed) Assert.Contains("Monday: Break is only available for work shifts longer than 8 hours.", result.Errors);
+    }
+
+    [Fact]
+    public async Task AShortShift_WithoutABreak_IsFine()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = ValidForm();
+        Day(form, 3).End = T(15);                                     // Wednesday 8:00-15:00, no break
+
+        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
+    }
+
+    [Theory]
+    [InlineData(8, 0, true)]                 // the shift's start
+    [InlineData(16, 0, true)]                // end - 1 hour: the last start that fits
+    [InlineData(16, 1, false)]
+    [InlineData(7, 59, false)]
+    public async Task TheBreak_StartsBetweenTheShiftStart_AndOneHourBeforeItsEnd(int h, int m, bool ok)
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = ValidForm();                                        // Monday 8:00-17:00
+        Day(form, 1).Breaks.Add(new BreakForm { Start = T(h, m) });
+
+        Assert.Equal(ok, (await svc.SaveAsync(p.UserId, form)).Saved);
+    }
+
+    [Fact]
+    public void TheDropdown_OffersEvery30Minutes_FromTheStart_ToOneHourBeforeTheEnd()
+    {
+        var options = BreakRules.StartOptions(T(7), T(17));
+        Assert.Equal(19, options.Count);
+        Assert.Equal(T(7), options[0]);
+        Assert.Equal(T(7, 30), options[1]);
+        Assert.Equal(T(16), options[^1]);
+
+        Assert.Empty(BreakRules.StartOptions(T(9), T(16)));           // 7 hours: no break
+        Assert.Empty(BreakRules.StartOptions(null, T(17)));
+        Assert.Equal(T(15, 30), BreakRules.StartOptions(T(8), T(16, 59))[^1]);   // a 4:00 pm start would end after 4:59 pm
+        Assert.Equal("4:00 pm", BreakRules.Clock(T(16)));
+        Assert.Equal("12:30 pm", BreakRules.Clock(T(12, 30)));
+    }
+
+    [Fact]
+    public void AnOldBreakThatNoLongerFits_IsShownAtTheNearestStart()
+    {
+        Assert.Equal(T(16), BreakRules.Nearest(T(16, 30), T(8), T(17)));        // the old 4:30-5:00 pm break
+        Assert.Equal(T(12), BreakRules.Nearest(T(12), T(8), T(17)));            // still fits: unchanged
+        Assert.Null(BreakRules.Nearest(T(12), T(9), T(15)));                     // 6-hour shift: no break at all
+    }
+
+    // ------------------------------------------- unavailable dates: this year, 5 a month
+
+    [Fact]
+    public async Task Dec31_IsTheLastDayThatCanBeMarked()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+
+        var page = (await svc.GetAsync(p.UserId)).Page!;
+        Assert.Equal(new DateOnly(2026, 12, 31), page.LastDate);
+
+        var dec31 = ValidForm();
+        dec31.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 12, 31), Reason = "New Year's Eve" });
+        Assert.True((await svc.SaveAsync(p.UserId, dec31)).Saved);
+
+        var jan1 = ValidForm();
+        jan1.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2027, 1, 1) });
+        var result = await svc.SaveAsync(p.UserId, jan1);
+        Assert.False(result.Saved);
+        Assert.Contains(result.Errors, e => e.StartsWith("Jan 1, 2027 is not in 2026."));
+    }
+
+    [Fact]
+    public async Task FiveDaysAMonth_IsTheLimit_ForEachMonthSeparately()
+    {
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        var form = ValidForm();
+        for (var day = 2; day <= 6; day++) form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 11, day) });
+        for (var day = 21; day <= 25; day++) form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 12, day) });
+
+        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
+        Assert.Equal(10, await db.ProviderUnavailableDates.CountAsync());
+
+        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 12, 28) });       // a 6th day in December
+        var result = await svc.SaveAsync(p.UserId, form);
+        Assert.False(result.Saved);
+        Assert.Equal(new[] { "You can only set up to 5 unavailable days per month. December 2026 would have 6." }, result.Errors);
+        Assert.Equal(10, await db.ProviderUnavailableDates.CountAsync());                    // nothing changed
+    }
+
+    [Fact]
+    public async Task DaysOfThisMonthThatAlreadyPassed_CountTowardTheFive()
+    {
+        var (svc, db) = Create();                                                             // today: Oct 14, 2026
+        var p = await AddProviderAsync(db);
+        db.ProviderUnavailableDates.AddRange(
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 1) },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 5) },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 9, 30) });   // last month: not counted
+        await db.SaveChangesAsync();
+
+        Assert.Equal(2, (await svc.GetAsync(p.UserId)).Page!.PastDaysThisMonth);
+
+        var three = ValidForm();
+        for (var day = 20; day <= 22; day++) three.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, day) });
+        Assert.True((await svc.SaveAsync(p.UserId, three)).Saved);                           // 2 + 3 = 5
+
+        var four = ValidForm();
+        for (var day = 20; day <= 23; day++) four.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, day) });
+        var result = await svc.SaveAsync(p.UserId, four);                                     // 2 + 4 = 6
+        Assert.False(result.Saved);
+        Assert.Contains("You can only set up to 5 unavailable days per month. October 2026 would have 6 (2 of them already passed).", result.Errors);
+    }
+
+    [Fact]
+    public async Task TheYearlyReset_DeletesOnlyLastYearsDates()
+    {
+        var (_, db) = Create();
+        var p = await AddProviderAsync(db);
+        db.ProviderUnavailableDates.AddRange(
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2025, 12, 30) },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 6, 1) },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 12, 31) },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2027, 1, 4) });
+        await db.SaveChangesAsync();
+
+        // still 2026: only the 2025 date goes
+        Assert.Equal(1, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2026, 12, 31)));
+        Assert.Equal(3, await db.ProviderUnavailableDates.CountAsync());
+
+        // January 1, 2027: every 2026 date goes; running it again deletes nothing more
+        Assert.Equal(2, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2027, 1, 1)));
+        Assert.Equal(0, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2027, 1, 1)));
+        Assert.Equal(new DateOnly(2027, 1, 4), (await db.ProviderUnavailableDates.SingleAsync()).UnavailableDate);
     }
 }

@@ -32,6 +32,14 @@ public class ProviderDetailsViewModel
     /// Only the buttons that make sense for the account's CURRENT status.
     public IReadOnlyList<UserActionInfo> Actions { get; set; } = Array.Empty<UserActionInfo>();
 
+    /// The provider's days off from today to December 31 (their own ones and extra days approved by an administrator).
+    public IReadOnlyList<ProviderDayOffLine> DaysOff { get; set; } = Array.Empty<ProviderDayOffLine>();
+
+    /// "Approve an extra day off" is offered for approved providers; the date box allows today to December 31.
+    public bool CanApproveDayOff { get; set; }
+    public string DayOffMin { get; set; } = string.Empty;    // "2026-11-11"
+    public string DayOffMax { get; set; } = string.Empty;    // "2026-12-31"
+
     // remembered so "Close" and every action come back to the same filtered list
     public string ReturnStatus { get; set; } = ProviderStatuses.All;
     public int ReturnPage { get; set; } = 1;
@@ -48,6 +56,22 @@ public sealed record ProviderDetailsLookup(ProviderDetailsOutcome Outcome, Provi
 
 /// What the browser posts to change a provider's account status. It says WHAT to do;
 /// WHO is doing it comes from the sign-in cookie, and WHICH provider is in the address.
+/// One day off in the admin pop-up: "Nov 20, 2026", the reason, and whether an administrator approved it as an extra day.
+public sealed record ProviderDayOffLine(string DateText, string? Reason, bool ApprovedByAdmin);
+
+/// "Approve an extra day off" (admin pop-up). The administrator comes from the sign-in cookie; the provider is in the address.
+public class ExtraDayOffForm
+{
+    public DateOnly? Date { get; set; }
+    public string? Reason { get; set; }
+    public string? ReturnStatus { get; set; }
+    public int ReturnPage { get; set; } = 1;
+}
+
+public enum ExtraDayOffOutcome { Success, NotAllowed, NotFound, Invalid }
+
+public sealed record ExtraDayOffResult(ExtraDayOffOutcome Outcome, string Message);
+
 public class ProviderStatusForm
 {
     public string? Action { get; set; }

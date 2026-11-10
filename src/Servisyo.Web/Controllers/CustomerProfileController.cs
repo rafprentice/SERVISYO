@@ -63,6 +63,8 @@ public class CustomerProfileController : Controller
     }
 
     // ------------------------------------------------------------------ saved address
+    // The form for browsers without JavaScript (with JavaScript the page uses PUT /api/profile/address).
+    // Same service, same rules: one of the 5 Cebu City options; a blank address is refused, never removed.
 
     [HttpPost("address")]
     [ValidateAntiForgeryToken]

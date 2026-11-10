@@ -10,8 +10,8 @@ It reuses `ProfileRules` (from the provider profile page), so install `provider_
 | Card | What it does |
 |---|---|
 | Summary (left) | Initials avatar, name, email, "Active Account", Member since (account creation date, Philippine time), Total bookings (all of YOUR bookings) |
-| Personal Information | Full name, email, phone, city. "Edit" unlocks the boxes; Save / Cancel. Same rules as the provider profile (name needs first + last, email unique, phone 7-15 digits, city max 50) |
-| Saved Address | The customer's one address (`CUSTOMERS.ADDRESS`). Add / Edit / remove (trash asks first). Blank = removed |
+| Personal Information | Full name, email, phone, city. "Edit" unlocks the boxes; Save / Cancel. Name needs first + last, email unique, phone REQUIRED (09XXXXXXXXX or +639XXXXXXXXX, at most 13 characters, saved as 09XXXXXXXXX) |
+| Saved Address | The customer's one address (`CUSTOMERS.ADDRESS`). "Edit Address" (or "+ Add Address" for an older account with none) opens a dropdown of the 5 Cebu City addresses. There is NO remove button: a saved address can be changed, never removed |
 | Security | Change Password: current password, new password, confirm. Account Status row (always "Active": only Active accounts can open the page) |
 
 Without JavaScript every form is simply open and works as a normal form; with JavaScript the cards start closed.
@@ -23,9 +23,12 @@ Without JavaScript every form is simply open and works as a normal form; with Ja
 | The customer is the signed-in user, never a form value | Controller reads `ClaimTypes.NameIdentifier`; the forms have no id fields; every query starts from that user |
 | Email is also the sign-in name, so it stays unique | Check in `SaveAsync` + the database unique index (race caught as `DbUpdateException`) |
 | Nothing is saved when any field is wrong | `SaveAsync` collects all errors first |
+| The phone number is required (the service provider must be able to contact the customer): blank is refused, so it can be changed but never removed; only 09XXXXXXXXX or +639XXXXXXXXX | `SaveAsync` (`InputRules.PhoneRequiredMessage`, `InputRules.IsPhone`) + `required maxlength=13 pattern` on the box |
 | Name / email in the sign-in cookie follow a profile change | `RefreshSignInAsync` (user id, role and "remember me" unchanged) |
 | Password: current one must be right; new = 8-100 chars with a letter and a number (same as registration), different from the old, confirmed | `ChangePasswordAsync` + `PasswordRules` |
 | Passwords are stored only as an ASP.NET `PasswordHasher` hash, never logged, never sent back to the page | `ChangePasswordAsync`, controller |
+| The saved address is one of the 5 Cebu City options (`CebuLocations`), exact text only | `SaveAddressAsync` (`CebuLocations.Find`); the page offers only those options |
+| A saved address can be edited but never removed (blank = refused: "Saved addresses cannot be removed once set. Please edit your address instead.") | `SaveAddressAsync` + `SavedAddressRules`; no remove button; `DELETE /api/profile/address` always answers 400 |
 
 ## Deliberately NOT built (and why)
 - **Several saved addresses (Home / Office / Set default) and Payment Methods (cards).** The documented database has ONE
@@ -48,3 +51,19 @@ Without JavaScript every form is simply open and works as a normal form; with Ja
    `builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();`
    (`IPasswordHasher<User>` is already registered for sign-in.)
 3. `dotnet build` then `dotnet test` then `dotnet run`; sign in as a customer and open My Profile.
+
+## Saved address API (added later)
+`Controllers/CustomerAddressApiController.cs`, tests in `tests/Servisyo.Tests/CustomerAddressApiTests.cs`.
+With JavaScript the Saved Address card saves through this API (no page reload); without JavaScript the same form posts
+to `POST /customer/profile/address`. Both call `CustomerProfileService.SaveAddressAsync`, so the rules are in one place.
+
+| Request | Answer |
+|---|---|
+| `PUT /api/profile/address` with `{ "address": "Salinas Drive, Brgy. Lahug, Cebu City" }` and the `RequestVerificationToken` header | 200 `{ message, address, streetAddress, barangay, city }` |
+| same, with a blank address or one that is not in the list | 400 `{ message }`, nothing changes |
+| `DELETE /api/profile/address` | always 400 `{ "message": "Saved addresses cannot be removed once set. Please edit your address instead." }` |
+| not signed in / not a customer / suspended or deactivated | 401 / 403 (scripts get a status code, not the login page) |
+
+`streetAddress`, `barangay` and `city` are worked out from the chosen option; the database keeps ONE column
+(`CUSTOMERS.ADDRESS`) with the full text (one fact, one place). Older accounts that typed an address before the
+dropdown existed keep it until they pick one of the 5 options.

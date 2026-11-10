@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Servisyo.Web.Data;
 using Servisyo.Web.Helpers;
@@ -17,6 +18,13 @@ public interface IProviderOfferingsService
 
     /// Activates or deactivates one of the signed-in provider's own services.
     Task<ServiceStatusResult> SetActiveAsync(int userId, int serviceId, bool active, CancellationToken ct = default);
+
+    /// Changes the name, category, description and price of one of the signed-in provider's own services.
+    /// Refused (Locked) while the service has an active booking (Pending, Accepted or In Progress).
+    Task<EditServiceResult> UpdateAsync(int userId, int serviceId, EditServiceForm form, CancellationToken ct = default);
+
+    /// The My Services page with the Edit dialog open again: what was typed and the problems.
+    Task<ServicesPageResult> GetWithRejectedEditAsync(int userId, int serviceId, EditServiceForm posted, EditServiceResult rejected, CancellationToken ct = default);
 }
 
 public class ProviderOfferingsService : IProviderOfferingsService
@@ -68,9 +76,17 @@ public class ProviderOfferingsService : IProviderOfferingsService
             .Select(s => new
             {
                 s.ServiceId, s.ServiceName, s.Description, s.Price, s.DurationMinutes, s.IsActive,
-                Category = s.Category.CategoryName
+                s.CategoryId, Category = s.Category.CategoryName
             })
             .ToListAsync(ct);
+
+        // services with an active booking (Pending, Accepted or In Progress) cannot be edited
+        var locked = (await _db.BookingServices.AsNoTracking()
+                .Where(bs => bs.Service.ProviderId == who.ProviderId && ActiveBookingRules.Statuses.Contains(bs.Booking.Status))
+                .Select(bs => bs.ServiceId)
+                .Distinct()
+                .ToListAsync(ct))
+            .ToHashSet();
 
         var categories = await _db.ServiceCategories.AsNoTracking()
             .Where(c => c.IsActive)
@@ -103,8 +119,10 @@ public class ProviderOfferingsService : IProviderOfferingsService
                 Description = string.IsNullOrWhiteSpace(r.Description) ? null : r.Description.Trim(),
                 Price = r.Price,
                 DurationMinutes = r.DurationMinutes,
+                CategoryId = r.CategoryId,
                 CategoryName = r.Category,
-                IsActive = r.IsActive
+                IsActive = r.IsActive,
+                EditLocked = locked.Contains(r.ServiceId)
             }).ToList(),
             Categories = categories,
             DurationOptions = durations.Select(m => (m, ServiceFormat.Duration(m))).ToList(),
@@ -123,58 +141,13 @@ public class ProviderOfferingsService : IProviderOfferingsService
         if (who is null) return new(access, false, new Dictionary<string, string>(), string.Empty);
 
         var errors = new Dictionary<string, string>();
-
-        // ---- name ----
-        var name = form.ServiceName?.Trim() ?? string.Empty;
-        if (name.Length == 0)
-            errors["ServiceName"] = "Enter a service name.";
-        else if (name.Length > MaxNameLength)
-            errors["ServiceName"] = $"The name can be at most {MaxNameLength} characters.";
-
-        // ---- description (optional) ----
-        var description = string.IsNullOrWhiteSpace(form.Description) ? null : form.Description.Trim();
-        if (description is { Length: > MaxDescriptionLength })
-            errors["Description"] = $"The description can be at most {MaxDescriptionLength} characters.";
-
-        // ---- category: must exist and be active (usp_AddService) ----
-        int categoryId = 0;
-        if (form.CategoryId is null or <= 0)
-        {
-            errors["CategoryId"] = "Choose a category.";
-        }
-        else
-        {
-            categoryId = form.CategoryId.Value;
-            var usable = await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.CategoryId == categoryId && c.IsActive, ct);
-            if (!usable) errors["CategoryId"] = "That category is not available. Choose another one.";
-        }
-
-        // ---- price: 0 or more, at most 2 decimals, fits DECIMAL(10,2) ----
-        decimal price = 0;
-        if (form.Price is null)
-            errors["Price"] = "Enter a price, for example 800.";
-        else if (form.Price < 0)
-            errors["Price"] = "The price cannot be negative.";
-        else if (form.Price > MaxPrice)
-            errors["Price"] = "That price is too large.";
-        else if (decimal.Round(form.Price.Value, 2) != form.Price.Value)
-            errors["Price"] = "Use at most 2 decimal places.";
-        else
-            price = form.Price.Value;
+        var (name, description, categoryId, price) =
+            await CheckDetailsAsync(who.ProviderId, form.ServiceName, form.Description, form.CategoryId, form.Price, null, null, errors, ct);
 
         // ---- duration ----
         var minutes = form.DurationMinutes ?? 0;
         if (!ServiceDurations.Choices.Contains(minutes))
             errors["DurationMinutes"] = "Choose how long the service usually takes.";
-
-        // ---- the same provider cannot have two services with the same name ----
-        if (!errors.ContainsKey("ServiceName"))
-        {
-            var lower = name.ToLowerInvariant();
-            var duplicate = await _db.Services.AsNoTracking()
-                .AnyAsync(s => s.ProviderId == who.ProviderId && s.ServiceName.ToLower() == lower, ct);
-            if (duplicate) errors["ServiceName"] = "You already have a service with this name.";
-        }
 
         if (errors.Count > 0)
             return new(ProviderDashboardAccess.Allowed, false, errors, "The service was not added. Please fix the highlighted fields.");
@@ -234,5 +207,149 @@ public class ProviderOfferingsService : IProviderOfferingsService
         return new(ProviderDashboardAccess.Allowed, ServiceStatusOutcome.Success, active
             ? $"“{service.ServiceName}” is active again and customers can see it."
             : $"“{service.ServiceName}” was deactivated. Customers can no longer see or book it.");
+    }
+
+    // ----------------------------------------------------------------- edit
+
+    /// True while the service is part of a booking that is still going on (Pending, Accepted or In Progress).
+    /// Finished bookings (Completed, Cancelled, Rejected) keep the price they were booked at (BOOKING_SERVICES.PRICE_SNAPSHOT).
+    private Task<bool> HasActiveBookingsAsync(int serviceId, CancellationToken ct) =>
+        _db.BookingServices.AnyAsync(bs => bs.ServiceId == serviceId && ActiveBookingRules.Statuses.Contains(bs.Booking.Status), ct);
+
+    public async Task<EditServiceResult> UpdateAsync(int userId, int serviceId, EditServiceForm form, CancellationToken ct = default)
+    {
+        var (access, who) = await FindAsync(userId, ct);
+        if (who is null) return new(access, EditServiceOutcome.NotFound, NoErrors, string.Empty);
+
+        // Serializable: "no active booking" is checked and the change is saved as ONE step, so a customer cannot book
+        // this service in between (their BOOKING_SERVICES row has to wait until this transaction is finished).
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+
+        // The service must belong to THIS provider. Someone else's service looks exactly like a missing one.
+        var service = await _db.Services.FirstOrDefaultAsync(s => s.ServiceId == serviceId && s.ProviderId == who.ProviderId, ct);
+        if (service is null)
+            return new(ProviderDashboardAccess.Allowed, EditServiceOutcome.NotFound, NoErrors, "That service no longer exists.");
+
+        if (await HasActiveBookingsAsync(serviceId, ct))
+        {
+            _logger.LogWarning("Provider {ProviderId} tried to edit service {ServiceId} while it has active bookings: refused.", who.ProviderId, serviceId);
+            return new(ProviderDashboardAccess.Allowed, EditServiceOutcome.Locked, NoErrors, ServiceEditRules.LockedMessage);
+        }
+
+        var errors = new Dictionary<string, string>();
+        var (name, description, categoryId, price) = await CheckDetailsAsync(
+            who.ProviderId, form.ServiceName, form.Description, form.CategoryId, form.Price, serviceId, service.CategoryId, errors, ct);
+        if (errors.Count > 0)
+            return new(ProviderDashboardAccess.Allowed, EditServiceOutcome.Invalid, errors, "The service was not saved. Please fix the highlighted fields.");
+
+        if (name == service.ServiceName && description == service.Description && categoryId == service.CategoryId && price == service.Price)
+            return new(ProviderDashboardAccess.Allowed, EditServiceOutcome.NoChange, NoErrors, $"Nothing was changed in “{service.ServiceName}”.");
+
+        var oldPrice = service.Price;
+        service.ServiceName = name;
+        service.Description = description;
+        service.CategoryId = categoryId;
+        service.Price = price;
+
+        // like Add (usp_AddService): link the provider to a new category if that has not happened yet
+        var linked = await _db.ProviderCategories.AnyAsync(pc => pc.ProviderId == who.ProviderId && pc.CategoryId == categoryId, ct);
+        if (!linked)
+            _db.ProviderCategories.Add(new ProviderCategory { ProviderId = who.ProviderId, CategoryId = categoryId });
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogWarning(ex, "Could not edit service {ServiceId} of provider {ProviderId}.", serviceId, who.ProviderId);
+            return new(ProviderDashboardAccess.Allowed, EditServiceOutcome.Failed, NoErrors, "The service could not be saved. Please try again.");
+        }
+
+        _logger.LogInformation("Provider {ProviderId} edited service {ServiceId} (price {OldPrice} -> {NewPrice}).",
+            who.ProviderId, serviceId, oldPrice, price);
+        return new(ProviderDashboardAccess.Allowed, EditServiceOutcome.Saved, NoErrors, $"“{name}” was updated.");
+    }
+
+    public async Task<ServicesPageResult> GetWithRejectedEditAsync(int userId, int serviceId, EditServiceForm posted, EditServiceResult rejected, CancellationToken ct = default)
+    {
+        var result = await GetAsync(userId, null, null, ct);
+        if (result.Page is null) return result;
+
+        var page = result.Page;
+        var card = page.Cards.FirstOrDefault(c => c.ServiceId == serviceId);
+        if (card is null || card.EditLocked) return result;          // gone or locked meanwhile: just show the list
+
+        page.EditServiceId = serviceId;
+        page.EditForm = posted;
+        page.EditErrors = rejected.FieldErrors;
+        page.EditFormError = rejected.FieldErrors.Count == 0 ? rejected.Message : null;
+        return result;
+    }
+
+    // ----------------------------------------------------------------- shared checks (Add and Edit)
+
+    private static readonly IReadOnlyDictionary<string, string> NoErrors = new Dictionary<string, string>();
+
+    /// Checks the name, description, category and price. Problems are added to `errors` (one per box).
+    /// exceptServiceId: the service being edited (its own name is not a duplicate).
+    /// keepCategoryId: the category the service already has; it stays allowed even if an administrator has
+    /// deactivated it since (only a NEW choice must be an active category).
+    private async Task<(string Name, string? Description, int CategoryId, decimal Price)> CheckDetailsAsync(
+        int providerId, string? nameIn, string? descriptionIn, int? categoryIn, decimal? priceIn,
+        int? exceptServiceId, int? keepCategoryId, Dictionary<string, string> errors, CancellationToken ct)
+    {
+        // ---- name ----
+        var name = nameIn?.Trim() ?? string.Empty;
+        if (name.Length == 0)
+            errors["ServiceName"] = "Enter a service name.";
+        else if (name.Length > MaxNameLength)
+            errors["ServiceName"] = $"The name can be at most {MaxNameLength} characters.";
+
+        // ---- description (optional) ----
+        var description = string.IsNullOrWhiteSpace(descriptionIn) ? null : descriptionIn.Trim();
+        if (description is { Length: > MaxDescriptionLength })
+            errors["Description"] = $"The description can be at most {MaxDescriptionLength} characters.";
+
+        // ---- category: must exist and be active (usp_AddService) ----
+        var categoryId = 0;
+        if (categoryIn is null or <= 0)
+        {
+            errors["CategoryId"] = "Choose a category.";
+        }
+        else
+        {
+            categoryId = categoryIn.Value;
+            var usable = categoryId == keepCategoryId
+                      || await _db.ServiceCategories.AsNoTracking().AnyAsync(c => c.CategoryId == categoryId && c.IsActive, ct);
+            if (!usable) errors["CategoryId"] = "That category is not available. Choose another one.";
+        }
+
+        // ---- price: 0 or more, at most 2 decimals, fits DECIMAL(10,2) ----
+        decimal price = 0;
+        if (priceIn is null)
+            errors["Price"] = "Enter a price, for example 800.";
+        else if (priceIn < 0)
+            errors["Price"] = "The price cannot be negative.";
+        else if (priceIn > MaxPrice)
+            errors["Price"] = "That price is too large.";
+        else if (decimal.Round(priceIn.Value, 2) != priceIn.Value)
+            errors["Price"] = "Use at most 2 decimal places.";
+        else
+            price = priceIn.Value;
+
+        // ---- the same provider cannot have two services with the same name ----
+        if (!errors.ContainsKey("ServiceName"))
+        {
+            var lower = name.ToLowerInvariant();
+            var duplicate = await _db.Services.AsNoTracking()
+                .AnyAsync(s => s.ProviderId == providerId && s.ServiceName.ToLower() == lower && s.ServiceId != exceptServiceId, ct);
+            if (duplicate) errors["ServiceName"] = "You already have a service with this name.";
+        }
+
+        return (name, description, categoryId, price);
     }
 }

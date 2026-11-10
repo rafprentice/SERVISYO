@@ -74,6 +74,33 @@ public class ProviderServicesController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    /// "Edit Service": name, category, description and price. Refused while the service has an active booking.
+    [HttpPost("{serviceId:int}/edit")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Edit(int serviceId, EditServiceForm form, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Forbid();
+
+        // The provider comes from the sign-in cookie; the browser only says WHICH service and the new values.
+        var result = await _offerings.UpdateAsync(userId, serviceId, form, ct);
+        var denied = Denied(result.Access);
+        if (denied is not null) return await denied;
+
+        if (result.Outcome == EditServiceOutcome.Invalid)
+        {
+            // show the page again with the Edit dialog open, what the provider typed, and the problems
+            var again = await _offerings.GetWithRejectedEditAsync(userId, serviceId, form, result, ct);
+            var deniedAgain = Denied(again.Access);
+            if (deniedAgain is not null) return await deniedAgain;
+
+            return View(nameof(Index), again.Page!);
+        }
+
+        TempData["Flash"] = result.Message;
+        TempData["FlashKind"] = result.Succeeded ? "ok" : "error";
+        return RedirectToAction(nameof(Index));               // reload so a refresh does not send the form twice
+    }
+
     // Pending applicants wait on their own page; rejected providers see the dashboard message; anything else is signed out.
     private Task<IActionResult>? Denied(ProviderDashboardAccess access) => access switch
     {

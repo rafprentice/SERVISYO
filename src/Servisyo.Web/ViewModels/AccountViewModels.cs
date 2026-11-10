@@ -23,6 +23,7 @@ public static class InputRules
     /// ([0-9], not \d: in .NET \d also matches digits of other alphabets.)
     public const string Phone = "^(09[0-9]{9}|\\+639[0-9]{9})$";
     public const string PhoneMessage = "Enter an 11-digit mobile number like 09171234567 (or +639171234567), digits only.";
+    public const string PhoneRequiredMessage = "Enter your phone number so your service provider can contact you.";
 
     /// [username]@[domain].[tld]: the domain and the TLD are letters only (no numbers) and every part has at least
     /// 2 letters, so "juan@gmail.com" and "ana@usc.edu.ph" pass but "juan@gmail2.com" and "juan@a.c" do not.

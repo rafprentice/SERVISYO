@@ -17,7 +17,9 @@ public interface ICustomerProfileService
     /// Saves the Personal Information form. Everything is checked first; if anything is wrong nothing at all is saved.
     Task<CustomerProfileSaveResult> SaveAsync(int userId, CustomerProfileForm form, CancellationToken ct = default);
 
-    /// Saves (or, when the text is blank, removes) the customer's saved address.
+    /// Saves the customer's address: one of the 5 Cebu City options (CebuLocations). A saved address can be changed
+    /// to another option but never removed: a blank value is refused. Used by the My Profile page AND by
+    /// PUT /api/profile/address, so both follow exactly the same rules.
     Task<CustomerProfileSaveResult> SaveAddressAsync(int userId, CustomerAddressForm form, CancellationToken ct = default);
 
     /// Changes the password after checking the current one.
@@ -125,12 +127,16 @@ public class CustomerProfileService : ICustomerProfileService
         else if (nameChanged && await _db.Bookings.AnyAsync(b => b.CustomerId == customer.CustomerId && ActiveBookingRules.Statuses.Contains(b.Status), ct))
             errors["FullName"] = ActiveBookingRules.NameLockedMessage;       // the provider must keep seeing the name they were booked by
 
-        // ---- phone (optional; a number saved earlier in another style is left alone unless it is edited) ----
+        // ---- phone (REQUIRED: the service provider must be able to contact the customer) ----
+        // Only 09XXXXXXXXX (11 characters) or +639XXXXXXXXX (13 characters), digits only; it is always saved as
+        // 09XXXXXXXXX. A blank box is refused, so a saved number can be changed but never removed.
         var typedPhone = (form.PhoneNumber ?? string.Empty).Trim();
-        var phoneChanged = typedPhone != (user.PhoneNumber ?? string.Empty).Trim();
+        if (typedPhone.Length == 0)
+            errors["PhoneNumber"] = InputRules.PhoneRequiredMessage;
+        else if (typedPhone.Length > ProfileRules.MaxPhoneLength || !InputRules.IsPhone(typedPhone))
+            errors["PhoneNumber"] = InputRules.PhoneMessage;                     // e.g. 09998384283842833248 is refused
         var phone = ProfileRules.NormalizePhone(typedPhone);                     // +639171234567 is saved as 09171234567
-        if (phoneChanged && typedPhone.Length > 0 && !InputRules.IsPhone(typedPhone))
-            errors["PhoneNumber"] = InputRules.PhoneMessage;                     // digits only: 09XXXXXXXXX or +639XXXXXXXXX
+        var phoneChanged = !string.Equals(phone, user.PhoneNumber, StringComparison.Ordinal);
 
         // ---- email (it is also the sign-in name, so it must stay unique) ----
         var email = (form.Email ?? string.Empty).Trim().ToLowerInvariant();
@@ -187,20 +193,28 @@ public class CustomerProfileService : ICustomerProfileService
         var customer = await FindAsync(userId, ct);
         if (customer is null) return NotAllowed();
 
-        var address = ProfileRules.NormalizeText(form.Address);
-        if (address is { Length: > ProfileRules.MaxAddressLength })
-            return new(true, false,
-                new Dictionary<string, string> { ["Address"] = $"The address can be at most {ProfileRules.MaxAddressLength} characters." },
-                FixFields);
-        if (address is not null && !InputRules.HasALetter(address))
-            return new(true, false, new Dictionary<string, string> { ["Address"] = InputRules.AddressMessage }, FixFields);
+        var hadAddress = !string.IsNullOrWhiteSpace(customer.Address);
 
-        var removing = address is null;
-        customer.Address = address;
+        // a blank value would remove the address: refused once one is saved (older accounts with none are asked to choose)
+        if (string.IsNullOrWhiteSpace(form.Address))
+        {
+            if (hadAddress)
+                _logger.LogWarning("Customer {CustomerId} tried to remove their saved address: refused.", customer.CustomerId);
+            return Problem(hadAddress ? SavedAddressRules.CannotRemoveMessage : CebuLocations.NotInListMessage);
+        }
+
+        // only the exact text of one of the 5 options (anything typed or changed in the browser is refused)
+        var chosen = CebuLocations.Find(form.Address);
+        if (chosen is null) return Problem(CebuLocations.NotInListMessage);
+
+        customer.Address = chosen.Full;
         await _db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Customer {CustomerId} {Action} their saved address.", customer.CustomerId, removing ? "removed" : "saved");
-        return new(true, true, NoErrors, removing ? "Your saved address was removed." : "Your address was saved.");
+        _logger.LogInformation("Customer {CustomerId} {Action} their saved address.", customer.CustomerId, hadAddress ? "changed" : "added");
+        return new(true, true, NoErrors, hadAddress ? "Your address was updated." : "Your address was saved.", Address: chosen.Full);
+
+        static CustomerProfileSaveResult Problem(string message) =>
+            new(true, false, new Dictionary<string, string> { ["Address"] = message }, message);
     }
 
     // ----------------------------------------------------------------- password

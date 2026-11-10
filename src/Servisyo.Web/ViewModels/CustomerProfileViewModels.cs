@@ -32,10 +32,17 @@ public class CustomerProfileForm
     public string? PhoneNumber { get; set; }
 }
 
-/// The Saved Address form. A blank address removes the saved one.
+/// The Saved Address form (the "My Profile" page and PUT /api/profile/address). Address must be the full text of one
+/// of the 5 Cebu City options (CebuLocations), e.g. "Osmeña Blvd, Brgy. Capitol Site, Cebu City".
 public class CustomerAddressForm
 {
     public string? Address { get; set; }
+}
+
+/// The saved address can be CHANGED to another Cebu City option, but never removed: the booking form fills it in.
+public static class SavedAddressRules
+{
+    public const string CannotRemoveMessage = "Saved addresses cannot be removed once set. Please edit your address instead.";
 }
 
 public class CustomerPasswordForm
@@ -91,10 +98,12 @@ public class CustomerProfilePageViewModel
 public record CustomerProfilePageResult(bool Allowed, CustomerProfilePageViewModel? Page);
 
 /// The answer of every save on the page (personal information, address, password).
+/// Address is only filled by a successful address save (the address that is now saved).
 public record CustomerProfileSaveResult(
     bool Allowed,
     bool Saved,
     IReadOnlyDictionary<string, string> FieldErrors,
     string Message,
     string FullName = "",
-    string Email = "");
+    string Email = "",
+    string? Address = null);

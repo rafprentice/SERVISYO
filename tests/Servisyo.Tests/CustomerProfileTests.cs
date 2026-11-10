@@ -189,10 +189,10 @@ public class CustomerProfileServiceTests
     }
 
     [Fact]
-    public async Task Save_WithoutChanges_KeepsAMultiWordLastNameAndAnOldPhoneStyle()
+    public async Task Save_WithoutChanges_KeepsAMultiWordLastNameAndThePhone()
     {
         var (svc, db, hasher) = Create();
-        var c = await AddCustomerAsync(db, hasher, "Juan", "Dela Cruz", phone: "0917-111-2222");
+        var c = await AddCustomerAsync(db, hasher, "Juan", "Dela Cruz");
 
         var result = await svc.SaveAsync(c.UserId, FormFrom(c));
 
@@ -200,19 +200,71 @@ public class CustomerProfileServiceTests
         var user = await db.Users.SingleAsync();
         Assert.Equal("Juan", user.FirstName);
         Assert.Equal("Dela Cruz", user.LastName);
-        Assert.Equal("0917-111-2222", user.PhoneNumber);        // not rewritten when the customer did not touch it
+        Assert.Equal("09171112222", user.PhoneNumber);
     }
 
-    [Fact]
-    public async Task Save_BlankPhone_ClearsIt()
+    // ---- the phone number is required (the service provider must be able to contact the customer)
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Save_BlankPhone_IsRefused_AndKeepsTheSavedNumber(string? blank)
     {
         var (svc, db, hasher) = Create();
         var c = await AddCustomerAsync(db, hasher);
 
-        var result = await svc.SaveAsync(c.UserId, FormFrom(c, f => f.PhoneNumber = "  "));
+        var result = await svc.SaveAsync(c.UserId, FormFrom(c, f => f.PhoneNumber = blank));
+
+        Assert.False(result.Saved);
+        Assert.Equal(InputRules.PhoneRequiredMessage, result.FieldErrors["PhoneNumber"]);
+        Assert.Equal("09171112222", (await db.Users.SingleAsync()).PhoneNumber);
+    }
+
+    [Fact]
+    public async Task Save_AnAccountWithNoPhoneYet_MustAddOne_BeforeAnythingIsSaved()
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher, phone: null);
+
+        var refused = await svc.SaveAsync(c.UserId, FormFrom(c, f => f.Email = "ana.new@test.com"));
+        Assert.False(refused.Saved);
+        Assert.Equal(InputRules.PhoneRequiredMessage, refused.FieldErrors["PhoneNumber"]);
+        Assert.NotEqual("ana.new@test.com", (await db.Users.AsNoTracking().SingleAsync()).Email);   // nothing at all was saved
+
+        var saved = await svc.SaveAsync(c.UserId, FormFrom(c, f => { f.Email = "ana.new@test.com"; f.PhoneNumber = "09983854130"; }));
+        Assert.True(saved.Saved);
+        var user = await db.Users.AsNoTracking().SingleAsync();
+        Assert.Equal("09983854130", user.PhoneNumber);
+        Assert.Equal("ana.new@test.com", user.Email);
+    }
+
+    [Theory]
+    [InlineData("09983854130", "09983854130")]                  // 11 characters
+    [InlineData("+639983854130", "09983854130")]                // 13 characters, saved as 09...
+    [InlineData("  09983854130  ", "09983854130")]
+    public async Task Save_AcceptsBothPhoneStyles(string typed, string saved)
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher);
+
+        var result = await svc.SaveAsync(c.UserId, FormFrom(c, f => f.PhoneNumber = typed));
 
         Assert.True(result.Saved);
-        Assert.Null((await db.Users.SingleAsync()).PhoneNumber);
+        Assert.Equal(saved, (await db.Users.SingleAsync()).PhoneNumber);
+    }
+
+    [Fact]
+    public async Task Save_AnOldStyleSavedNumber_MustBeCorrected()
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher, phone: "0917-111-2222");
+
+        var result = await svc.SaveAsync(c.UserId, FormFrom(c));          // the old number sent back as it is
+
+        Assert.False(result.Saved);
+        Assert.Equal(InputRules.PhoneMessage, result.FieldErrors["PhoneNumber"]);
+        Assert.Equal("0917-111-2222", (await db.Users.SingleAsync()).PhoneNumber);
     }
 
     [Fact]
@@ -245,6 +297,10 @@ public class CustomerProfileServiceTests
     [InlineData("PhoneNumber", "0917-555-1234", InputRules.PhoneMessage)] // no dashes
     [InlineData("PhoneNumber", "0917555123", InputRules.PhoneMessage)]    // 10 digits
     [InlineData("PhoneNumber", "08175551234", InputRules.PhoneMessage)]   // not a mobile number
+    [InlineData("PhoneNumber", "09998384283842833248", InputRules.PhoneMessage)]   // 20 digits: longer than 13
+    [InlineData("PhoneNumber", "+6399838541301", InputRules.PhoneMessage)] // 14 characters
+    [InlineData("PhoneNumber", "099838541301", InputRules.PhoneMessage)]  // 12 digits
+    [InlineData("PhoneNumber", "", InputRules.PhoneRequiredMessage)]
     public async Task Save_RefusesBadInput_AndSavesNothing(string field, string value, string message)
     {
         var (svc, db, hasher) = Create();
@@ -319,48 +375,101 @@ public class CustomerProfileServiceTests
     }
 
     // ------------------------------------------------------------------ saved address
+    // A saved address can be CHANGED to one of the 5 Cebu City options, never removed (SavedAddressRules).
+
+    public static TheoryData<string> CebuOptions()
+    {
+        var data = new TheoryData<string>();
+        foreach (var location in CebuLocations.All) data.Add(location.Full);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(CebuOptions))]
+    public async Task SaveAddress_AnyOfTheFiveCebuOptions_ReplacesTheSavedAddress(string option)
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher);                    // saved: "45 Mabini St, Quezon City" (an older typed one)
+
+        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = option });
+
+        Assert.True(result.Saved);
+        Assert.Equal("Your address was updated.", result.Message);
+        Assert.Equal(option, result.Address);
+        Assert.Equal(option, (await db.Customers.SingleAsync()).Address);
+    }
 
     [Fact]
-    public async Task SaveAddress_TrimsAndSaves()
+    public async Task SaveAddress_TrimsTheChoice_AndCanAddAFirstAddress()
     {
         var (svc, db, hasher) = Create();
         var c = await AddCustomerAsync(db, hasher, address: null);
 
-        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = "  100 Ortigas Ave, Pasig City  " });
+        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = "  Salinas Drive, Brgy. Lahug, Cebu City  " });
 
         Assert.True(result.Saved);
         Assert.Equal("Your address was saved.", result.Message);
-        Assert.Equal("100 Ortigas Ave, Pasig City", (await db.Customers.SingleAsync()).Address);
+        Assert.Equal("Salinas Drive, Brgy. Lahug, Cebu City", (await db.Customers.SingleAsync()).Address);
+    }
+
+    [Fact]
+    public async Task SaveAddress_CanSwitchBetweenOptions()
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher, address: "Osmeña Blvd, Brgy. Capitol Site, Cebu City");
+
+        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = "C. Padilla St, Brgy. Duljo Fatima, Cebu City" });
+
+        Assert.True(result.Saved);
+        Assert.Equal("C. Padilla St, Brgy. Duljo Fatima, Cebu City", (await db.Customers.SingleAsync()).Address);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public async Task SaveAddress_Blank_RemovesTheSavedAddress(string? blank)
+    public async Task SaveAddress_Blank_CannotRemoveTheSavedAddress(string? blank)
     {
         var (svc, db, hasher) = Create();
-        var c = await AddCustomerAsync(db, hasher);
+        var c = await AddCustomerAsync(db, hasher, address: "N. Bacalso Ave, Brgy. Sambag I, Cebu City");
 
         var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = blank });
 
-        Assert.True(result.Saved);
-        Assert.Equal("Your saved address was removed.", result.Message);
+        Assert.True(result.Allowed);
+        Assert.False(result.Saved);
+        Assert.Equal(SavedAddressRules.CannotRemoveMessage, result.Message);
+        Assert.Equal("Saved addresses cannot be removed once set. Please edit your address instead.", result.FieldErrors["Address"]);
+        Assert.Equal("N. Bacalso Ave, Brgy. Sambag I, Cebu City", (await db.Customers.SingleAsync()).Address);
+    }
+
+    [Fact]
+    public async Task SaveAddress_Blank_WithNoAddressYet_AsksToChooseOne()
+    {
+        var (svc, db, hasher) = Create();
+        var c = await AddCustomerAsync(db, hasher, address: null);
+
+        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = "" });
+
+        Assert.False(result.Saved);
+        Assert.Equal(CebuLocations.NotInListMessage, result.FieldErrors["Address"]);
         Assert.Null((await db.Customers.SingleAsync()).Address);
     }
 
     [Theory]
+    [InlineData("100 Ortigas Ave, Pasig City")]                          // typed, not one of the options
+    [InlineData("osmeña blvd, brgy. capitol site, cebu city")]           // changed in the browser
+    [InlineData("Osmeña Blvd,  Brgy. Capitol Site, Cebu City")]          // (two spaces)
+    [InlineData("Lower Pakigne, Minglanilla")]                           // a booking-only place, not a profile address
     [InlineData("12345")]
-    [InlineData("  42 - 7 ")]
-    public async Task SaveAddress_NumbersOnly_IsRefused_AndKeepsTheOldAddress(string numbers)
+    public async Task SaveAddress_NotOneOfTheOptions_IsRefused_AndKeepsTheOldAddress(string typed)
     {
         var (svc, db, hasher) = Create();
         var c = await AddCustomerAsync(db, hasher);
 
-        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = numbers });
+        var result = await svc.SaveAddressAsync(c.UserId, new CustomerAddressForm { Address = typed });
 
         Assert.False(result.Saved);
-        Assert.Equal(InputRules.AddressMessage, result.FieldErrors["Address"]);
+        Assert.Equal(CebuLocations.NotInListMessage, result.FieldErrors["Address"]);
         Assert.Equal("45 Mabini St, Quezon City", (await db.Customers.SingleAsync()).Address);
     }
 
@@ -384,8 +493,10 @@ public class CustomerProfileServiceTests
         var ana = await AddCustomerAsync(db, hasher);
         var ben = await AddCustomerAsync(db, hasher, "Ben", "Cruz", address: "Ben's house");
 
+        await svc.SaveAddressAsync(ana.UserId, new CustomerAddressForm { Address = "Salinas Drive, Brgy. Lahug, Cebu City" });
         await svc.SaveAddressAsync(ana.UserId, new CustomerAddressForm { Address = null });
 
+        Assert.Equal("Salinas Drive, Brgy. Lahug, Cebu City", (await db.Customers.SingleAsync(x => x.CustomerId == ana.CustomerId)).Address);
         Assert.Equal("Ben's house", (await db.Customers.SingleAsync(x => x.CustomerId == ben.CustomerId)).Address);
     }
 

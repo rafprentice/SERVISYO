@@ -44,7 +44,26 @@ builder.Services.AddScoped<IProviderOfferingsService, ProviderOfferingsService>(
 9. Security checks: a customer or administrator opening `/provider/services` is refused/redirected; a provider who is still Pending is sent to the waiting page.
 
 ## Left out on purpose
-- **Edit / delete a service** - not in the mock-up. (A wrong price or typo currently means deactivating the service and adding a new one. Say the word and I'll add an Edit button.)
+- **Delete a service** - not built: bookings point to their services (BOOKING_SERVICES), so a service is deactivated instead.
 - **Deactivating does not touch existing bookings.** Customers just stop seeing the service (customer search is a later stage).
 - Two services of one provider cannot share a name (case ignored, inactive ones count too). That is a small extra rule, not in the PDF.
 - **Duration** is not in the mock-up either, but booking-conflict checks (Stage 9) need it, so it is collected here instead of guessing 60 minutes for everyone.
+
+## Edit Service (added later)
+- Each card has **Edit Service**. It opens the *Edit Service* dialog with the card's **title, category, description and
+  price**; the duration is kept as it is. Same checks as Add (name unique per provider, active category, price 0 to
+  99,999,999.99 with at most 2 decimals). A category an administrator has switched off since may be **kept**, not newly chosen.
+- **Active booking lock:** while the service is part of a booking that is still going on (**Pending, Accepted or
+  In Progress**: `ActiveBookingRules`), the button is greyed out and shows the tooltip *"Editing is locked while there are
+  active bookings for this service to prevent price tampering."* The server refuses the change too (`UpdateAsync` ->
+  `Locked`), so it cannot be bypassed by sending the form by hand. The check and the save run in one **serializable**
+  transaction, so a customer cannot book the service in between.
+  (The request named the statuses Requested / Quotation / Paid / Scheduled / InProgress; SERVISYO's booking statuses are
+  Pending / Accepted / In Progress, which cover the same steps; paid-ness is the separate PAYMENT_STATUS.)
+- Finished bookings (Completed, Cancelled, Rejected) keep the price they were booked at (`BOOKING_SERVICES.PRICE_SNAPSHOT`
+  and `BOOKINGS.TOTAL_FEE`), so editing never changes them.
+- Code: `ProviderOfferingsService.UpdateAsync` / `GetWithRejectedEditAsync`, `ProviderServicesController.Edit`
+  (`POST provider/services/{id}/edit`), `EditServiceForm` / `ServiceEditRules` / `EditServiceResult`, the dialog in
+  `Views/ProviderServices/Index.cshtml`, `provider-services.js`, tests in `tests/Servisyo.Tests/ProviderServiceEditTests.cs`.
+- Try it: edit a service with no bookings (new price shows on the card); then book a service as a customer (Pending) and
+  check that its **Edit Service** button is grey and shows the tooltip; accept/complete or cancel the booking and it unlocks.

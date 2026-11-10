@@ -121,6 +121,8 @@ public class ServisyoDbContext : DbContext
             e.ToTable("PROVIDER_UNAVAILABLE_DATES");
             e.HasOne(x => x.Provider).WithMany(p => p.UnavailableDates).HasForeignKey(x => x.ProviderId);
             e.HasIndex(x => new { x.ProviderId, x.UnavailableDate }).IsUnique();
+            // database v2.4: an extra day off approved by an administrator points to the ADMIN_ACTIONS row that approved it
+            e.HasOne(x => x.ApprovedBy).WithMany().HasForeignKey(x => x.ApprovedByActionId).OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<ServiceCategory>(e =>

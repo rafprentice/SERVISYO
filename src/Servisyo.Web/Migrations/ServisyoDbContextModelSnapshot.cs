@@ -648,6 +648,10 @@ namespace Servisyo.Web.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("UnavailableId"));
 
+                    b.Property<int?>("ApprovedByActionId")
+                        .HasColumnType("int")
+                        .HasColumnName("APPROVED_BY_ACTION_ID");
+
                     b.Property<int>("ProviderId")
                         .HasColumnType("int")
                         .HasColumnName("PROVIDER_ID");
@@ -662,6 +666,8 @@ namespace Servisyo.Web.Migrations
                         .HasColumnName("UNAVAILABLE_DATE");
 
                     b.HasKey("UnavailableId");
+
+                    b.HasIndex("ApprovedByActionId");
 
                     b.HasIndex("ProviderId", "UnavailableDate")
                         .IsUnique();
@@ -1135,11 +1141,18 @@ namespace Servisyo.Web.Migrations
 
             modelBuilder.Entity("Servisyo.Web.Models.ProviderUnavailableDate", b =>
                 {
+                    b.HasOne("Servisyo.Web.Models.AdminAction", "ApprovedBy")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByActionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Servisyo.Web.Models.Provider", "Provider")
                         .WithMany("UnavailableDates")
                         .HasForeignKey("ProviderId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("ApprovedBy");
 
                     b.Navigation("Provider");
                 });
