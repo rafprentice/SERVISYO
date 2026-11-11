@@ -176,12 +176,16 @@
         renumber();
     });
 
-    // ---------- unavailable dates: this year only, at most 5 a month ----------
+    // ---------- unavailable dates: from tomorrow (no same-day requests), this year only, at most 5 a month ----------
     var today = datesList.getAttribute("data-today");                  // "2026-11-11" (Philippine time)
     var lastDay = datesList.getAttribute("data-last");                 // "2026-12-31"
     var pastThisMonth = Number(datesList.getAttribute("data-past-this-month")) || 0;
     var maxPerMonth = Number(datesList.getAttribute("data-max-per-month")) || 5;
     var monthMessage = datesList.getAttribute("data-month-message");
+    var sameDayMessage = datesList.getAttribute("data-same-day-message");
+    // days ANOTHER provider already has off: only one provider can be off per day (the server checks again on save)
+    var takenDays = (datesList.getAttribute("data-taken") || "").split(",").filter(Boolean);
+    var takenMessage = datesList.getAttribute("data-taken-message");
 
     function dateLabel(value) {
         return new Date(value + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -190,19 +194,52 @@
         return new Date(key + "-01T00:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
     }
 
+    /// A message right under one date box (empty text removes it).
+    function rowProblem(input, text) {
+        var holder = input.closest(".sv-av__dateedit");
+        var note = holder.querySelector(".sv-av__daterr");
+        if (!text) { if (note) note.remove(); return; }
+        if (!note) {
+            note = document.createElement("p");
+            note.className = "sv-av__daterr";
+            note.setAttribute("role", "alert");
+            holder.appendChild(note);
+        }
+        note.textContent = text;
+        input.setAttribute("aria-invalid", "true");
+    }
+
     /// Shows the problems with the listed dates (none: the message is hidden). Returns true when there are none.
     function checkDates() {
         var problems = [], perMonth = {}, year = lastDay.slice(0, 4);
         datesList.querySelectorAll("[data-d-date]").forEach(function (input) {
             input.removeAttribute("aria-invalid");
+            rowProblem(input, null);
             var value = input.value;
             if (!value) return;
-            if (value > lastDay) {
-                problems.push(dateLabel(value) + " is not in " + year + ". You can only mark unavailable days until December 31, " + year + ".");
-                input.setAttribute("aria-invalid", "true");
+            var row = input.closest("[data-date-row]");
+            var savedBefore = row.getAttribute("data-saved-date") === value;   // already saved (e.g. today's): it may stay
+            if (value < today && !savedBefore) {
+                problems.push(dateLabel(value) + " is in the past.");
+                rowProblem(input, dateLabel(value) + " is in the past. Choose tomorrow or a later date.");
                 return;
             }
-            if (input.closest("[data-date-row]").hasAttribute("data-approved")) return;   // an extra day approved by an administrator
+            if (value === today && !savedBefore) {
+                problems.push(dateLabel(value) + ": " + sameDayMessage);
+                rowProblem(input, sameDayMessage);
+                return;
+            }
+            if (value > lastDay) {
+                problems.push(dateLabel(value) + " is not in " + year + ". You can only mark unavailable days until December 31, " + year + ".");
+                rowProblem(input, "Only dates until December 31, " + year + " can be marked.");
+                return;
+            }
+            if (takenDays.indexOf(value) >= 0 && !savedBefore) {
+                problems.push(dateLabel(value) + ": " + takenMessage);
+                rowProblem(input, takenMessage);
+                return;
+            }
+            if (row.hasAttribute("data-approved")) return;   // an extra day approved by an administrator
             var key = value.slice(0, 7);
             (perMonth[key] = perMonth[key] || []).push(input);
         });

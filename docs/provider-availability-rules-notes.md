@@ -19,7 +19,10 @@
 ## Unavailable dates
 | Rule | Where it is enforced |
 |---|---|
-| From today up to **December 31 of this year** (Philippine time); 2027, 2028, 2030 ... are refused | date picker `min`/`max` + server (`ValidateDates`) |
+| From **tomorrow** up to **December 31 of this year** (Philippine time); 2027, 2028, 2030 ... are refused | date picker `min`/`max` + server (`ValidateDates`) |
+| **No same-day requests:** today cannot be added. The page shows *"Same-day off requests are not allowed. Unavailable dates must be marked at least 1 day in advance."* under the box and blocks Save; the server refuses it with *"Same-day unavailable date selection is not permitted."* and answers **400 Bad Request** (the page with the problems) | `provider-availability.js` + `ValidateDates` + `ProviderAvailabilityController.Save` |
+| A day off for today that was saved EARLIER (when it was still tomorrow) stays; only new days are checked. "Saved earlier" is looked up in the database (`AlreadySaved`, `[BindNever]`) | `GetAsync` / `ValidateDates` |
+| An administrator can still approve today as an extra day off (the emergency path, e.g. sick this morning) | `ApproveExtraDayOffAsync` |
 | At most **5 per calendar month**: *"You can only set up to 5 unavailable days per month."* Days of this month that already passed count too | page (message as soon as the 6th day is picked; Save is blocked) + server |
 | **January 1:** last year's dates are deleted, so every year starts with an empty list | `Services/UnavailableDatesResetService.cs` |
 
@@ -29,6 +32,8 @@
 - A date saved earlier in a later year (for example Nov 11, 2030) is shown in red with "Remove this date before saving";
   the schedule cannot be saved until it is removed.
 - In December, January dates cannot be added until January 1 (that is what "until Dec 31 of this year" means).
+- "Today" is always the Philippine date (UTC+8), not the server's DateTime.Today: the hosting server may run on another
+  time zone, where "today" changes at a different hour.
 
 ## Days with a booking, and extra days approved by an administrator (database v2.4)
 | Rule | Where it is enforced |
@@ -44,6 +49,20 @@
 Database change: run `tools\add-extra-day-off.ps1` once (it builds, tests, creates the migration "ExtraDayOff", checks it
 only adds that column + index + foreign key, backs up SERVISYO, and updates it after you type YES).
 The design file `docs/sql/DatabaseDesign-v2.sql` is now v2.4 (PART 1 shows the column and its foreign key).
+
+## Only one provider off per day (database v2.5)
+| Rule | Where it is enforced |
+|---|---|
+| A date can be off for only ONE provider (first come, first served), so the other providers stay bookable that day | page (warns as soon as a taken date is picked) + `SaveAsync` (`TakenByOthersAsync`) + the database (UNIQUE index `IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE`) |
+| Provider message: *"Nov 14, 2026: Another provider already has this day off. Only one provider can be off per day, so please choose another date."* (the other provider is not named) | `UnavailableDateRules.TakenMessage` |
+| Administrators follow it too: *"Angel Diolin already has Nov 14, 2026 off. Only one provider can be off per day, so Vincent Valencia cannot be given that day."* | `ApproveExtraDayOffAsync` |
+| A provider's own saved day is never "taken" by themselves (re-saving the page works) | only NEW days are checked |
+| Two providers saving the same new date at the same moment: the transaction + unique index let only the first through; the second gets "Nothing was saved: another provider may have just taken one of your new days off ..." | `SaveAsync` catch |
+
+Database change: run `tools\add-one-day-off-per-date.ps1` once (after v2.4). It lists dates that more than one provider
+already has off; with YES it keeps the FIRST one saved for each date and removes the later ones (after a backup), then
+adds the unique index. To choose yourself, answer NO, remove the unwanted day on that provider's Availability page, and
+run it again.
 
 ## Program.cs
 ```csharp

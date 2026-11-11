@@ -134,13 +134,15 @@
         <div class="sv-panel__head">
             <div>
                 <h2 id="av-dates-title" class="sv-panel__title">Unavailable Dates</h2>
-                <p class="sv-av__hint">Mark specific dates when you are not available: up to @UnavailableDateRules.MaxPerMonth days a month, until Dec 31, @Model.Today.Year. Days with an active booking cannot be marked. For an emergency beyond that, contact an administrator. The list starts empty again every January 1.</p>
+                <p class="sv-av__hint">Mark specific dates when you are not available, at least 1 day in advance (no same-day requests): up to @UnavailableDateRules.MaxPerMonth days a month, until Dec 31, @Model.Today.Year. Only one provider can be off on any day (first come, first served). Days with an active booking cannot be marked. For an emergency beyond that, contact an administrator. The list starts empty again every January 1.</p>
             </div>
             <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" id="sv-av-add-date">+ Add date</button>
         </div>
 
         <p class="sv-av__dateerr" id="sv-av-dates-error" role="alert" hidden></p>
-        <ul class="sv-av__dates" id="sv-av-dates" data-today="@Model.Today.ToString("yyyy-MM-dd", inv)" data-last="@Model.LastDate.ToString("yyyy-MM-dd", inv)"
+        <ul class="sv-av__dates" id="sv-av-dates" data-today="@Model.Today.ToString("yyyy-MM-dd", inv)" data-first="@Model.FirstDate.ToString("yyyy-MM-dd", inv)"
+            data-last="@Model.LastDate.ToString("yyyy-MM-dd", inv)" data-same-day-message="@UnavailableDateRules.SameDayAdvice"
+            data-taken="@(string.Join(",", Model.TakenDates.Select(x => x.ToString("yyyy-MM-dd", inv))))" data-taken-message="@UnavailableDateRules.TakenMessage"
             data-past-this-month="@Model.PastDaysThisMonth" data-max-per-month="@UnavailableDateRules.MaxPerMonth"
             data-month-message="@UnavailableDateRules.MonthlyLimitMessage">
             @for (var j = 0; j < form.Dates.Count; j++)
@@ -148,7 +150,10 @@
                 var dt = form.Dates[j];
                 var saved = dt.Date is not null && !hasErrors;
                 var outOfYear = dt.Date is not null && dt.Date > Model.LastDate;      // saved before the "this year only" rule
-                <li class="sv-av__date @(saved ? "is-saved" : "") @(outOfYear ? "is-out" : "")" data-date-row data-approved="@(dt.ApprovedByAdmin ? "true" : null)">
+                @* a day saved earlier keeps its own date as the lowest choice (e.g. today); a new day starts tomorrow *@
+                var minDate = dt.AlreadySaved && dt.Date is not null && dt.Date < Model.FirstDate ? dt.Date.Value : Model.FirstDate;
+                <li class="sv-av__date @(saved ? "is-saved" : "") @(outOfYear ? "is-out" : "")" data-date-row data-approved="@(dt.ApprovedByAdmin ? "true" : null)"
+                    data-saved-date="@(dt.AlreadySaved ? dt.Date?.ToString("yyyy-MM-dd", inv) : null)">
                     <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
                     <div class="sv-av__dateview">
                         <strong>@(dt.Date?.ToString("MMM d, yyyy", inv))</strong>
@@ -163,7 +168,7 @@
                         }
                     </div>
                     <div class="sv-av__dateedit">
-                        <input type="date" name="Dates[@j].Date" value="@(dt.Date?.ToString("yyyy-MM-dd", inv))" min="@Model.Today.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
+                        <input type="date" name="Dates[@j].Date" value="@(dt.Date?.ToString("yyyy-MM-dd", inv))" min="@minDate.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
                         <input type="text" name="Dates[@j].Reason" value="@dt.Reason" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
                     </div>
                     <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>
@@ -229,7 +234,7 @@
         <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
         <div class="sv-av__dateview"><strong></strong><span></span></div>
         <div class="sv-av__dateedit">
-            <input type="date" min="@Model.Today.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
+            <input type="date" min="@Model.FirstDate.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
             <input type="text" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
         </div>
         <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>

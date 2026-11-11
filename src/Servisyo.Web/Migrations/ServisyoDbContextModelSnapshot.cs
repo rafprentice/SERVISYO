@@ -669,6 +669,9 @@ namespace Servisyo.Web.Migrations
 
                     b.HasIndex("ApprovedByActionId");
 
+                    b.HasIndex("UnavailableDate")
+                        .IsUnique();
+
                     b.HasIndex("ProviderId", "UnavailableDate")
                         .IsUnique();
 

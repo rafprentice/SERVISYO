@@ -438,21 +438,55 @@ public class ProviderAvailabilityServiceTests
     // ----------------------------------------------------------------- dates
 
     [Fact]
-    public async Task TodayIsAllowed_ButYesterdayIsNot_ByCebuTime()
+    public async Task Today_IsRefused_TomorrowIsAllowed_ByCebuTime()
     {
         // 20:00 UTC on Oct 13 is already 04:00 on Oct 14 in Cebu
         var (svc, db) = Create(new DateTimeOffset(2026, 10, 13, 20, 0, 0, TimeSpan.Zero));
         var p = await AddProviderAsync(db);
+        Assert.Equal(new DateOnly(2026, 10, 15), (await svc.GetAsync(p.UserId)).Page!.FirstDate);      // the date picker starts tomorrow
 
         var today = ValidForm();
-        today.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 14), Reason = "Today" });
-        Assert.True((await svc.SaveAsync(p.UserId, today)).Saved);
+        today.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 14), Reason = "Sick" });
+        var refused = await svc.SaveAsync(p.UserId, today);
+        Assert.False(refused.Saved);
+        Assert.Equal(new[] { "Oct 14, 2026: Same-day unavailable date selection is not permitted. Unavailable dates must be marked at least 1 day in advance." },
+            refused.Errors);
+        Assert.Empty(db.ProviderUnavailableDates);
+
+        var tomorrow = ValidForm();
+        tomorrow.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 15), Reason = "Check-up" });
+        Assert.True((await svc.SaveAsync(p.UserId, tomorrow)).Saved);
 
         var yesterday = ValidForm();
         yesterday.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 13) });
         var result = await svc.SaveAsync(p.UserId, yesterday);
         Assert.False(result.Saved);
         Assert.Contains(result.Errors, e => e.Contains("is in the past"));
+    }
+
+    [Fact]
+    public async Task ADayOffForToday_SavedBeforeToday_CanStay()
+    {
+        // marked yesterday (allowed then): saving the schedule today must still work, and it is shown as saved
+        var (svc, db) = Create();
+        var p = await AddProviderAsync(db);
+        db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = Today, Reason = "Planned" });
+        await db.SaveChangesAsync();
+
+        var page = (await svc.GetAsync(p.UserId)).Page!;
+        var row = Assert.Single(page.Form.Dates);
+        Assert.True(row.AlreadySaved);
+
+        Assert.True((await svc.SaveAsync(p.UserId, page.Form)).Saved);
+        Assert.Equal(Today, (await db.ProviderUnavailableDates.SingleAsync()).UnavailableDate);
+
+        // a rejected form still knows which day was saved before (from the database, not the browser)
+        var form = page.Form;
+        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2027, 1, 5) });
+        form.Dates[0].AlreadySaved = false;
+        var again = (await svc.GetAsync(p.UserId, form)).Page!;
+        Assert.True(again.Form.Dates.Single(d => d.Date == Today).AlreadySaved);
+        Assert.False(again.Form.Dates.Single(d => d.Date == new DateOnly(2027, 1, 5)).AlreadySaved);
     }
 
     [Fact]

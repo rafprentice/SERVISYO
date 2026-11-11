@@ -103,6 +103,9 @@ app.UseRouting();
 
 app.UseAuthentication();   // must come BEFORE UseAuthorization
 app.UseAuthorization();
+// a signed-in user's pages are never kept by the browser (no-store): after logout or a change of account nothing
+// from the previous account can be shown again from the cache
+Servisyo.Web.Helpers.PrivatePages.UsePrivatePages(app);
 
 app.MapStaticAssets();
 

@@ -312,4 +312,42 @@ public class ProviderExtraDayOffTests
         var fk = Assert.Single(entity.GetForeignKeys(), f => f.PrincipalEntityType.ClrType == typeof(AdminAction));
         Assert.Equal(DeleteBehavior.Restrict, fk.DeleteBehavior);                 // the admin history is never deleted with it
     }
+
+    // ------------------------------------------------------------ no same-day requests, together with the other rules
+
+    [Fact]
+    public async Task TheSameDayRule_WorksTogetherWithTheOtherDateRules()
+    {
+        var w = await WorldAsync();                                                   // today: Oct 14, 2026
+        var b = await BookAsync(w, Nov(20), BookingStatuses.Accepted);
+        var form = Week(new DateOnly(2026, 10, 14),                                   // today
+                        Nov(2), Nov(3), Nov(4), Nov(5), Nov(6), Nov(9),             // 6 in November
+                        Nov(20),                                                      // booked
+                        new DateOnly(2027, 1, 5));                                    // next year
+
+        var result = await w.Schedule.SaveAsync(w.Vince.UserId, form);
+
+        Assert.False(result.Saved);
+        Assert.Contains("Oct 14, 2026: Same-day unavailable date selection is not permitted. Unavailable dates must be marked at least 1 day in advance.", result.Errors);
+        Assert.Contains($"Nov 20, 2026: you already have booking #{b.BookingId} (Accepted) on this day. A day with an active booking cannot be marked unavailable.", result.Errors);
+        Assert.Contains(result.Errors, e => e.StartsWith("Jan 5, 2027 is not in 2026."));
+        Assert.Contains("You can only set up to 5 unavailable days per month. November 2026 would have 6.", result.Errors);
+        Assert.Equal(4, result.Errors.Count);
+        Assert.Empty(w.Db.ProviderUnavailableDates);
+    }
+
+    [Fact]
+    public async Task AnAdministrator_CanStillApproveToday_AsAnEmergency()
+    {
+        var w = await WorldAsync();
+        var today = new DateOnly(2026, 10, 14);
+
+        Assert.Equal(ExtraDayOffOutcome.Success, (await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, today, "Sick this morning")).Outcome);
+
+        // the provider's page keeps it, and saving the schedule still works
+        var page = (await w.Schedule.GetAsync(w.Vince.UserId)).Page!;
+        var row = Assert.Single(page.Form.Dates);
+        Assert.True(row.AlreadySaved && row.ApprovedByAdmin);
+        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, page.Form)).Saved);
+    }
 }

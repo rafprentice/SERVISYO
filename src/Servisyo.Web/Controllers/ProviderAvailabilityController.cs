@@ -67,7 +67,11 @@ public class ProviderAvailabilityController : Controller
 
         var page = again.Page!;
         page.Errors = errors;
-        return View(nameof(Index), page);
+
+        // 400 Bad Request: nothing was saved (e.g. a same-day day off); the page shows what to fix
+        var view = View(nameof(Index), page);
+        view.StatusCode = StatusCodes.Status400BadRequest;
+        return view;
     }
 
     // Pending applicants wait on their own page; rejected providers see the dashboard message; anything else is signed out.

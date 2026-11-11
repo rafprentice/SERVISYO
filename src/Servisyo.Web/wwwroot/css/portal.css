@@ -458,6 +458,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-av__dateout { display: block; font-size: .6875rem; font-style: normal; color: #991B1B; }
 .sv-av__date.is-out { background: #FEF2F2; }
 .sv-av__dateok { display: block; font-size: .6875rem; font-style: normal; color: #3730A3; }
+.sv-av__daterr { flex-basis: 100%; margin: 0; font-size: .6875rem; color: #991B1B; }
 .sv-av__x { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: none; color: #94A3B8; font-size: .75rem; cursor: pointer; }
 .sv-av__x:hover { background: #FEE2E2; color: #991B1B; }
 

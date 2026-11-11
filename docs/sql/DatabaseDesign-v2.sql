@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.4  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.5  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -14,7 +14,7 @@
 
    HOW THIS FILE IS USED
      - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup", "AdminTargets" and "DerivedData" (dotnet ef database update);
-       "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY (PART 1), no procedures:
+       "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY, "OneDayOffPerDate" (v2.5) one UNIQUE index (PART 1):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -87,6 +87,14 @@
      - A day with an active booking (Pending, Accepted, In Progress) cannot be marked off (checked by the app in a
        SERIALIZABLE transaction, like usp_CreateBooking checks unavailable dates the other way round).
      - Unavailable dates are only for the current year; last year's rows are deleted on January 1 (by the app).
+
+   WHAT CHANGED IN v2.5 (EF migration "OneDayOffPerDate") - only one provider off per day
+     - UNIQUE index IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE on PROVIDER_UNAVAILABLE_DATES (UNAVAILABLE_DATE):
+       a date can be in the table only once, whichever provider it belongs to (first come, first served), so on every
+       day the other providers stay bookable. The app checks it first (with a friendly message, also for
+       administrators' extra days); the index is the guarantee, even when two providers save at the same moment.
+     - Existing duplicates must be resolved before the index can be created (tools\add-one-day-off-per-date.ps1 lists
+       them and, only if you type YES, keeps the first one saved for each date).
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -230,6 +238,7 @@ CREATE TABLE PROVIDER_UNAVAILABLE_DATES (
 );
 CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_PROVIDER_ID_UNAVAILABLE_DATE ON PROVIDER_UNAVAILABLE_DATES (PROVIDER_ID, UNAVAILABLE_DATE);
 CREATE INDEX IX_PROVIDER_UNAVAILABLE_DATES_APPROVED_BY_ACTION_ID ON PROVIDER_UNAVAILABLE_DATES (APPROVED_BY_ACTION_ID);
+CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE ON PROVIDER_UNAVAILABLE_DATES (UNAVAILABLE_DATE);   -- v2.5: one provider off per day
 -- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
 CREATE TABLE SERVICE_CATEGORIES (

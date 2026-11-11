@@ -113,7 +113,7 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
                     .OrderBy(d => d.UnavailableDate)
                     .Select(d => new { d.UnavailableDate, d.Reason, Approved = d.ApprovedByActionId != null })
                     .ToListAsync(ct))
-                .Select(d => new UnavailableDateForm { Date = d.UnavailableDate, Reason = d.Reason, ApprovedByAdmin = d.Approved })
+                .Select(d => new UnavailableDateForm { Date = d.UnavailableDate, Reason = d.Reason, ApprovedByAdmin = d.Approved, AlreadySaved = true })
                 .ToList();
         }
         else
@@ -121,12 +121,23 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             // a rejected form: show the days in the usual order even if the browser sent them differently
             form.Days = form.Days.OrderBy(d => Array.IndexOf(AvailabilityDays.DisplayOrder, d.DayOfWeek)).ToList();
 
-            // which listed days an administrator approved comes from the database, never from the browser
-            var approved = (await SavedDatesAsync(who.ProviderId, today, ct)).Where(x => x.Value).Select(x => x.Key).ToHashSet();
-            foreach (var d in form.Dates) d.ApprovedByAdmin = d.Date is { } day && approved.Contains(day);
+            // which listed days were saved before / approved by an administrator comes from the database, never from the browser
+            var savedDays = await SavedDatesAsync(who.ProviderId, today, ct);
+            foreach (var d in form.Dates)
+            {
+                d.AlreadySaved = d.Date is { } day && savedDays.ContainsKey(day);
+                d.ApprovedByAdmin = d.Date is { } approvedDay && savedDays.TryGetValue(approvedDay, out var approved) && approved;
+            }
         }
 
         var pastThisMonth = await CountPastDaysThisMonthAsync(who.ProviderId, today, ct);
+        var lastDay = UnavailableDateRules.LastAllowed(today);
+        var takenDates = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId != who.ProviderId && d.UnavailableDate >= today && d.UnavailableDate <= lastDay)
+            .Select(d => d.UnavailableDate)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToListAsync(ct);
 
         var options = NoticeChoices.Contains(form.MinNoticeDays) ? NoticeChoices : NoticeChoices.Append(form.MinNoticeDays).OrderBy(x => x).ToArray();
 
@@ -147,6 +158,7 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             IsSuggested = suggested,
             Today = today,
             PastDaysThisMonth = pastThisMonth,
+            TakenDates = takenDates,
             NoticeOptions = options.Select(v => (v, v == 0 ? "Same day" : Plural.Of(v, "day"))).ToList()
         });
     }
@@ -168,9 +180,10 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         var errors = new List<string>();
         var days = ValidateDays(form, errors);
         var saved = await SavedDatesAsync(who.ProviderId, today, ct);
-        var booked = await ActiveBookingDaysAsync(who.ProviderId,
-            form.Dates.Where(d => d.Date is { } day && day >= today && !saved.ContainsKey(day)).Select(d => d.Date!.Value).Distinct().ToList(), ct);
-        var dates = ValidateDates(form, today, await CountPastDaysThisMonthAsync(who.ProviderId, today, ct), saved, booked, errors);
+        var newDays = form.Dates.Where(d => d.Date is { } day && day >= today && !saved.ContainsKey(day)).Select(d => d.Date!.Value).Distinct().ToList();
+        var booked = await ActiveBookingDaysAsync(who.ProviderId, newDays, ct);
+        var taken = await TakenByOthersAsync(who.ProviderId, newDays, ct);
+        var dates = ValidateDates(form, today, await CountPastDaysThisMonthAsync(who.ProviderId, today, ct), saved, booked, taken, errors);
 
         if (form.MinNoticeDays < 0 || form.MinNoticeDays > MaxNoticeDays)
             errors.Add($"Minimum booking notice must be between 0 and {MaxNoticeDays} days.");
@@ -231,10 +244,12 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         }
         catch (DbUpdateException ex)
         {
+            // most likely another provider took one of these days off at the same moment (the database allows only
+            // one provider per day - IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE): nothing was saved
             _db.ChangeTracker.Clear();
             _logger.LogError(ex, "Saving the schedule of provider {ProviderId} failed.", who.ProviderId);
             return new(ProviderDashboardAccess.Allowed, false,
-                new[] { "Something went wrong while saving. Nothing was changed. Please try again." },
+                new[] { "Nothing was saved: another provider may have just taken one of your new days off (only one provider can be off per day). Please reload the page, check your dates and save again." },
                 "Your schedule was not saved.");
         }
 
@@ -259,6 +274,17 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             .Select(d => new { d.UnavailableDate, Approved = d.ApprovedByActionId != null })
             .ToListAsync(ct))
         .ToDictionary(d => d.UnavailableDate, d => d.Approved);
+
+    /// Which of these days ANOTHER provider already has off (only one provider can be off per day).
+    private async Task<HashSet<DateOnly>> TakenByOthersAsync(int providerId, List<DateOnly> days, CancellationToken ct)
+    {
+        if (days.Count == 0) return new();
+        return (await _db.ProviderUnavailableDates.AsNoTracking()
+                .Where(d => d.ProviderId != providerId && days.Contains(d.UnavailableDate))
+                .Select(d => d.UnavailableDate)
+                .ToListAsync(ct))
+            .ToHashSet();
+    }
 
     /// For each of these days: the provider's first active booking on it (Pending, Accepted or In Progress), if any.
     private async Task<Dictionary<DateOnly, (int BookingId, string Status)>> ActiveBookingDaysAsync(int providerId, List<DateOnly> days, CancellationToken ct)
@@ -358,8 +384,10 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
 
     /// saved: the days off already saved from today on (true = approved by an administrator: not counted in the 5).
     /// booked: NEW days that have an active booking (they are refused). Days that were already saved are left alone.
+    /// taken: NEW days that another provider already has off (refused: only one provider per day).
     private static List<CleanDate> ValidateDates(AvailabilityForm form, DateOnly today, int pastDaysThisMonth,
-        IReadOnlyDictionary<DateOnly, bool> saved, IReadOnlyDictionary<DateOnly, (int BookingId, string Status)> booked, List<string> errors)
+        IReadOnlyDictionary<DateOnly, bool> saved, IReadOnlyDictionary<DateOnly, (int BookingId, string Status)> booked,
+        IReadOnlySet<DateOnly> taken, List<string> errors)
     {
         var result = new List<CleanDate>();
         var seen = new HashSet<DateOnly>();
@@ -378,7 +406,13 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             var date = row.Date.Value;
             var label = date.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
 
-            if (date < today) { errors.Add($"{label} is in the past. Choose today or a later date."); continue; }
+            if (date < today) { errors.Add($"{label} is in the past. Choose tomorrow or a later date."); continue; }
+            // no same-day requests: today is only allowed when it was already saved earlier (only NEW days are checked)
+            if (date == today && !saved.ContainsKey(date))
+            {
+                errors.Add($"{label}: {UnavailableDateRules.SameDayMessage} Unavailable dates must be marked at least 1 day in advance.");
+                continue;
+            }
             if (date > last)
             {
                 errors.Add($"{label} is not in {today.Year}. You can only mark unavailable days until December 31, {today.Year}.");
@@ -386,6 +420,7 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             }
             if (!seen.Add(date)) { errors.Add($"{label} is listed more than once."); continue; }
             if (reason is { Length: > MaxReasonLength }) { errors.Add($"{label}: the reason can be at most {MaxReasonLength} characters."); continue; }
+            if (taken.Contains(date)) { errors.Add($"{label}: {UnavailableDateRules.TakenMessage}"); continue; }
             if (booked.TryGetValue(date, out var job)) { errors.Add(UnavailableDateRules.BookedMessage(label, job.BookingId, job.Status)); continue; }
 
             result.Add(new(date, reason));

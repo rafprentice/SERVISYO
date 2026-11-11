@@ -287,6 +287,15 @@ public class ProviderManagementService : IProviderManagementService
                 ? $"An extra day off on {label} was already approved for {name}."
                 : $"{name} has already marked {label} as a day off.");
 
+        // only ONE provider can be off on any date (database v2.5), an administrator's approval included
+        var other = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.UnavailableDate == day && d.ProviderId != providerId)
+            .Select(d => new { d.Provider.User.FirstName, d.Provider.User.LastName })
+            .FirstOrDefaultAsync(ct);
+        if (other is not null)
+            return new(ExtraDayOffOutcome.Invalid,
+                $"{other.FirstName} {other.LastName} already has {label} off. Only one provider can be off per day, so {name} cannot be given that day.");
+
         var job = await _db.Bookings.AsNoTracking()
             .Where(b => b.ProviderId == providerId && b.BookingDate == day && ActiveBookingRules.Statuses.Contains(b.Status))
             .OrderBy(b => b.BookingTime)
@@ -312,7 +321,7 @@ public class ProviderManagementService : IProviderManagementService
         }
         catch (DbUpdateException ex)
         {
-            // e.g. the provider marked the same day at the same moment (the unique index caught it): nothing was saved
+            // e.g. this or another provider took the same day at the same moment (a unique index caught it): nothing was saved
             _db.ChangeTracker.Clear();
             _logger.LogWarning(ex, "Extra day off for provider {ProviderId} on {Date} was not saved.", providerId, day);
             return new(ExtraDayOffOutcome.Invalid, $"The extra day off for {name} could not be saved. Please open the provider again and retry.");

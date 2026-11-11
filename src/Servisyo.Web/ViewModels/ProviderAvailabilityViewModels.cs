@@ -57,11 +57,22 @@ public static class BreakRules
     public static string Clock(TimeOnly t) => t.ToString("h:mm tt", CultureInfo.InvariantCulture).ToLowerInvariant();
 }
 
-/// The unavailable-date rules: only dates from today up to December 31 of THIS year (Philippine time), at most 5 per
-/// calendar month (days of this month that already passed count too). On January 1 last year's dates are deleted
-/// (UnavailableDatesResetService), so every year starts with an empty list.
+/// The unavailable-date rules: only dates from TOMORROW up to December 31 of THIS year (Philippine time) - no
+/// same-day requests -, at most 5 per calendar month (days of this month that already passed count too). On January 1
+/// last year's dates are deleted (UnavailableDatesResetService), so every year starts with an empty list.
+/// (An administrator may still approve an extra day off for today: that is the emergency path.)
 public static class UnavailableDateRules
 {
+    public const string SameDayMessage = "Same-day unavailable date selection is not permitted.";
+
+    /// Database v2.5: only ONE provider can be off on any date (first come, first served), so customers always find
+    /// someone. The other provider is not named to providers (an administrator sees the name).
+    public const string TakenMessage = "Another provider already has this day off. Only one provider can be off per day, so please choose another date.";
+    public const string SameDayAdvice = "Same-day off requests are not allowed. Unavailable dates must be marked at least 1 day in advance.";
+
+    /// The first day a provider can mark: tomorrow (Philippine time).
+    public static DateOnly FirstAllowed(DateOnly today) => today.AddDays(1);
+
     public const int MaxPerMonth = 5;
     public const string MonthlyLimitMessage = "You can only set up to 5 unavailable days per month.";
     public const string ApprovedNote = "Extra day approved by an administrator (does not count toward your 5)";
@@ -107,6 +118,11 @@ public class UnavailableDateForm
     /// Never taken from the browser - the server always looks it up in the database.
     [BindNever]
     public bool ApprovedByAdmin { get; set; }
+
+    /// Shown only: this day off was already saved (e.g. today's, saved before today). The same-day rule is only for
+    /// NEW days, so such a day can stay. Looked up in the database, never taken from the browser.
+    [BindNever]
+    public bool AlreadySaved { get; set; }
 }
 
 /// Everything the page posts back when "Save Schedule" is pressed.
@@ -133,8 +149,15 @@ public class AvailabilityPageViewModel
     /// The last date that can be marked unavailable: December 31 of this year.
     public DateOnly LastDate => UnavailableDateRules.LastAllowed(Today);
 
+    /// The first date that can be marked unavailable: tomorrow (no same-day requests).
+    public DateOnly FirstDate => UnavailableDateRules.FirstAllowed(Today);
+
     /// Unavailable days of THIS month that already passed (not listed, but they count toward the 5 per month).
     public int PastDaysThisMonth { get; set; }
+
+    /// Days from today to December 31 that ANOTHER provider already has off (only one provider per day).
+    /// The page uses them to warn right away; the server checks again when saving.
+    public IReadOnlyList<DateOnly> TakenDates { get; set; } = Array.Empty<DateOnly>();
 
     public IReadOnlyList<(int Value, string Label)> NoticeOptions { get; set; } = Array.Empty<(int, string)>();
 

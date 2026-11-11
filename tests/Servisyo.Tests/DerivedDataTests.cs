@@ -147,7 +147,7 @@ public class DerivedDataTests
     public void TheDesignFile_HasTheV23Objects()
     {
         var design = DesignFile();
-        Assert.Contains("DATABASE DESIGN v2.4", design);                         // v2.4 (ExtraDayOff) only added one column
+        Assert.Contains("DATABASE DESIGN v2.5", design);                         // v2.4 / v2.5 only added a column and an index
         Assert.Contains("WHAT CHANGED IN v2.3 (EF migration \"DerivedData\")", design);
         Assert.Contains("CREATE OR ALTER PROCEDURE dbo.usp_GetNotifications", design);
         Assert.Contains("CREATE OR ALTER PROCEDURE dbo.usp_GetBookingsNeedingAttention", design);
