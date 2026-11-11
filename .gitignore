@@ -490,3 +490,7 @@ src/Servisyo.Web/appsettings.Production.json
 servisyo-publish.zip
 deploy*.sql
 graphify-out/
+
+servisyo-publish.zip
+deploy*.sql
+publish/
