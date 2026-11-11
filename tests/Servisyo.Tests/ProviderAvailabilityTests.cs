@@ -351,7 +351,7 @@ public class ProviderAvailabilityServiceTests
             case "noticeNegative": f.MinNoticeDays = -1; break;
             case "noticeTooBig": f.MinNoticeDays = 31; break;
             case "jobsZero": f.MaxJobsPerDay = 0; break;
-            case "jobsTooBig": f.MaxJobsPerDay = 51; break;
+            case "jobsTooBig": f.MaxJobsPerDay = 21; break;
             default: throw new ArgumentException(key);
         }
     }
@@ -381,8 +381,8 @@ public class ProviderAvailabilityServiceTests
     [InlineData("longReason", "the reason can be at most 255 characters.")]
     [InlineData("noticeNegative", "Minimum booking notice must be between 0 and 30 days.")]
     [InlineData("noticeTooBig", "Minimum booking notice must be between 0 and 30 days.")]
-    [InlineData("jobsZero", "Maximum jobs per day must be between 1 and 50.")]
-    [InlineData("jobsTooBig", "Maximum jobs per day must be between 1 and 50.")]
+    [InlineData("jobsZero", "Maximum jobs per day must be between 1 and 20.")]
+    [InlineData("jobsTooBig", "Maximum jobs per day must be between 1 and 20.")]
     public async Task BadInput_IsRejectedWithAClearMessage_AndNothingIsSaved(string key, string expected)
     {
         var (svc, db) = Create();

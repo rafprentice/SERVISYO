@@ -83,7 +83,7 @@ public class AuthService : IAuthService
             ?? (InputRules.HasALetter(vm.Address!.Trim()) ? null : InputRules.AddressMessage)
             ?? BaseFeeRules.Check(vm.BaseFee)                                           // required, 1 to 100,000 PHP (never 0 or below)
             ?? (vm.MinNoticeDays is < 0 or > 30 ? "Enter a whole number of days from 0 to 30." : null)
-            ?? (vm.MaxJobsPerDay is < 1 or > 50 ? "Enter a whole number of jobs from 1 to 50." : null);
+            ?? (vm.MaxJobsPerDay is < 1 or > ProviderLimits.MaxJobsPerDay ? ProviderLimits.MaxJobsMessage : null);
         if (problem is not null) return AuthResult.Fail(problem);
 
         var email = NormalizeEmail(vm.Email);

@@ -145,7 +145,7 @@ public class RegisterProviderViewModel : RegisterBaseViewModel
     [Display(Name = "Minimum notice (days)")]
     public int MinNoticeDays { get; set; } = 1;
 
-    [Range(1, 50, ErrorMessage = "Enter a whole number of jobs from 1 to 50.")]
+    [Range(1, Servisyo.Web.Models.ProviderLimits.MaxJobsPerDay, ErrorMessage = Servisyo.Web.Models.ProviderLimits.MaxJobsMessage)]
     [Display(Name = "Maximum jobs per day")]
     public int MaxJobsPerDay { get; set; } = 5;
 }

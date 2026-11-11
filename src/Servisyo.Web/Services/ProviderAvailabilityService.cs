@@ -21,7 +21,7 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
     public const int MaxBreaksPerDay = BreakRules.MaxBreaksPerDay;
     public const int MaxUnavailableDates = 100;
     public const int MaxNoticeDays = 30;
-    public const int MaxJobsLimit = 50;
+    public const int MaxJobsLimit = ProviderLimits.MaxJobsPerDay;      // 20 (database v2.6)
     public const int MaxReasonLength = 255;
 
     private static readonly TimeSpan ManilaOffset = TimeSpan.FromHours(8);

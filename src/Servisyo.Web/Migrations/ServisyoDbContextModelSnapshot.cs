@@ -529,7 +529,7 @@ namespace Servisyo.Web.Migrations
 
                             t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");
 
-                            t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0");
+                            t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] BETWEEN 1 AND 20");
 
                             t.HasCheckConstraint("CK_PROVIDERS_RATING", "[AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5");
 

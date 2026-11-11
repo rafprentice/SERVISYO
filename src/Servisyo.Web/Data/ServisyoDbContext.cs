@@ -26,6 +26,9 @@ public class ServisyoDbContext : DbContext
     public DbSet<SystemLog> SystemLogs => Set<SystemLog>();
     public DbSet<AdminAction> AdminActions => Set<AdminAction>();
 
+    /// CK_PROVIDERS_LIMITS (database v2.6): MAX_JOBS_PER_DAY from 1 to 20 (ProviderLimits.MaxJobsPerDay).
+    public const string ProviderLimitsCheck = "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] BETWEEN 1 AND 20";
+
     /// CK_ADMIN_ACTIONS_TARGET (database v2.2): exactly one target column is filled, and it is the one TARGET_TYPE names.
     public const string AdminActionTargetCheck =
         "([TARGET_TYPE] = 'CUSTOMER' AND [TARGET_CUSTOMER_ID] IS NOT NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'SERVICE_PROVIDER' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NOT NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'REVIEW' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NOT NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'CATEGORY' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NOT NULL)";
@@ -84,7 +87,7 @@ public class ServisyoDbContext : DbContext
             {
                 t.HasCheckConstraint("CK_PROVIDERS_RATING", "[AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5");
                 t.HasCheckConstraint("CK_PROVIDERS_APPROVAL", "[APPROVAL_STATUS] IN ('Pending','Approved','Rejected')");
-                t.HasCheckConstraint("CK_PROVIDERS_LIMITS", "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0");
+                t.HasCheckConstraint("CK_PROVIDERS_LIMITS", ProviderLimitsCheck);   // database v2.6: at most 20 jobs a day
                 t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");   // database v2
                 t.HasCheckConstraint("CK_PROVIDERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");          // database v2.1
                 t.HasTrigger("trg_Providers_StatusCopy");  // database v2.1

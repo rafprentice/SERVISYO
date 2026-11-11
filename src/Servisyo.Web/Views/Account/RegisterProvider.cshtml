@@ -53,7 +53,7 @@
                 </div>
                 <div class="col-md-4 mb-3">
                     <label asp-for="MaxJobsPerDay" class="form-label"></label>
-                    <input asp-for="MaxJobsPerDay" class="form-control" type="number" min="1" max="50" step="1" inputmode="numeric" data-sv-number data-sv-whole />
+                    <input asp-for="MaxJobsPerDay" class="form-control" type="number" min="1" max="@Servisyo.Web.Models.ProviderLimits.MaxJobsPerDay" step="1" inputmode="numeric" data-sv-number data-sv-whole />
                     <span asp-validation-for="MaxJobsPerDay" class="text-danger"></span>
                 </div>
             </div>

@@ -64,6 +64,21 @@ already has off; with YES it keeps the FIRST one saved for each date and removes
 adds the unique index. To choose yourself, answer NO, remove the unwanted day on that provider's Availability page, and
 run it again.
 
+## Maximum jobs per day: 1 to 20 (database v2.6)
+The number is kept in one place, `ProviderLimits.MaxJobsPerDay` (`Models/Constants.cs`), and the rest of the app uses it.
+| Rule | Where it is enforced |
+|---|---|
+| A provider accepts at most **20** jobs a day (was 50). Message: *"Enter a whole number of jobs from 1 to 20."* | Register as Provider form (`[Range]` + `max="20"`) and `AuthService.RegisterProviderAsync` |
+| The same on the Availability page: *"Maximum jobs per day must be between 1 and 20."* | `max="20"` on the field + `ProviderAvailabilityService.SaveAsync` (a rejected save returns 400) |
+| The database refuses anything outside 1 to 20, even from SQL typed by hand | CHECK `CK_PROVIDERS_LIMITS`: `[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] BETWEEN 1 AND 20` |
+| Registering through the stored procedure | `usp_RegisterProvider`: THROW 50110 *"Enter a whole number of jobs per day from 1 to 20."* |
+
+Database change: run `tools\set-max-jobs-20.ps1` once (after v2.5). It shows the providers saved with more than 20
+(they become 20, otherwise the new CHECK cannot be added), backs up SERVISYO, and after YES applies the migration
+`MaxJobsPerDay20` (EF changes the CHECK; the script adds the `Data/MaxJobsSql.cs` steps: lower the old values first,
+then the new procedure; Down puts the v2.3 procedure back but cannot restore numbers that were lowered).
+Tests: `tests/Servisyo.Tests/MaxJobsPerDayTests.cs`.
+
 ## Program.cs
 ```csharp
 builder.Services.AddHostedService<UnavailableDatesResetService>();

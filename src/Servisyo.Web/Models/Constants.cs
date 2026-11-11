@@ -45,3 +45,11 @@ public static class ReviewStatuses
     public const string Removed = "Removed";
 }
 
+/// The limit of a provider's "Maximum jobs per day" (database v2.6). The same number is in the provider registration
+/// form, the Availability page, the database CHECK CK_PROVIDERS_LIMITS (ServisyoDbContext.ProviderLimitsCheck) and
+/// usp_RegisterProvider (MaxJobsSql) - the tests check that they all agree.
+public static class ProviderLimits
+{
+    public const int MaxJobsPerDay = 20;
+    public const string MaxJobsMessage = "Enter a whole number of jobs from 1 to 20.";
+}

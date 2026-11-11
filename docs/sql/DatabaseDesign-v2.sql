@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.5  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.6  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -14,7 +14,8 @@
 
    HOW THIS FILE IS USED
      - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup", "AdminTargets" and "DerivedData" (dotnet ef database update);
-       "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY, "OneDayOffPerDate" (v2.5) one UNIQUE index (PART 1):
+       "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY, "OneDayOffPerDate" (v2.5) one UNIQUE index (PART 1),
+       "MaxJobsPerDay20" (v2.6) the 20-job limit (CK_PROVIDERS_LIMITS and usp_RegisterProvider):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -95,6 +96,12 @@
        administrators' extra days); the index is the guarantee, even when two providers save at the same moment.
      - Existing duplicates must be resolved before the index can be created (tools\add-one-day-off-per-date.ps1 lists
        them and, only if you type YES, keeps the first one saved for each date).
+
+   WHAT CHANGED IN v2.6 (EF migration "MaxJobsPerDay20") - at most 20 jobs a day
+     - CK_PROVIDERS_LIMITS: MAX_JOBS_PER_DAY BETWEEN 1 AND 20 (was: > 0; the app allowed up to 50).
+     - usp_RegisterProvider: THROW 50110 for anything outside 1 to 20 (was 1 to 50).
+     - Providers saved with more than 20 are set to 20 by the migration (tools\set-max-jobs-20.ps1 lists them and
+       asks first).
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -195,7 +202,7 @@ CREATE TABLE SERVICE_PROVIDERS (
     CONSTRAINT PK_SERVICE_PROVIDERS PRIMARY KEY (PROVIDER_ID),
     CONSTRAINT FK_SERVICE_PROVIDERS_USERS_USER_ID FOREIGN KEY (USER_ID) REFERENCES USERS(USER_ID),
     CONSTRAINT CK_PROVIDERS_APPROVAL CHECK ([APPROVAL_STATUS] IN ('Pending','Approved','Rejected')),
-    CONSTRAINT CK_PROVIDERS_LIMITS CHECK ([MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] > 0),
+    CONSTRAINT CK_PROVIDERS_LIMITS CHECK ([MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] BETWEEN 1 AND 20),   -- v2.6: at most 20 jobs a day
     CONSTRAINT CK_PROVIDERS_RATING CHECK ([AVG_RATING] IS NULL OR [AVG_RATING] BETWEEN 0 AND 5),
     CONSTRAINT CK_PROVIDERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
@@ -814,7 +821,7 @@ BEGIN
     IF @BaseFee IS NULL THROW 50109, N'Please enter your base fee.', 1;
     IF @BaseFee < 0 OR @BaseFee > 1000000 THROW 50109, N'Enter a base fee from 0 to 1,000,000.', 1;
     IF @MinNoticeDays IS NULL OR @MinNoticeDays < 0 OR @MinNoticeDays > 30 THROW 50110, N'Enter a whole number of notice days from 0 to 30.', 1;
-    IF @MaxJobsPerDay IS NULL OR @MaxJobsPerDay < 1 OR @MaxJobsPerDay > 50 THROW 50110, N'Enter a whole number of jobs per day from 1 to 50.', 1;
+    IF @MaxJobsPerDay IS NULL OR @MaxJobsPerDay < 1 OR @MaxJobsPerDay > 20 THROW 50110, N'Enter a whole number of jobs per day from 1 to 20.', 1;
 
     DECLARE @tc INT = @@TRANCOUNT;
     BEGIN TRY

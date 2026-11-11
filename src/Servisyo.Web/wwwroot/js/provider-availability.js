@@ -299,7 +299,7 @@
     }
     form.querySelectorAll("[data-step]").forEach(function (button) {
         button.addEventListener("click", function () {
-            var lo = Number(max.min) || 1, hi = Number(max.max) || 50;
+            var lo = Number(max.min) || 1, hi = Number(max.max) || 20;
             var next = (Number(max.value) || lo) + Number(button.dataset.step);
             max.value = Math.min(hi, Math.max(lo, next));
             updateMaxHint();
