@@ -1,5 +1,4 @@
 using System.Globalization;
-using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Servisyo.Web.Models;
 
 namespace Servisyo.Web.ViewModels;
@@ -57,34 +56,60 @@ public static class BreakRules
     public static string Clock(TimeOnly t) => t.ToString("h:mm tt", CultureInfo.InvariantCulture).ToLowerInvariant();
 }
 
-/// The unavailable-date rules: only dates from TOMORROW up to December 31 of THIS year (Philippine time) - no
-/// same-day requests -, at most 5 per calendar month (days of this month that already passed count too). On January 1
-/// last year's dates are deleted (UnavailableDatesResetService), so every year starts with an empty list.
-/// (An administrator may still approve an extra day off for today: that is the emergency path.)
+/// The day-off rules (database v2.7). A provider REQUESTS days off and an administrator approves or rejects them:
+///   - 1 to 7 days in a row per request ("Maximum Day Off is 1 week or 7 days");
+///   - from TOMORROW up to December 31 of THIS year (Philippine time) - no same-day requests;
+///   - only ONE provider can be off on any date: a Pending request already holds its dates (first come, first served);
+///   - a day with an active booking cannot be requested;
+///   - one request at a time may wait for an administrator, so nobody can hold many dates with requests;
+///   - a Pending request does NOT stop bookings; an Approved one does. A Rejected one gives its dates back.
+/// On January 1 last year's days off and requests are deleted (UnavailableDatesResetService).
+/// (An administrator can still give an extra day off for today: that is the emergency path.)
 public static class UnavailableDateRules
 {
     public const string SameDayMessage = "Same-day unavailable date selection is not permitted.";
+    public const string SameDayAdvice = "Same-day off requests are not allowed. Unavailable dates must be marked at least 1 day in advance.";
 
     /// Database v2.5: only ONE provider can be off on any date (first come, first served), so customers always find
     /// someone. The other provider is not named to providers (an administrator sees the name).
     public const string TakenMessage = "Another provider already has this day off. Only one provider can be off per day, so please choose another date.";
-    public const string SameDayAdvice = "Same-day off requests are not allowed. Unavailable dates must be marked at least 1 day in advance.";
 
-    /// The first day a provider can mark: tomorrow (Philippine time).
+    /// The most days one request can cover (a week).
+    public const int MaxDaysPerRequest = 7;
+    public const string MaxDaysMessage = "Maximum Day Off is 1 week or 7 days";
+
+    public const string PendingLabel = "Pending Admin Approval";
+    public const string ApprovedLabel = "Approved";
+    public const string ApprovedNote = "Extra day off given by an administrator";
+
+    /// The first day a provider can request: tomorrow (Philippine time).
     public static DateOnly FirstAllowed(DateOnly today) => today.AddDays(1);
 
-    public const int MaxPerMonth = 5;
-    public const string MonthlyLimitMessage = "You can only set up to 5 unavailable days per month.";
-    public const string ApprovedNote = "Extra day approved by an administrator (does not count toward your 5)";
-
     /// "Nov 20, 2026: you already have booking #12 (Accepted) on this day. ..." - a day with an active booking
-    /// (Pending, Accepted or In Progress) cannot be marked unavailable, so no customer is left without their provider.
+    /// (Pending, Accepted or In Progress) cannot be requested, so no customer is left without their provider.
     public static string BookedMessage(string dateLabel, int bookingId, string status) =>
         $"{dateLabel}: you already have booking #{bookingId} ({status}) on this day. A day with an active booking cannot be marked unavailable.";
 
     public static DateOnly LastAllowed(DateOnly today) => new(today.Year, 12, 31);
     public static DateOnly FirstOfYear(DateOnly today) => new(today.Year, 1, 1);
-    public static DateOnly FirstOfMonth(DateOnly today) => new(today.Year, today.Month, 1);
+}
+
+/// How days off are written on the pages and in the admin log.
+public static class DayOffFormat
+{
+    private static readonly CultureInfo En = CultureInfo.InvariantCulture;
+
+    /// "Nov 20, 2026"
+    public static string Date(DateOnly d) => d.ToString("MMM d, yyyy", En);
+
+    /// "Nov 20, 2026" (one day), "Nov 20 to Nov 22, 2026", "Dec 30, 2026 to Jan 2, 2027".
+    public static string Range(DateOnly first, DateOnly last) =>
+        first == last ? Date(first)
+        : first.Year == last.Year ? $"{first.ToString("MMM d", En)} to {Date(last)}"
+        : $"{Date(first)} to {Date(last)}";
+
+    /// "1 day", "3 days"
+    public static string Days(int n) => n == 1 ? "1 day" : $"{n} days";
 }
 
 /// Day numbers follow the database: 0 = Sunday ... 6 = Saturday. The page lists Monday first.
@@ -109,28 +134,34 @@ public class DayScheduleForm
     public List<BreakForm> Breaks { get; set; } = new();
 }
 
-public class UnavailableDateForm
+/// "Request Day Off": the first and last day (one day: the last day can be left empty) and the reason.
+/// There is no provider id here on purpose: the provider is always the signed-in user.
+public class DayOffRequestForm
 {
-    public DateOnly? Date { get; set; }
+    public DateOnly? Start { get; set; }
+    public DateOnly? End { get; set; }
     public string? Reason { get; set; }
-
-    /// Shown only: an extra day approved by an administrator (PROVIDER_UNAVAILABLE_DATES.APPROVED_BY_ACTION_ID).
-    /// Never taken from the browser - the server always looks it up in the database.
-    [BindNever]
-    public bool ApprovedByAdmin { get; set; }
-
-    /// Shown only: this day off was already saved (e.g. today's, saved before today). The same-day rule is only for
-    /// NEW days, so such a day can stay. Looked up in the database, never taken from the browser.
-    [BindNever]
-    public bool AlreadySaved { get; set; }
 }
+
+/// One line of the provider's "Unavailable Dates" list: a request (1-7 days) or a single day without a request
+/// (an older day off, or an extra day an administrator gave).
+public sealed record DayOffItem(
+    int? RequestId,             // set for a request
+    int? UnavailableId,         // set for a single day without a request
+    string DatesText,           // "Nov 20 to Nov 22, 2026"
+    string DaysText,            // "3 days"
+    string? Reason,
+    string? Badge,              // "Pending Admin Approval", "Approved" or null
+    string BadgeTone,           // "pending", "completed"
+    string? Note,               // "Extra day off given by an administrator"
+    bool IsPending,
+    string RemoveLabel);        // "Cancel request" or "Remove"
 
 /// Everything the page posts back when "Save Schedule" is pressed.
 /// There is no provider id here on purpose: the provider is always the signed-in user.
 public class AvailabilityForm
 {
     public List<DayScheduleForm> Days { get; set; } = new();
-    public List<UnavailableDateForm> Dates { get; set; } = new();
     public int MinNoticeDays { get; set; } = 1;
     public int MaxJobsPerDay { get; set; } = 5;
 }
@@ -146,18 +177,25 @@ public class AvailabilityPageViewModel
 
     public DateOnly Today { get; set; }
 
-    /// The last date that can be marked unavailable: December 31 of this year.
+    /// The last date that can be requested: December 31 of this year.
     public DateOnly LastDate => UnavailableDateRules.LastAllowed(Today);
 
-    /// The first date that can be marked unavailable: tomorrow (no same-day requests).
+    /// The first date that can be requested: tomorrow (no same-day requests).
     public DateOnly FirstDate => UnavailableDateRules.FirstAllowed(Today);
 
-    /// Unavailable days of THIS month that already passed (not listed, but they count toward the 5 per month).
-    public int PastDaysThisMonth { get; set; }
+    /// The provider's days off and requests from today on, oldest first.
+    public IReadOnlyList<DayOffItem> DaysOff { get; set; } = Array.Empty<DayOffItem>();
 
-    /// Days from today to December 31 that ANOTHER provider already has off (only one provider per day).
-    /// The page uses them to warn right away; the server checks again when saving.
+    /// True while one request waits for an administrator (only one at a time): "Request Day Off" explains why it waits.
+    public bool HasPendingRequest { get; set; }
+
+    /// Days from today to December 31 that ANOTHER provider already has off or requested (only one provider per day).
+    /// The page uses them to warn right away; the server checks again.
     public IReadOnlyList<DateOnly> TakenDates { get; set; } = Array.Empty<DateOnly>();
+
+    /// The "Request Day Off" form that was refused: shown again (with DayOffErrors) so nothing has to be typed twice.
+    public DayOffRequestForm? DayOffForm { get; set; }
+    public IReadOnlyList<string> DayOffErrors { get; set; } = Array.Empty<string>();
 
     public IReadOnlyList<(int Value, string Label)> NoticeOptions { get; set; } = Array.Empty<(int, string)>();
 
@@ -168,3 +206,12 @@ public class AvailabilityPageViewModel
 public sealed record AvailabilityPageResult(ProviderDashboardAccess Access, AvailabilityPageViewModel? Page);
 
 public sealed record AvailabilitySaveResult(ProviderDashboardAccess Access, bool Saved, IReadOnlyList<string> Errors, string Message);
+
+/// The answer to "Request Day Off", "Cancel request" and "Remove". Errors lists every problem of a refused request.
+public sealed record DayOffResult(ProviderDashboardAccess Access, bool Done, string Message, IReadOnlyList<string> Errors)
+{
+    public static DayOffResult Denied(ProviderDashboardAccess access) => new(access, false, string.Empty, Array.Empty<string>());
+    public static DayOffResult Ok(string message) => new(ProviderDashboardAccess.Allowed, true, message, Array.Empty<string>());
+    public static DayOffResult Refused(string message, IReadOnlyList<string>? errors = null) =>
+        new(ProviderDashboardAccess.Allowed, false, message, errors ?? new[] { message });
+}

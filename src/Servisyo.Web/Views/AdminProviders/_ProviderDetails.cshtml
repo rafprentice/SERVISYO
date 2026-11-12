@@ -91,43 +91,62 @@
     </div>
 
     <div class="sv-pd__section">
-        <h3 class="sv-pd__h">Days Off (until Dec 31)</h3>
-        @if (Model.DaysOff.Count == 0)
-        {
-            <p class="sv-rv__none sv-pd__none">No days off planned.</p>
-        }
-        else
-        {
-            <ul class="sv-pd__daysoff">
-                @foreach (var d in Model.DaysOff)
+        @* Database v2.7: fetched again by admin-approval.js when this provider's days off change (pushed by SignalR) *@
+        <div data-sv-dayoff-live="true" data-provider-id="@Model.ProviderId"
+             data-refresh-url="@Url.Action("Details", "AdminProviders", new { providerId = Model.ProviderId, status = Model.ReturnStatus == ProviderStatuses.All ? null : Model.ReturnStatus, page = Model.ReturnPage, partial = true })">
+            <h3 class="sv-pd__h">Days Off (until Dec 31)
+                @if (Model.PendingRequests > 0)
                 {
-                    <li>
-                        <span class="sv-pd__dodate">@d.DateText</span>
-                        <span class="sv-pd__doreason">@(d.Reason ?? "No reason given")</span>
-                        @if (d.ApprovedByAdmin)
-                        {
-                            <span class="sv-tag sv-tag--scheduled">Extra (approved)</span>
-                        }
-                    </li>
+                    <span class="sv-tag sv-tag--pending">@Model.PendingRequests waiting for you</span>
                 }
-            </ul>
-        }
+            </h3>
+            @if (Model.DaysOff.Count == 0)
+            {
+                <p class="sv-rv__none sv-pd__none">No days off planned.</p>
+            }
+            else
+            {
+                <ul class="sv-pd__daysoff">
+                    @foreach (var d in Model.DaysOff)
+                    {
+                        <li class="@(d.IsPending ? "is-pending" : "")">
+                            <span class="sv-pd__dodate">@d.DateText <span class="sv-pd__dodays">· @d.DaysText</span></span>
+                            <span class="sv-pd__doreason">@(d.Reason ?? "No reason given")</span>
+                            <span class="sv-tag sv-tag--@d.Tone">@d.Label</span>
+                            @if (d.IsPending && d.RequestId is not null)
+                            {
+                                @* approving blocks bookings on these days; rejecting gives the dates back (saved with an admin log entry) *@
+                                <form asp-controller="AdminProviders" asp-action="DecideDayOff" asp-route-providerId="@Model.ProviderId" asp-route-requestId="@d.RequestId"
+                                      method="post" class="sv-pd__dodecide" data-sv-decision-form>
+                                    <input type="hidden" name="ReturnStatus" value="@Model.ReturnStatus" />
+                                    <input type="hidden" name="ReturnPage" value="@Model.ReturnPage" />
+                                    <button type="submit" name="Decision" value="Approve" class="sv-btn sv-btn--xs sv-btn--primary"
+                                            data-confirm="Approve @(Model.Name)'s day off for @(d.DateText)? Customers will not be able to book them on those days.">Approve</button>
+                                    <button type="submit" name="Decision" value="Reject" class="sv-btn sv-btn--xs sv-btn--danger-outline"
+                                            data-confirm="Reject @(Model.Name)'s day off request for @(d.DateText)? They stay available on those days.">Reject</button>
+                                </form>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
 
         @if (Model.CanApproveDayOff)
         {
-            @* an emergency beyond the provider's 5 days a month; saved with an admin log entry (ADMIN_ACTIONS) *@
+            @* an emergency (even today, which a provider cannot request); saved with an admin log entry (ADMIN_ACTIONS) *@
             <form asp-controller="AdminProviders" asp-action="ApproveExtraDayOff" asp-route-providerId="@Model.ProviderId"
                   method="post" class="sv-pd__dayoff" data-sv-decision-form>
                 <input type="hidden" name="ReturnStatus" value="@Model.ReturnStatus" />
                 <input type="hidden" name="ReturnPage" value="@Model.ReturnPage" />
-                <p class="sv-pd__dohint">Emergency (for example sick): approve an extra day off beyond the provider's 5 a month. Days with an active booking cannot be approved.</p>
+                <p class="sv-pd__dohint">Emergency (for example sick today): give the provider a day off right away, without a request. Days with an active booking cannot be given.</p>
                 <div class="sv-pd__dorow">
                     <label class="sv-sr-only" for="sv-pd-dodate">Day off</label>
                     <input id="sv-pd-dodate" name="Date" type="date" required min="@Model.DayOffMin" max="@Model.DayOffMax" />
                     <label class="sv-sr-only" for="sv-pd-doreason">Reason</label>
                     <input id="sv-pd-doreason" name="Reason" type="text" required maxlength="@Servisyo.Web.Services.ProviderManagementService.MaxExtraDayReasonLength"
                            placeholder="Reason (provider sees it)" />
-                    <button type="submit" class="sv-btn sv-btn--sm sv-btn--primary">Approve extra day off</button>
+                    <button type="submit" class="sv-btn sv-btn--sm sv-btn--primary">Give extra day off</button>
                 </div>
             </form>
         }

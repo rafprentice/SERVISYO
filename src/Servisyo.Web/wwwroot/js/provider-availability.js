@@ -1,5 +1,6 @@
-/* Provider > Availability: switches, the 1-hour break, "Copy Mon -> Weekdays", unavailable dates and the settings.
-   Everything is only a convenience: the server checks every value again when "Save Schedule" is pressed
+/* Provider > Availability: switches, the 1-hour break, "Copy Mon -> Weekdays", the settings, and the
+   "Request Day Off" dialog (database v2.7: 1 to 7 days, from tomorrow, this year, one provider per date).
+   Everything is only a convenience: the server checks every value again
    (BreakRules and UnavailableDateRules in ProviderAvailabilityViewModels.cs). */
 (function () {
     "use strict";
@@ -9,10 +10,6 @@
 
     var daysList = document.getElementById("sv-av-days");
     var breakTpl = document.getElementById("sv-break-tpl");
-    var dateTpl = document.getElementById("sv-date-tpl");
-    var datesList = document.getElementById("sv-av-dates");
-    var datesEmpty = document.getElementById("sv-av-dates-empty");
-    var datesError = document.getElementById("sv-av-dates-error");
 
     // the break rules (the same numbers as BreakRules on the server)
     var MIN_SHIFT = 8 * 60, BREAK = 60, STEP = 30;
@@ -33,17 +30,13 @@
         return h12 + ":" + pad(m % 60) + (h < 12 ? " am" : " pm");
     }
 
-    // ---------- names: the server reads Days[i].Breaks[j].Start and Dates[k], so they are renumbered after every change ----------
+    // ---------- names: the server reads Days[i].Breaks[j].Start, so they are renumbered after every change ----------
     function renumber() {
         days().forEach(function (li) {
             var i = li.dataset.index;
             li.querySelectorAll("[data-break]").forEach(function (row, j) {
                 row.querySelector("[data-b-start]").name = "Days[" + i + "].Breaks[" + j + "].Start";
             });
-        });
-        datesList.querySelectorAll("[data-date-row]").forEach(function (row, k) {
-            row.querySelector("[data-d-date]").name = "Dates[" + k + "].Date";
-            row.querySelector("[data-d-reason]").name = "Dates[" + k + "].Reason";
         });
     }
 
@@ -176,111 +169,6 @@
         renumber();
     });
 
-    // ---------- unavailable dates: from tomorrow (no same-day requests), this year only, at most 5 a month ----------
-    var today = datesList.getAttribute("data-today");                  // "2026-11-11" (Philippine time)
-    var lastDay = datesList.getAttribute("data-last");                 // "2026-12-31"
-    var pastThisMonth = Number(datesList.getAttribute("data-past-this-month")) || 0;
-    var maxPerMonth = Number(datesList.getAttribute("data-max-per-month")) || 5;
-    var monthMessage = datesList.getAttribute("data-month-message");
-    var sameDayMessage = datesList.getAttribute("data-same-day-message");
-    // days ANOTHER provider already has off: only one provider can be off per day (the server checks again on save)
-    var takenDays = (datesList.getAttribute("data-taken") || "").split(",").filter(Boolean);
-    var takenMessage = datesList.getAttribute("data-taken-message");
-
-    function dateLabel(value) {
-        return new Date(value + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-    }
-    function monthLabel(key) {
-        return new Date(key + "-01T00:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-    }
-
-    /// A message right under one date box (empty text removes it).
-    function rowProblem(input, text) {
-        var holder = input.closest(".sv-av__dateedit");
-        var note = holder.querySelector(".sv-av__daterr");
-        if (!text) { if (note) note.remove(); return; }
-        if (!note) {
-            note = document.createElement("p");
-            note.className = "sv-av__daterr";
-            note.setAttribute("role", "alert");
-            holder.appendChild(note);
-        }
-        note.textContent = text;
-        input.setAttribute("aria-invalid", "true");
-    }
-
-    /// Shows the problems with the listed dates (none: the message is hidden). Returns true when there are none.
-    function checkDates() {
-        var problems = [], perMonth = {}, year = lastDay.slice(0, 4);
-        datesList.querySelectorAll("[data-d-date]").forEach(function (input) {
-            input.removeAttribute("aria-invalid");
-            rowProblem(input, null);
-            var value = input.value;
-            if (!value) return;
-            var row = input.closest("[data-date-row]");
-            var savedBefore = row.getAttribute("data-saved-date") === value;   // already saved (e.g. today's): it may stay
-            if (value < today && !savedBefore) {
-                problems.push(dateLabel(value) + " is in the past.");
-                rowProblem(input, dateLabel(value) + " is in the past. Choose tomorrow or a later date.");
-                return;
-            }
-            if (value === today && !savedBefore) {
-                problems.push(dateLabel(value) + ": " + sameDayMessage);
-                rowProblem(input, sameDayMessage);
-                return;
-            }
-            if (value > lastDay) {
-                problems.push(dateLabel(value) + " is not in " + year + ". You can only mark unavailable days until December 31, " + year + ".");
-                rowProblem(input, "Only dates until December 31, " + year + " can be marked.");
-                return;
-            }
-            if (takenDays.indexOf(value) >= 0 && !savedBefore) {
-                problems.push(dateLabel(value) + ": " + takenMessage);
-                rowProblem(input, takenMessage);
-                return;
-            }
-            if (row.hasAttribute("data-approved")) return;   // an extra day approved by an administrator
-            var key = value.slice(0, 7);
-            (perMonth[key] = perMonth[key] || []).push(input);
-        });
-        Object.keys(perMonth).sort().forEach(function (key) {
-            var past = key === today.slice(0, 7) ? pastThisMonth : 0;
-            var total = perMonth[key].length + past;
-            if (total <= maxPerMonth) return;
-            problems.push(monthMessage + " " + monthLabel(key) + " would have " + total +
-                (past > 0 ? " (" + past + " of them already passed)." : "."));
-            perMonth[key].forEach(function (input) { input.setAttribute("aria-invalid", "true"); });
-        });
-        datesError.textContent = problems.join(" ");
-        datesError.hidden = problems.length === 0;
-        return problems.length === 0;
-    }
-
-    function refreshEmpty() {
-        var any = datesList.querySelector("[data-date-row]") !== null;
-        datesEmpty.hidden = any;
-    }
-
-    document.getElementById("sv-av-add-date").addEventListener("click", function () {
-        var node = dateTpl.content.firstElementChild.cloneNode(true);
-        datesList.appendChild(node);
-        renumber();
-        refreshEmpty();
-        node.querySelector("[data-d-date]").focus();
-    });
-
-    datesList.addEventListener("change", function (e) { if (e.target.matches("[data-d-date]")) checkDates(); });
-
-    datesList.addEventListener("click", function (e) {
-        var del = e.target.closest("[data-remove-date]");
-        if (del) {
-            del.closest("[data-date-row]").remove();
-            renumber();
-            refreshEmpty();
-            checkDates();
-        }
-    });
-
     // ---------- booking settings ----------
     var notice = document.getElementById("sv-av-notice");
     var noticeHint = document.getElementById("sv-av-notice-hint");
@@ -309,17 +197,161 @@
 
     // ---------- submit ----------
     var saveButton = document.getElementById("sv-av-save");
-    form.addEventListener("submit", function (e) {
-        if (!checkDates()) {                                       // the server would refuse it: say so right away
-            e.preventDefault();
-            datesError.scrollIntoView({ block: "center" });
-            return;
-        }
+    form.addEventListener("submit", function () {
         renumber();
         saveButton.disabled = true;                                // no double submit
     });
 
     renumber();
     days().forEach(refreshDay);
-    checkDates();
+
+    // ---------- "Remove" / "Cancel request": ask first ----------
+    document.addEventListener("submit", function (e) {
+        var button = e.submitter || e.target.querySelector("[data-confirm]");
+        if (!button || !button.hasAttribute("data-confirm")) return;
+        if (!window.confirm(button.getAttribute("data-confirm"))) { e.preventDefault(); return; }
+        button.disabled = true;
+    });
+
+    // ---------- "Request Day Off" ----------
+    // The dialog opens ONLY when the button is pressed (or when the server refused a request, see the end).
+    // The Unavailable Dates section can be redrawn live, so its button is looked up at click time.
+    var dialog = document.getElementById("sv-av-dayoff");
+    var dayOff = document.getElementById("sv-av-dayoff-form");
+    if (!dialog || !dayOff) return;
+
+    var startBox = document.getElementById("sv-av-do-start");
+    var endBox = document.getElementById("sv-av-do-end");
+    var summary = document.getElementById("sv-av-do-sum");
+    var problem = document.getElementById("sv-av-do-error");
+    var sendButton = document.getElementById("sv-av-do-send");
+
+    var today = dayOff.getAttribute("data-today");                     // "2026-11-12" (Philippine time)
+    var lastDay = dayOff.getAttribute("data-last");                    // "2026-12-31"
+    var maxDays = Number(dayOff.getAttribute("data-max-days")) || 7;
+    var maxDaysMessage = dayOff.getAttribute("data-max-days-message"); // "Maximum Day Off is 1 week or 7 days"
+    var sameDayMessage = dayOff.getAttribute("data-same-day-message");
+    var takenMessage = dayOff.getAttribute("data-taken-message");
+
+    // days ANOTHER provider already has off or asked for: only one provider can be off per day. They are read from
+    // the section each time, because the live refresh brings the newest list.
+    function takenDays() {
+        var holder = document.getElementById("sv-av-daysoff") || dayOff;
+        return (holder.getAttribute("data-taken") || "").split(",").filter(Boolean);
+    }
+
+    function dateLabel(value) {
+        return new Date(value + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    }
+    function addDays(value, n) {
+        var d = new Date(value + "T00:00:00Z");
+        d.setUTCDate(d.getUTCDate() + n);
+        return d.toISOString().slice(0, 10);
+    }
+    function daysBetween(a, b) { return Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000); }
+
+    /// The first problem with the chosen dates ("" when there is none). The same rules as the server.
+    function findProblem() {
+        var start = startBox.value, end = endBox.value || start;
+        if (!start) return "Please choose the first day off.";
+        if (end < start) return "The last day off cannot be before the first day.";
+        if (start < today) return dateLabel(start) + " is in the past. Choose tomorrow or a later date.";
+        if (start === today) return sameDayMessage;
+        if (end > lastDay) return dateLabel(end) + " is not in " + lastDay.slice(0, 4) + ". You can only request days off until December 31, " + lastDay.slice(0, 4) + ".";
+        if (daysBetween(start, end) + 1 > maxDays) return maxDaysMessage;
+        var taken = takenDays();
+        for (var d = start; d <= end; d = addDays(d, 1)) {
+            if (taken.indexOf(d) >= 0) return dateLabel(d) + ": " + takenMessage;
+        }
+        return "";
+    }
+
+    function markInvalid(box, wrong) {
+        if (wrong) box.setAttribute("aria-invalid", "true"); else box.removeAttribute("aria-invalid");
+    }
+
+    function refresh(show) {
+        var start = startBox.value, end = endBox.value || start;
+        // the end date can be at most 6 days after the start (7 days in all), and not after December 31
+        endBox.min = start || dayOff.getAttribute("data-first");
+        endBox.max = start && addDays(start, maxDays - 1) < lastDay ? addDays(start, maxDays - 1) : lastDay;
+
+        var text = findProblem();
+        summary.textContent = !text && start
+            ? (start === end ? "1 day: " + dateLabel(start) : (daysBetween(start, end) + 1) + " days: " + dateLabel(start) + " to " + dateLabel(end))
+            : "";
+        if (show) {
+            problem.textContent = text;
+            problem.hidden = !text;
+            // the box to fix: the end date for "too many days", "before the start" or "after December 31", otherwise the start
+            var endIsWrong = !!text && !!endBox.value && (text === maxDaysMessage || endBox.value < start || endBox.value > lastDay);
+            markInvalid(startBox, !!text && !endIsWrong);
+            markInvalid(endBox, endIsWrong);
+        }
+        return !text;
+    }
+
+    function openDialog(opener) {
+        if (opener.getAttribute("aria-disabled") === "true") {
+            var note = document.getElementById("sv-av-waiting");
+            if (note) note.scrollIntoView({ block: "center" });
+            return;
+        }
+        if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+        refresh(false);
+        startBox.focus();
+    }
+    function closeDialog() { if (typeof dialog.close === "function") dialog.close(); else dialog.removeAttribute("open"); }
+
+    document.addEventListener("click", function (e) {
+        var opener = e.target.closest("#sv-av-request");
+        if (opener) openDialog(opener);
+    });
+    dialog.addEventListener("click", function (e) {
+        if (e.target === dialog || e.target.closest("[data-sv-close]")) closeDialog();   // the dark backdrop or "Cancel"
+    });
+    startBox.addEventListener("change", function () { refresh(true); });
+    endBox.addEventListener("change", function () { refresh(true); });
+    startBox.addEventListener("input", function () { refresh(false); });
+    endBox.addEventListener("input", function () { refresh(false); });
+
+    dayOff.addEventListener("submit", function (e) {
+        if (!refresh(true)) { e.preventDefault(); return; }           // the server would refuse it: say so right away
+        sendButton.disabled = true;                                   // no double submit
+    });
+
+    // the server refused the request: open the dialog again with what was typed. Only data-open="true" counts
+    // (Razor always writes data-* attributes, so the attribute is there on every visit).
+    if (dialog.getAttribute("data-open") === "true") {
+        if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+        refresh(true);
+    }
+
+    // ---------- live (database v2.7): an administrator approved or rejected a request ----------
+    // live-bookings.js turns the SignalR push into "sv:dayoff-changed"; the section is fetched again from the server.
+    function refreshSection() {
+        var section = document.getElementById("sv-av-daysoff");
+        if (!section || !window.fetch || !window.DOMParser) return;
+        fetch(section.getAttribute("data-refresh-url"), { credentials: "same-origin", cache: "no-store", headers: { "X-Requested-With": "fetch" } })
+            .then(function (response) { return response.ok && !response.redirected ? response.text() : null; })
+            .then(function (html) {
+                if (!html) return;
+                var fresh = new DOMParser().parseFromString(html, "text/html").getElementById("sv-av-daysoff");
+                var current = document.getElementById("sv-av-daysoff");
+                if (!fresh || !current || current.querySelector("button[disabled]")) return;   // a Cancel / Remove is being sent
+                current.setAttribute("data-taken", fresh.getAttribute("data-taken") || "");
+                if (fresh.innerHTML === current.innerHTML) return;
+                current.innerHTML = fresh.innerHTML;
+                current.classList.remove("sv-live-flash");
+                void current.offsetWidth;                             // restart the highlight
+                current.classList.add("sv-live-flash");
+            })
+            .catch(function () { });
+    }
+    document.addEventListener("sv:dayoff-changed", refreshSection);
+
+    // If the live connection is not working (e.g. the SignalR script could not load), ask every 30 seconds instead.
+    setInterval(function () {
+        if (!document.hidden && document.documentElement.getAttribute("data-sv-live-connected") !== "true") refreshSection();
+    }, 30000);
 })();

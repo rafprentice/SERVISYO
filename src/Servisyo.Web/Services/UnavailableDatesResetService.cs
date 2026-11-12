@@ -5,8 +5,8 @@ using Servisyo.Web.ViewModels;
 namespace Servisyo.Web.Services;
 
 /// The yearly reset of the providers' unavailable dates: from January 1 (Philippine time) the dates of the year
-/// before are deleted, so every provider starts the new year with an empty list (UnavailableDateRules only allows
-/// dates of the current year, so nothing else is ever deleted).
+/// before are deleted, and the day-off requests left without days, so every provider starts the new year with an
+/// empty list (UnavailableDateRules only allows dates of the current year, so nothing else is ever deleted).
 ///
 /// It runs when the website starts and then every hour. A website that was asleep on January 1 resets on its first
 /// start after it; running it again changes nothing. Old unavailable dates are not used by anything else
@@ -27,17 +27,27 @@ public class UnavailableDatesResetService : BackgroundService
         _clock = clock ?? TimeProvider.System;
     }
 
-    /// Deletes every unavailable date BEFORE January 1 of today's year. Returns how many were deleted.
+    /// Deletes every unavailable date BEFORE January 1 of today's year, then the day-off requests (database v2.7) that
+    /// were made before January 1 and have no days left (last year's requests, and rejected ones, whose days were
+    /// already given back). Returns how many dates were deleted.
     public static async Task<int> DeleteLastYearsDatesAsync(ServisyoDbContext db, DateOnly today, CancellationToken ct = default)
     {
         var firstOfYear = UnavailableDateRules.FirstOfYear(today);
+        var firstOfYearUtc = new DateTime(today.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc) - ManilaOffset;   // Jan 1, 00:00 in Cebu
         var old = db.ProviderUnavailableDates.Where(d => d.UnavailableDate < firstOfYear);
+        var oldRequests = db.DayOffRequests.Where(r => r.RequestedAt < firstOfYearUtc && !r.Days.Any());
 
         if (db.Database.IsRelational())
-            return await old.ExecuteDeleteAsync(ct);                    // one DELETE ... WHERE UNAVAILABLE_DATE < @first
+        {
+            var deleted = await old.ExecuteDeleteAsync(ct);              // one DELETE ... WHERE UNAVAILABLE_DATE < @first
+            await oldRequests.ExecuteDeleteAsync(ct);                    // then the requests that have no days left
+            return deleted;
+        }
 
-        var rows = await old.ToListAsync(ct);                           // the in-memory test database
+        var rows = await old.ToListAsync(ct);                            // the in-memory test database
         db.ProviderUnavailableDates.RemoveRange(rows);
+        await db.SaveChangesAsync(ct);
+        db.DayOffRequests.RemoveRange(await oldRequests.ToListAsync(ct));
         await db.SaveChangesAsync(ct);
         return rows.Count;
     }

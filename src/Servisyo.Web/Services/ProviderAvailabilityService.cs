@@ -12,14 +12,23 @@ public interface IProviderAvailabilityService
     /// Builds the page for the signed-in provider. When `posted` is given (the form was rejected) the page shows those values instead of the saved ones.
     Task<AvailabilityPageResult> GetAsync(int userId, AvailabilityForm? posted = null, CancellationToken ct = default);
 
-    /// Validates and saves weekly hours, breaks, unavailable dates and booking settings in one transaction.
+    /// Validates and saves weekly hours, breaks and booking settings in one save. (Days off have their own requests.)
     Task<AvailabilitySaveResult> SaveAsync(int userId, AvailabilityForm form, CancellationToken ct = default);
+
+    /// "Request Day Off" (database v2.7): 1 to 7 days in a row from tomorrow to December 31, saved as a Pending request
+    /// whose days hold the dates (one provider per date) without stopping bookings until an administrator approves.
+    Task<DayOffResult> RequestDayOffAsync(int userId, DayOffRequestForm form, CancellationToken ct = default);
+
+    /// Cancels the provider's OWN request (Pending) or removes its days from today on (Approved): the dates are free again.
+    Task<DayOffResult> RemoveRequestAsync(int userId, int requestId, CancellationToken ct = default);
+
+    /// Removes one of the provider's OWN days off that has no request (an older day, or an administrator's extra day).
+    Task<DayOffResult> RemoveDayAsync(int userId, int unavailableId, CancellationToken ct = default);
 }
 
 public class ProviderAvailabilityService : IProviderAvailabilityService
 {
     public const int MaxBreaksPerDay = BreakRules.MaxBreaksPerDay;
-    public const int MaxUnavailableDates = 100;
     public const int MaxNoticeDays = 30;
     public const int MaxJobsLimit = ProviderLimits.MaxJobsPerDay;      // 20 (database v2.6)
     public const int MaxReasonLength = 255;
@@ -32,13 +41,20 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
     private readonly ServisyoDbContext _db;
     private readonly TimeProvider _clock;
     private readonly ILogger<ProviderAvailabilityService> _logger;
+    private readonly IDayOffLiveUpdates? _live;
 
-    public ProviderAvailabilityService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<ProviderAvailabilityService>? logger = null)
+    public ProviderAvailabilityService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<ProviderAvailabilityService>? logger = null,
+        IDayOffLiveUpdates? live = null)
     {
         _db = db;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ProviderAvailabilityService>.Instance;
+        _live = live;
     }
+
+    /// The administrators' open pages (and this provider's other tabs) show the change at once.
+    private Task PushAsync(int providerId, int providerUserId, string what) =>
+        _live?.DayOffChangedAsync(providerId, providerUserId, what) ?? Task.CompletedTask;
 
     private DateOnly TodayInCebu() => DateOnly.FromDateTime(_clock.GetUtcNow().ToOffset(ManilaOffset).DateTime);
 
@@ -107,30 +123,14 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
                 }
                 form.Days.Add(day);
             }
-
-            form.Dates = (await _db.ProviderUnavailableDates.AsNoTracking()
-                    .Where(d => d.ProviderId == who.ProviderId && d.UnavailableDate >= today)
-                    .OrderBy(d => d.UnavailableDate)
-                    .Select(d => new { d.UnavailableDate, d.Reason, Approved = d.ApprovedByActionId != null })
-                    .ToListAsync(ct))
-                .Select(d => new UnavailableDateForm { Date = d.UnavailableDate, Reason = d.Reason, ApprovedByAdmin = d.Approved, AlreadySaved = true })
-                .ToList();
         }
         else
         {
             // a rejected form: show the days in the usual order even if the browser sent them differently
             form.Days = form.Days.OrderBy(d => Array.IndexOf(AvailabilityDays.DisplayOrder, d.DayOfWeek)).ToList();
-
-            // which listed days were saved before / approved by an administrator comes from the database, never from the browser
-            var savedDays = await SavedDatesAsync(who.ProviderId, today, ct);
-            foreach (var d in form.Dates)
-            {
-                d.AlreadySaved = d.Date is { } day && savedDays.ContainsKey(day);
-                d.ApprovedByAdmin = d.Date is { } approvedDay && savedDays.TryGetValue(approvedDay, out var approved) && approved;
-            }
         }
 
-        var pastThisMonth = await CountPastDaysThisMonthAsync(who.ProviderId, today, ct);
+        var daysOff = await DaysOffAsync(who.ProviderId, today, ct);
         var lastDay = UnavailableDateRules.LastAllowed(today);
         var takenDates = await _db.ProviderUnavailableDates.AsNoTracking()
             .Where(d => d.ProviderId != who.ProviderId && d.UnavailableDate >= today && d.UnavailableDate <= lastDay)
@@ -157,7 +157,8 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             Form = form,
             IsSuggested = suggested,
             Today = today,
-            PastDaysThisMonth = pastThisMonth,
+            DaysOff = daysOff,
+            HasPendingRequest = daysOff.Any(d => d.IsPending),
             TakenDates = takenDates,
             NoticeOptions = options.Select(v => (v, v == 0 ? "Same day" : Plural.Of(v, "day"))).ToList()
         });
@@ -170,20 +171,8 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         var (access, who) = await FindAsync(userId, ct);
         if (who is null) return new(access, false, Array.Empty<string>(), string.Empty);
 
-        var today = TodayInCebu();
-
-        // Serializable: "no active booking on this day" is checked and the day off is saved as ONE step, so a customer
-        // cannot book the provider for that day in between (BookProviderService checks the other way round the same way).
-        var relational = _db.Database.IsRelational();
-        await using var tx = relational ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
-
         var errors = new List<string>();
         var days = ValidateDays(form, errors);
-        var saved = await SavedDatesAsync(who.ProviderId, today, ct);
-        var newDays = form.Dates.Where(d => d.Date is { } day && day >= today && !saved.ContainsKey(day)).Select(d => d.Date!.Value).Distinct().ToList();
-        var booked = await ActiveBookingDaysAsync(who.ProviderId, newDays, ct);
-        var taken = await TakenByOthersAsync(who.ProviderId, newDays, ct);
-        var dates = ValidateDates(form, today, await CountPastDaysThisMonthAsync(who.ProviderId, today, ct), saved, booked, taken, errors);
 
         if (form.MinNoticeDays < 0 || form.MinNoticeDays > MaxNoticeDays)
             errors.Add($"Minimum booking notice must be between 0 and {MaxNoticeDays} days.");
@@ -197,7 +186,6 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
         {
             var provider = await _db.Providers
                 .Include(p => p.Availabilities).ThenInclude(a => a.Breaks)
-                .Include(p => p.UnavailableDates)
                 .FirstAsync(p => p.ProviderId == who.ProviderId, ct);
 
             // ---- weekly hours: one row per day (a unique index guarantees it), updated in place ----
@@ -218,64 +206,225 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
                     row.Breaks.Add(new ProviderBreak { BreakStart = b.Start, BreakEnd = b.End });
             }
 
-            // ---- unavailable dates: only today and later are managed here; older rows are left alone ----
-            var wanted = dates.ToDictionary(x => x.Date);
-            foreach (var existing in provider.UnavailableDates.Where(x => x.UnavailableDate >= today).ToList())
-            {
-                if (wanted.TryGetValue(existing.UnavailableDate, out var keep))
-                {
-                    existing.Reason = keep.Reason;
-                    wanted.Remove(existing.UnavailableDate);
-                }
-                else
-                {
-                    _db.ProviderUnavailableDates.Remove(existing);
-                }
-            }
-            foreach (var add in wanted.Values)
-                provider.UnavailableDates.Add(new ProviderUnavailableDate { ProviderId = provider.ProviderId, UnavailableDate = add.Date, Reason = add.Reason });
-
             // ---- booking settings ----
             provider.MinNoticeDays = form.MinNoticeDays;
             provider.MaxJobsPerDay = form.MaxJobsPerDay;
 
             await _db.SaveChangesAsync(ct);          // everything above is one database transaction
+        }
+        catch (DbUpdateException ex)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogError(ex, "Saving the schedule of provider {ProviderId} failed.", who.ProviderId);
+            return new(ProviderDashboardAccess.Allowed, false,
+                new[] { "Nothing was saved because the database refused the change. Please reload the page and try again." },
+                "Your schedule was not saved.");
+        }
+
+        _logger.LogInformation("Provider {ProviderId} saved their schedule ({Open} open days).", who.ProviderId, days.Count(d => d.IsAvailable));
+        return new(ProviderDashboardAccess.Allowed, true, Array.Empty<string>(), "Your schedule was saved.");
+    }
+
+    // ------------------------------------------------------------ day-off requests (database v2.7)
+
+    public async Task<DayOffResult> RequestDayOffAsync(int userId, DayOffRequestForm form, CancellationToken ct = default)
+    {
+        var (access, who) = await FindAsync(userId, ct);
+        if (who is null) return DayOffResult.Denied(access);
+
+        var today = TodayInCebu();
+
+        // 1. the form on its own: dates, at most 7 days, the reason
+        var errors = new List<string>();
+        var reason = string.IsNullOrWhiteSpace(form.Reason) ? null : form.Reason.Trim();
+        if (form.Start is null)
+            return DayOffResult.Refused("Please choose the first day off.");
+        var first = form.Start.Value;
+        var last = form.End ?? first;                       // one day: the last day can be left empty
+        var firstLabel = DayOffFormat.Date(first);
+
+        if (last < first)
+            errors.Add("The last day off cannot be before the first day.");
+        else if (first < today)
+            errors.Add($"{firstLabel} is in the past. Choose tomorrow or a later date.");
+        else if (first == today)
+            errors.Add($"{firstLabel}: {UnavailableDateRules.SameDayMessage} Unavailable dates must be marked at least 1 day in advance.");
+        else if (last > UnavailableDateRules.LastAllowed(today))
+            errors.Add($"{DayOffFormat.Date(last)} is not in {today.Year}. You can only request days off until December 31, {today.Year}.");
+        else if (last.DayNumber - first.DayNumber + 1 > UnavailableDateRules.MaxDaysPerRequest)
+            errors.Add(UnavailableDateRules.MaxDaysMessage);
+        if (reason is { Length: > MaxReasonLength })
+            errors.Add($"The reason can be at most {MaxReasonLength} characters.");
+        if (errors.Count > 0)
+            return DayOffResult.Refused(errors[0], errors);
+
+        var dates = Enumerable.Range(0, last.DayNumber - first.DayNumber + 1).Select(first.AddDays).ToList();
+        var rangeText = DayOffFormat.Range(first, last);
+
+        // Serializable: the checks below and the save are ONE step, so another provider cannot take the same dates
+        // and a customer cannot book one of them in between (the unique index on the date is the last guard).
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+
+        // 2. only one request at a time may wait for an administrator
+        var waiting = await PendingRequestAsync(who.ProviderId, today, ct);
+        if (waiting is not null)
+            return DayOffResult.Refused($"Your request for {waiting} is still waiting for an administrator. You can send a new request when it is answered, or cancel it first.");
+
+        // 3. every day: not already off for this provider, not taken by another provider, no active booking
+        var mine = (await _db.ProviderUnavailableDates.AsNoTracking()
+                .Where(d => d.ProviderId == who.ProviderId && dates.Contains(d.UnavailableDate))
+                .Select(d => d.UnavailableDate).ToListAsync(ct))
+            .ToHashSet();
+        var taken = await TakenByOthersAsync(who.ProviderId, dates, ct);
+        var booked = await ActiveBookingDaysAsync(who.ProviderId, dates, ct);
+        foreach (var day in dates)
+        {
+            var label = DayOffFormat.Date(day);
+            if (mine.Contains(day)) errors.Add($"{label}: you already have this day off (or asked for it).");
+            else if (taken.Contains(day)) errors.Add($"{label}: {UnavailableDateRules.TakenMessage}");
+            else if (booked.TryGetValue(day, out var job)) errors.Add(UnavailableDateRules.BookedMessage(label, job.BookingId, job.Status));
+        }
+        if (errors.Count > 0)
+            return DayOffResult.Refused($"Your day off request for {rangeText} was not sent.", errors);
+
+        // 4. the request and its days: one SaveChanges = one database transaction
+        var request = new ProviderDayOffRequest
+        {
+            ProviderId = who.ProviderId, Reason = reason, Status = DayOffStatuses.Pending, RequestedAt = _clock.GetUtcNow().UtcDateTime
+        };
+        foreach (var day in dates)
+            request.Days.Add(new ProviderUnavailableDate { ProviderId = who.ProviderId, UnavailableDate = day });
+        _db.DayOffRequests.Add(request);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
             if (tx is not null) await tx.CommitAsync(ct);
         }
         catch (DbUpdateException ex)
         {
-            // most likely another provider took one of these days off at the same moment (the database allows only
-            // one provider per day - IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE): nothing was saved
+            // most likely another provider took one of these days at the same moment (only one provider per day -
+            // IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE): nothing was saved
             _db.ChangeTracker.Clear();
-            _logger.LogError(ex, "Saving the schedule of provider {ProviderId} failed.", who.ProviderId);
-            return new(ProviderDashboardAccess.Allowed, false,
-                new[] { "Nothing was saved: another provider may have just taken one of your new days off (only one provider can be off per day). Please reload the page, check your dates and save again." },
-                "Your schedule was not saved.");
+            _logger.LogWarning(ex, "The day off request of provider {ProviderId} for {Dates} was not saved.", who.ProviderId, rangeText);
+            return DayOffResult.Refused("Nothing was sent: another provider may have just taken one of these days (only one provider can be off per day). Please reload the page and try again.");
         }
 
-        _logger.LogInformation("Provider {ProviderId} saved their schedule ({Open} open days, {Dates} unavailable dates).",
-            who.ProviderId, days.Count(d => d.IsAvailable), dates.Count);
-        return new(ProviderDashboardAccess.Allowed, true, Array.Empty<string>(), "Your schedule was saved.");
+        _logger.LogInformation("Provider {ProviderId} requested {Days} off: {Dates} (request {RequestId}).",
+            who.ProviderId, DayOffFormat.Days(dates.Count), rangeText, request.RequestId);
+        await PushAsync(who.ProviderId, userId, "requested");
+        return DayOffResult.Ok($"Your day off request for {rangeText} ({DayOffFormat.Days(dates.Count)}) was sent. Customers can still book you on those days until an administrator approves it.");
     }
 
-    /// The provider's OWN unavailable days of this month before today (extra days approved by an administrator do not
-    /// count): they are not on the page any more but count toward the 5 per month.
-    private Task<int> CountPastDaysThisMonthAsync(int providerId, DateOnly today, CancellationToken ct)
+    public async Task<DayOffResult> RemoveRequestAsync(int userId, int requestId, CancellationToken ct = default)
     {
-        var firstOfMonth = UnavailableDateRules.FirstOfMonth(today);
-        return _db.ProviderUnavailableDates.CountAsync(d => d.ProviderId == providerId && d.UnavailableDate >= firstOfMonth
-                                                          && d.UnavailableDate < today && d.ApprovedByActionId == null, ct);
+        var (access, who) = await FindAsync(userId, ct);
+        if (who is null) return DayOffResult.Denied(access);
+
+        var today = TodayInCebu();
+
+        // only the provider's OWN request (the provider comes from the sign-in, never from the browser)
+        var request = await _db.DayOffRequests.Include(r => r.Days)
+            .FirstOrDefaultAsync(r => r.RequestId == requestId && r.ProviderId == who.ProviderId, ct);
+        if (request is null || request.Status == DayOffStatuses.Rejected || request.Days.Count == 0)
+            return DayOffResult.Refused("That day off request was not found. Please reload the page.");
+
+        var rangeText = DayOffFormat.Range(request.Days.Min(d => d.UnavailableDate), request.Days.Max(d => d.UnavailableDate));
+        string message;
+        if (request.Status == DayOffStatuses.Pending)
+        {
+            // never decided: it goes completely
+            _db.ProviderUnavailableDates.RemoveRange(request.Days);
+            _db.DayOffRequests.Remove(request);
+            message = $"Your day off request for {rangeText} was cancelled.";
+        }
+        else
+        {
+            // approved: the days from today on are free again; days that already passed stay as history
+            var upcoming = request.Days.Where(d => d.UnavailableDate >= today).ToList();
+            if (upcoming.Count == 0)
+                return DayOffResult.Refused($"Your days off for {rangeText} have already passed.");
+            _db.ProviderUnavailableDates.RemoveRange(upcoming);
+            if (upcoming.Count == request.Days.Count) _db.DayOffRequests.Remove(request);
+            message = $"Your days off for {rangeText} were removed. Customers can book you on those days again.";
+        }
+
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation("Provider {ProviderId} removed day off request {RequestId} ({Status}).", who.ProviderId, requestId, request.Status);
+        await PushAsync(who.ProviderId, userId, request.Status == DayOffStatuses.Pending ? "cancelled" : "removed");
+        return DayOffResult.Ok(message);
     }
 
-    /// The saved days off from today on: date -> true when an administrator approved it as an extra day.
-    private async Task<Dictionary<DateOnly, bool>> SavedDatesAsync(int providerId, DateOnly today, CancellationToken ct) =>
-        (await _db.ProviderUnavailableDates.AsNoTracking()
-            .Where(d => d.ProviderId == providerId && d.UnavailableDate >= today)
-            .Select(d => new { d.UnavailableDate, Approved = d.ApprovedByActionId != null })
-            .ToListAsync(ct))
-        .ToDictionary(d => d.UnavailableDate, d => d.Approved);
+    public async Task<DayOffResult> RemoveDayAsync(int userId, int unavailableId, CancellationToken ct = default)
+    {
+        var (access, who) = await FindAsync(userId, ct);
+        if (who is null) return DayOffResult.Denied(access);
 
-    /// Which of these days ANOTHER provider already has off (only one provider can be off per day).
+        var today = TodayInCebu();
+        var day = await _db.ProviderUnavailableDates
+            .FirstOrDefaultAsync(d => d.UnavailableId == unavailableId && d.ProviderId == who.ProviderId && d.RequestId == null, ct);
+        if (day is null || day.UnavailableDate < today)
+            return DayOffResult.Refused("That day off was not found. Please reload the page.");
+
+        _db.ProviderUnavailableDates.Remove(day);
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation("Provider {ProviderId} removed the day off {Date}.", who.ProviderId, day.UnavailableDate);
+        await PushAsync(who.ProviderId, userId, "removed");
+        return DayOffResult.Ok($"{DayOffFormat.Date(day.UnavailableDate)} was removed. Customers can book you on that day again.");
+    }
+
+    // ------------------------------------------------------------------ helpers
+
+    /// The provider's list: each request (whose last day is today or later) as one line, and each day without a request.
+    private async Task<IReadOnlyList<DayOffItem>> DaysOffAsync(int providerId, DateOnly today, CancellationToken ct)
+    {
+        var rows = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId == providerId)
+            .Select(d => new
+            {
+                d.UnavailableId, d.UnavailableDate, d.Reason, d.RequestId,
+                Status = d.Request != null ? d.Request.Status : null,
+                RequestReason = d.Request != null ? d.Request.Reason : null,
+                ByAdmin = d.ApprovedByActionId != null
+            })
+            .ToListAsync(ct);
+
+        var items = new List<(DateOnly First, DayOffItem Item)>();
+        foreach (var g in rows.Where(r => r.RequestId != null).GroupBy(r => r.RequestId!.Value))
+        {
+            var first = g.Min(r => r.UnavailableDate);
+            var last = g.Max(r => r.UnavailableDate);
+            if (last < today) continue;
+            var pending = g.First().Status == DayOffStatuses.Pending;
+            items.Add((first, new DayOffItem(g.Key, null, DayOffFormat.Range(first, last), DayOffFormat.Days(g.Count()), g.First().RequestReason,
+                pending ? UnavailableDateRules.PendingLabel : UnavailableDateRules.ApprovedLabel, pending ? "pending" : "completed",
+                null, pending, pending ? "Cancel request" : "Remove")));
+        }
+        foreach (var r in rows.Where(r => r.RequestId == null && r.UnavailableDate >= today))
+        {
+            items.Add((r.UnavailableDate, new DayOffItem(null, r.UnavailableId, DayOffFormat.Date(r.UnavailableDate), DayOffFormat.Days(1), r.Reason,
+                null, "muted", r.ByAdmin ? UnavailableDateRules.ApprovedNote : null, false, "Remove")));
+        }
+        return items.OrderBy(i => i.First).Select(i => i.Item).ToList();
+    }
+
+    /// "Nov 20 to Nov 22, 2026" when one of the provider's requests still waits for an administrator (and is not over).
+    private async Task<string?> PendingRequestAsync(int providerId, DateOnly today, CancellationToken ct)
+    {
+        var days = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId == providerId && d.RequestId != null && d.Request!.Status == DayOffStatuses.Pending)
+            .Select(d => new { d.RequestId, d.UnavailableDate })
+            .ToListAsync(ct);
+        var waiting = days.GroupBy(d => d.RequestId)
+            .Select(g => new { First = g.Min(d => d.UnavailableDate), Last = g.Max(d => d.UnavailableDate) })
+            .Where(r => r.Last >= today)
+            .OrderBy(r => r.First)
+            .FirstOrDefault();
+        return waiting is null ? null : DayOffFormat.Range(waiting.First, waiting.Last);
+    }
+
+    /// Which of these days ANOTHER provider already has off or asked for (only one provider can be off per day).
     private async Task<HashSet<DateOnly>> TakenByOthersAsync(int providerId, List<DateOnly> days, CancellationToken ct)
     {
         if (days.Count == 0) return new();
@@ -301,7 +450,6 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
     // ------------------------------------------------------------ validation
 
     private sealed record CleanDay(int DayOfWeek, bool IsAvailable, TimeOnly Start, TimeOnly End, List<(TimeOnly Start, TimeOnly End)> Breaks);
-    private sealed record CleanDate(DateOnly Date, string? Reason);
 
     private static List<CleanDay> ValidateDays(AvailabilityForm form, List<string> errors)
     {
@@ -377,71 +525,6 @@ public class ProviderAvailabilityService : IProviderAvailabilityService
             }
 
             if (ownErrors == 0) result.Add(new(dow, true, start, end, breaks));
-        }
-
-        return result;
-    }
-
-    /// saved: the days off already saved from today on (true = approved by an administrator: not counted in the 5).
-    /// booked: NEW days that have an active booking (they are refused). Days that were already saved are left alone.
-    /// taken: NEW days that another provider already has off (refused: only one provider per day).
-    private static List<CleanDate> ValidateDates(AvailabilityForm form, DateOnly today, int pastDaysThisMonth,
-        IReadOnlyDictionary<DateOnly, bool> saved, IReadOnlyDictionary<DateOnly, (int BookingId, string Status)> booked,
-        IReadOnlySet<DateOnly> taken, List<string> errors)
-    {
-        var result = new List<CleanDate>();
-        var seen = new HashSet<DateOnly>();
-        var last = UnavailableDateRules.LastAllowed(today);
-
-        foreach (var row in form.Dates)
-        {
-            var reason = string.IsNullOrWhiteSpace(row.Reason) ? null : row.Reason.Trim();
-
-            if (row.Date is null)
-            {
-                if (reason is not null) errors.Add("Every unavailable date needs a date.");
-                continue;                                               // an empty row: ignore it
-            }
-
-            var date = row.Date.Value;
-            var label = date.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
-
-            if (date < today) { errors.Add($"{label} is in the past. Choose tomorrow or a later date."); continue; }
-            // no same-day requests: today is only allowed when it was already saved earlier (only NEW days are checked)
-            if (date == today && !saved.ContainsKey(date))
-            {
-                errors.Add($"{label}: {UnavailableDateRules.SameDayMessage} Unavailable dates must be marked at least 1 day in advance.");
-                continue;
-            }
-            if (date > last)
-            {
-                errors.Add($"{label} is not in {today.Year}. You can only mark unavailable days until December 31, {today.Year}.");
-                continue;
-            }
-            if (!seen.Add(date)) { errors.Add($"{label} is listed more than once."); continue; }
-            if (reason is { Length: > MaxReasonLength }) { errors.Add($"{label}: the reason can be at most {MaxReasonLength} characters."); continue; }
-            if (taken.Contains(date)) { errors.Add($"{label}: {UnavailableDateRules.TakenMessage}"); continue; }
-            if (booked.TryGetValue(date, out var job)) { errors.Add(UnavailableDateRules.BookedMessage(label, job.BookingId, job.Status)); continue; }
-
-            result.Add(new(date, reason));
-        }
-
-        if (result.Count > MaxUnavailableDates)
-            errors.Add($"You can list at most {MaxUnavailableDates} unavailable dates.");
-
-        // ---- at most 5 per calendar month (this month's days that already passed count too;
-        //      extra days approved by an administrator do not) ----
-        foreach (var month in result.Where(x => !(saved.TryGetValue(x.Date, out var approved) && approved))
-                                    .GroupBy(x => (x.Date.Year, x.Date.Month)).OrderBy(g => g.Key))
-        {
-            var past = month.Key == (today.Year, today.Month) ? pastDaysThisMonth : 0;
-            var total = month.Count() + past;
-            if (total <= UnavailableDateRules.MaxPerMonth) continue;
-
-            var name = new DateOnly(month.Key.Year, month.Key.Month, 1).ToString("MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
-            errors.Add(past > 0
-                ? $"{UnavailableDateRules.MonthlyLimitMessage} {name} would have {total} ({past} of them already passed)."
-                : $"{UnavailableDateRules.MonthlyLimitMessage} {name} would have {total}.");
         }
 
         return result;

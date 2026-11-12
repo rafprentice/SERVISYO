@@ -12,10 +12,11 @@ using Xunit;
 
 namespace Servisyo.Tests;
 
-/// Every provider has their OWN days off: the list, the 5-a-month count, the same-day rule, the booked-day rule and
-/// the administrator's extra days all look only at the signed-in provider (PROVIDER_UNAVAILABLE_DATES.PROVIDER_ID,
+/// Every provider has their OWN days off: the list, the requests, the same-day rule, the booked-day rule and the
+/// administrator's extra days all look only at the signed-in provider (PROVIDER_UNAVAILABLE_DATES.PROVIDER_ID,
 /// worked out from the sign-in cookie - never sent by the browser).
-/// The ONE thing shared by all providers (database v2.5): only one provider can be off on any date, first come first served.
+/// The ONE thing shared by all providers (database v2.5): only one provider can be off on any date, first come first
+/// served - and since v2.7 a Pending request already holds its dates.
 public class ProviderDaysOffIsolationTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 14, 2, 0, 0, TimeSpan.Zero);     // Oct 14, 10:00 in Cebu
@@ -46,29 +47,30 @@ public class ProviderDaysOffIsolationTests
         return new(db, new ProviderAvailabilityService(db, new FixedClock()), new ProviderManagementService(db, null, new FixedClock()), admin, vince, liza);
     }
 
-    private static AvailabilityForm Week(params DateOnly[] daysOff)
-    {
-        var form = new AvailabilityForm { MinNoticeDays = 1, MaxJobsPerDay = 4 };
-        foreach (var dow in AvailabilityDays.DisplayOrder)
-            form.Days.Add(new DayScheduleForm { DayOfWeek = dow, IsAvailable = dow is >= 1 and <= 5, Start = new TimeOnly(8, 0), End = new TimeOnly(17, 0) });
-        foreach (var d in daysOff) form.Dates.Add(new UnavailableDateForm { Date = d, Reason = "Leave" });
-        return form;
-    }
-
     private static DateOnly Nov(int day) => new(2026, 11, day);
 
-    private static async Task<IReadOnlyList<DateOnly?>> ListOf(World w, Provider p) =>
-        (await w.Schedule.GetAsync(p.UserId)).Page!.Form.Dates.Select(d => d.Date).ToList();
+    private static Task<DayOffResult> AskAsync(World w, Provider p, DateOnly first, DateOnly? last = null) =>
+        w.Schedule.RequestDayOffAsync(p.UserId, new DayOffRequestForm { Start = first, End = last, Reason = "Leave" });
+
+    /// Approves the provider's waiting request, so they can send the next one (one request at a time).
+    private static async Task ApproveAsync(World w, Provider p)
+    {
+        var id = await w.Db.DayOffRequests.Where(r => r.ProviderId == p.ProviderId && r.Status == DayOffStatuses.Pending).Select(r => r.RequestId).SingleAsync();
+        Assert.Equal(AdminDayOffOutcome.Success, (await w.Admin.DecideDayOffRequestAsync(w.AdminUser.UserId, p.ProviderId, id, approve: true)).Outcome);
+    }
+
+    private static async Task<IReadOnlyList<string>> ListOf(World w, Provider p) =>
+        (await w.Schedule.GetAsync(p.UserId)).Page!.DaysOff.Select(d => d.DatesText).ToList();
 
     [Fact]
     public async Task EachProvider_SeesOnlyTheirOwnDaysOff()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(13)))).Saved);
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(20)))).Saved);
+        Assert.True((await AskAsync(w, w.Vince, Nov(13))).Done);
+        Assert.True((await AskAsync(w, w.Liza, Nov(20), Nov(21))).Done);
 
-        Assert.Equal(new DateOnly?[] { Nov(13) }, await ListOf(w, w.Vince));
-        Assert.Equal(new DateOnly?[] { Nov(20) }, await ListOf(w, w.Liza));
+        Assert.Equal(new[] { "Nov 13, 2026" }, await ListOf(w, w.Vince));
+        Assert.Equal(new[] { "Nov 20 to Nov 21, 2026" }, await ListOf(w, w.Liza));
     }
 
     // ------------------------------------------------------------ only one provider off per day
@@ -76,60 +78,63 @@ public class ProviderDaysOffIsolationTests
     private const string Taken = "Another provider already has this day off. Only one provider can be off per day, so please choose another date.";
 
     [Fact]
-    public async Task TwoProviders_CannotTakeTheSameDayOff_FirstComeFirstServed()
+    public async Task TwoProviders_CannotAskForTheSameDay_FirstComeFirstServed()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(14)))).Saved);              // Liza (like Angel) was first
+        Assert.True((await AskAsync(w, w.Liza, Nov(14))).Done);                    // Liza (like Angel) was first - still Pending
 
-        var result = await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(14)));
+        var result = await AskAsync(w, w.Vince, Nov(13), Nov(15));
 
-        Assert.False(result.Saved);
+        Assert.False(result.Done);
         Assert.Equal(new[] { $"Nov 14, 2026: {Taken}" }, result.Errors);
         Assert.Equal(1, await w.Db.ProviderUnavailableDates.CountAsync(d => d.UnavailableDate == Nov(14)));
         Assert.Empty(await ListOf(w, w.Vince));
+        Assert.Empty(w.Db.DayOffRequests.Where(r => r.ProviderId == w.Vince.ProviderId));
 
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(15)))).Saved);            // another day is fine
+        Assert.True((await AskAsync(w, w.Vince, Nov(15))).Done);                   // another day is fine
     }
 
     [Fact]
     public async Task ADayFreedByOneProvider_CanBeTakenByAnother()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(14)))).Saved);
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week())).Saved);                     // Liza removes it
+        Assert.True((await AskAsync(w, w.Liza, Nov(14))).Done);
+        var id = (await w.Db.DayOffRequests.SingleAsync()).RequestId;
+        Assert.True((await w.Schedule.RemoveRequestAsync(w.Liza.UserId, id)).Done);    // Liza cancels it
 
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(14)))).Saved);
+        Assert.True((await AskAsync(w, w.Vince, Nov(14))).Done);
     }
 
     [Fact]
-    public async Task MyOwnSavedDay_StaysMine_WhenISaveAgain()
+    public async Task ARejectedRequest_GivesItsDaysBack()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(14)))).Saved);
+        Assert.True((await AskAsync(w, w.Liza, Nov(14), Nov(16))).Done);
+        var id = (await w.Db.DayOffRequests.SingleAsync()).RequestId;
+        Assert.Equal(AdminDayOffOutcome.Success, (await w.Admin.DecideDayOffRequestAsync(w.AdminUser.UserId, w.Liza.ProviderId, id, approve: false)).Outcome);
 
-        var page = (await w.Schedule.GetAsync(w.Liza.UserId)).Page!;
-        page.Form.Dates[0].Reason = "Family trip";
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, page.Form)).Saved);                  // not "taken" by herself
-        Assert.Equal("Family trip", (await w.Db.ProviderUnavailableDates.SingleAsync()).Reason);
+        Assert.True((await AskAsync(w, w.Vince, Nov(15))).Done);
     }
 
     [Fact]
     public async Task ThePage_KnowsWhichDaysAreTakenByOthers_ButNotByWhom()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(14), Nov(20)))).Saved);
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(16)))).Saved);
+        Assert.True((await AskAsync(w, w.Liza, Nov(14))).Done);
+        await ApproveAsync(w, w.Liza);
+        Assert.True((await AskAsync(w, w.Liza, Nov(20))).Done);                     // pending: it holds the date too
+        Assert.True((await AskAsync(w, w.Vince, Nov(16))).Done);
 
         var vince = (await w.Schedule.GetAsync(w.Vince.UserId)).Page!;
-        Assert.Equal(new[] { Nov(14), Nov(20) }, vince.TakenDates);                                  // not his own Nov 16
+        Assert.Equal(new[] { Nov(14), Nov(20) }, vince.TakenDates);                 // not his own Nov 16
         Assert.Equal(new[] { Nov(16) }, (await w.Schedule.GetAsync(w.Liza.UserId)).Page!.TakenDates);
     }
 
     [Fact]
-    public async Task AnAdministrator_CannotApproveADayAnotherProviderHasOff()
+    public async Task AnAdministrator_CannotGiveADayAnotherProviderHasOff()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(14)))).Saved);
+        Assert.True((await AskAsync(w, w.Liza, Nov(14))).Done);
 
         var result = await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(14), "Sick");
 
@@ -140,14 +145,14 @@ public class ProviderDaysOffIsolationTests
     }
 
     [Fact]
-    public async Task ADayAnAdministratorApproved_IsTakenForEveryoneElse()
+    public async Task ADayAnAdministratorGave_IsTakenForEveryoneElse()
     {
         var w = await WorldAsync();
         Assert.Equal(ExtraDayOffOutcome.Success, (await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(14), "Sick")).Outcome);
 
-        var result = await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(14)));
+        var result = await AskAsync(w, w.Liza, Nov(14));
 
-        Assert.False(result.Saved);
+        Assert.False(result.Done);
         Assert.Contains($"Nov 14, 2026: {Taken}", result.Errors);
     }
 
@@ -162,73 +167,67 @@ public class ProviderDaysOffIsolationTests
     }
 
     [Fact]
-    public async Task AnotherProvidersDays_DoNotCountTowardMyFive()
+    public async Task AnotherProvidersRequest_DoesNotCountAsMine()
     {
+        // "one request at a time" is per provider: Liza's waiting request does not stop Vince from asking
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(2), Nov(3), Nov(4), Nov(5), Nov(6)))).Saved);
+        Assert.True((await AskAsync(w, w.Liza, Nov(9), Nov(13))).Done);
 
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(9), Nov(10), Nov(11), Nov(12), Nov(13)))).Saved);
+        Assert.True((await AskAsync(w, w.Vince, Nov(2), Nov(6))).Done);
+        Assert.Equal(UnavailableDateRules.PendingLabel, (await w.Schedule.GetAsync(w.Liza.UserId)).Page!.DaysOff.Single().Badge);
+        Assert.Equal(UnavailableDateRules.PendingLabel, (await w.Schedule.GetAsync(w.Vince.UserId)).Page!.DaysOff.Single().Badge);
     }
 
     [Fact]
-    public async Task AnotherProvidersPastDaysThisMonth_DoNotCountForMe()
+    public async Task AProviderCannotCancelOrRemove_AnotherProvidersDaysOff()
     {
         var w = await WorldAsync();
-        w.Db.ProviderUnavailableDates.AddRange(
-            new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = new DateOnly(2026, 10, 1) },
-            new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = new DateOnly(2026, 10, 2) });
+        Assert.True((await AskAsync(w, w.Liza, Nov(20))).Done);
+        var request = await w.Db.DayOffRequests.SingleAsync();
+        w.Db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = w.Liza.ProviderId, UnavailableDate = Nov(25), Reason = "Old" });
         await w.Db.SaveChangesAsync();
+        var single = await w.Db.ProviderUnavailableDates.SingleAsync(d => d.UnavailableDate == Nov(25));
 
-        Assert.Equal(2, (await w.Schedule.GetAsync(w.Vince.UserId)).Page!.PastDaysThisMonth);
-        Assert.Equal(0, (await w.Schedule.GetAsync(w.Liza.UserId)).Page!.PastDaysThisMonth);
-    }
+        Assert.False((await w.Schedule.RemoveRequestAsync(w.Vince.UserId, request.RequestId)).Done);   // Vince guesses Liza's ids
+        Assert.False((await w.Schedule.RemoveDayAsync(w.Vince.UserId, single.UnavailableId)).Done);
 
-    [Fact]
-    public async Task SavingMyList_NeverRemovesAnotherProvidersDays()
-    {
-        var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Nov(20)))).Saved);
-
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week())).Saved);           // Vince's list is empty
-
-        Assert.Equal(new DateOnly?[] { Nov(20) }, await ListOf(w, w.Liza));
+        Assert.Equal(new[] { "Nov 20, 2026", "Nov 25, 2026" }, await ListOf(w, w.Liza));
     }
 
     [Fact]
     public async Task AnotherProvidersDayOffForToday_DoesNotLetMeTakeToday()
     {
-        // the same-day rule lets a day saved EARLIER stay - but only the provider's own one
         var w = await WorldAsync();
         w.Db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = w.Liza.ProviderId, UnavailableDate = Today, Reason = "Planned" });
         await w.Db.SaveChangesAsync();
 
-        var result = await w.Schedule.SaveAsync(w.Vince.UserId, Week(Today));
+        var result = await AskAsync(w, w.Vince, Today);
 
-        Assert.False(result.Saved);
+        Assert.False(result.Done);
         Assert.Contains("Oct 14, 2026: Same-day unavailable date selection is not permitted. Unavailable dates must be marked at least 1 day in advance.", result.Errors);
         Assert.Empty(await ListOf(w, w.Vince));
-        Assert.True((await w.Schedule.SaveAsync(w.Liza.UserId, Week(Today))).Saved);       // Liza's own saved day stays
+        Assert.Equal(new[] { "Oct 14, 2026" }, await ListOf(w, w.Liza));                  // Liza's own saved day stays
     }
 
     [Fact]
-    public async Task AnExtraDayApprovedForOneProvider_IsOnlyTheirs()
+    public async Task AnExtraDayGivenToOneProvider_IsOnlyTheirs()
     {
         var w = await WorldAsync();
         Assert.Equal(ExtraDayOffOutcome.Success, (await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Liza.ProviderId, Nov(20), "Sick")).Outcome);
 
         Assert.Empty(await ListOf(w, w.Vince));
-        Assert.True((await w.Schedule.GetAsync(w.Liza.UserId)).Page!.Form.Dates.Single().ApprovedByAdmin);
+        Assert.Equal(UnavailableDateRules.ApprovedNote, (await w.Schedule.GetAsync(w.Liza.UserId)).Page!.DaysOff.Single().Note);
 
-        // Liza's approved day is taken for Vince (one provider per day), not an exemption for him
-        var six = await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(2), Nov(3), Nov(4), Nov(5), Nov(6), Nov(20)));
-        Assert.False(six.Saved);
-        Assert.Equal(new[] { $"Nov 20, 2026: {Taken}" }, six.Errors);
+        // Liza's day is taken for Vince (one provider per day), not an exemption for him
+        var result = await AskAsync(w, w.Vince, Nov(18), Nov(21));
+        Assert.False(result.Done);
+        Assert.Equal(new[] { $"Nov 20, 2026: {Taken}" }, result.Errors);
     }
 
     [Fact]
     public void TheFormsHaveNoProviderOrUserId_ThatIsAlwaysTheSignedInAccount()
     {
-        foreach (var type in new[] { typeof(AvailabilityForm), typeof(DayScheduleForm), typeof(BreakForm), typeof(UnavailableDateForm) })
+        foreach (var type in new[] { typeof(AvailabilityForm), typeof(DayScheduleForm), typeof(BreakForm), typeof(DayOffRequestForm), typeof(DayOffDecisionForm) })
             Assert.DoesNotContain(type.GetProperties(BindingFlags.Public | BindingFlags.Instance),
                 p => p.Name.Contains("ProviderId") || p.Name.Contains("UserId"));
     }

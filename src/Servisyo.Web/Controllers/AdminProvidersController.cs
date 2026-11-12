@@ -88,6 +88,24 @@ public class AdminProvidersController : Controller
         return RedirectWithToast(result.Outcome == ExtraDayOffOutcome.Success ? "ok" : "error", result.Message, form.ReturnStatus, form.ReturnPage);
     }
 
+    [HttpPost("{providerId:int}/day-off-requests/{requestId:int}")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DecideDayOff(int providerId, int requestId, DayOffDecisionForm form, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var adminId)) return Forbid();
+
+        bool approve;
+        if (string.Equals(form.Decision, "Approve", StringComparison.OrdinalIgnoreCase)) approve = true;
+        else if (string.Equals(form.Decision, "Reject", StringComparison.OrdinalIgnoreCase)) approve = false;
+        else return RedirectWithToast("error", "That action is not recognised.", form.ReturnStatus, form.ReturnPage);
+
+        // The administrator comes from the sign-in cookie; the provider and the request are in the address.
+        var result = await _providers.DecideDayOffRequestAsync(adminId, providerId, requestId, approve, ct);
+        if (result.Outcome == AdminDayOffOutcome.NotAllowed) return await EndSessionAsync();
+
+        return RedirectWithToast(result.Outcome == AdminDayOffOutcome.Success ? "ok" : "error", result.Message, form.ReturnStatus, form.ReturnPage);
+    }
+
     private IActionResult RedirectWithToast(string kind, string message, string? status, int page)
     {
         TempData["Toast"] = message;

@@ -39,91 +39,113 @@
     }
 </nav>
 
-@if (Model.Cards.Count == 0)
-{
-    <div class="sv-panel sv-cards__empty">
-        <p class="sv-panel__empty">
-            @(Model.CountAll == 0
-                ? "No service providers have registered yet."
-                : "No providers match this filter.")
-        </p>
-    </div>
-}
-else
-{
-    <div class="sv-cards">
-        @foreach (var c in Model.Cards)
-        {
-            <article class="sv-pcard">
-                <div class="sv-pcard__head">
-                    <span class="sv-avatar sv-avatar--ink" aria-hidden="true">@c.Initials</span>
-                    <div>
-                        <h2 class="sv-pcard__name">@c.Name</h2>
-                        <div class="sv-pcard__biz">@c.BusinessName</div>
-                        @if (c.Details is not null)
-                        {
-                            <div class="sv-pcard__where">@c.Details</div>
-                        }
-                    </div>
-                </div>
-
-                @if (c.HasRating)
+@* Database v2.7: this area is fetched again when a provider sends, cancels or gets an answer to a day-off request
+   (admin-approval.js, pushed by SignalR), so a new request appears here without reloading the page. *@
+<div data-sv-dayoff-board="true" data-refresh-url="@Url.Action("Index", "AdminProviders", new { status = StatusParam(), page = Model.Page })">
+    @if (Model.WaitingDayOffs.Count > 0)
+    {
+        <section class="sv-panel sv-dow" aria-labelledby="sv-dow-title">
+            <h2 class="sv-dow__title" id="sv-dow-title">Day off requests waiting for you <span class="sv-tag sv-tag--pending">@Model.WaitingDayOffs.Count</span></h2>
+            <ul class="sv-dow__list">
+                @foreach (var w in Model.WaitingDayOffs)
                 {
-                    <div class="sv-pcard__rating">
-                        <span class="sv-stars" role="img" aria-label="@c.RatingText out of 5 stars">
-                            @for (var n = 1; n <= 5; n++)
+                    <li>
+                        <span class="sv-dow__who">@w.Name</span>
+                        <span class="sv-dow__when">@w.DatesText · @w.DaysText</span>
+                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                           href="@Url.Action("Details", "AdminProviders", new { providerId = w.ProviderId, status = StatusParam(), page = Model.Page })">Review</a>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (Model.Cards.Count == 0)
+    {
+        <div class="sv-panel sv-cards__empty">
+            <p class="sv-panel__empty">
+                @(Model.CountAll == 0
+                    ? "No service providers have registered yet."
+                    : "No providers match this filter.")
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="sv-cards">
+            @foreach (var c in Model.Cards)
+            {
+                <article class="sv-pcard">
+                    <div class="sv-pcard__head">
+                        <span class="sv-avatar sv-avatar--ink" aria-hidden="true">@c.Initials</span>
+                        <div>
+                            <h2 class="sv-pcard__name">@c.Name</h2>
+                            <div class="sv-pcard__biz">@c.BusinessName</div>
+                            @if (c.Details is not null)
                             {
-                                <span class="@(n <= c.StarsFilled ? "is-on" : "")">@Icons.Svg("star", 15, filled: true)</span>
+                                <div class="sv-pcard__where">@c.Details</div>
                             }
-                        </span>
-                        <span>@c.RatingText (@c.ReviewsText)</span>
+                        </div>
                     </div>
-                }
-                else if (c.ApprovalStatus == "Approved")
-                {
-                    <div class="sv-pcard__rating">No reviews yet</div>
-                }
 
-                <div class="sv-pcard__tags">
-                    @if (c.ServiceTags.Count > 0)
+                    @if (c.HasRating)
                     {
-                        foreach (var tag in c.ServiceTags)
-                        {
-                            <span class="sv-chip">@tag</span>
-                        }
-                        if (c.ExtraServices > 0)
-                        {
-                            <span class="sv-chip sv-chip--more">+@c.ExtraServices</span>
-                        }
+                        <div class="sv-pcard__rating">
+                            <span class="sv-stars" role="img" aria-label="@c.RatingText out of 5 stars">
+                                @for (var n = 1; n <= 5; n++)
+                                {
+                                    <span class="@(n <= c.StarsFilled ? "is-on" : "")">@Icons.Svg("star", 15, filled: true)</span>
+                                }
+                            </span>
+                            <span>@c.RatingText (@c.ReviewsText)</span>
+                        </div>
                     }
                     else if (c.ApprovalStatus == "Approved")
                     {
-                        <span class="sv-pcard__none">No services listed yet</span>
+                        <div class="sv-pcard__rating">No reviews yet</div>
                     }
-                </div>
 
-                <div class="sv-pcard__foot">
-                    <div class="sv-pcard__badges">
-                        @foreach (var b in c.Badges)
+                    <div class="sv-pcard__tags">
+                        @if (c.ServiceTags.Count > 0)
                         {
-                            <span class="sv-tag sv-tag--@b.Tone">@b.Text</span>
+                            foreach (var tag in c.ServiceTags)
+                            {
+                                <span class="sv-chip">@tag</span>
+                            }
+                            if (c.ExtraServices > 0)
+                            {
+                                <span class="sv-chip sv-chip--more">+@c.ExtraServices</span>
+                            }
+                        }
+                        else if (c.ApprovalStatus == "Approved")
+                        {
+                            <span class="sv-pcard__none">No services listed yet</span>
                         }
                     </div>
-                    @if (c.ApprovalStatus == "Pending")
-                    {
-                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
-                           href="@Url.Action("Review", "AdminApplications", new { providerId = c.ProviderId, returnTo = "providers", status = StatusParam(), page = Model.Page })">Review Application</a>
-                    }
-                    else
-                    {
-                        <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
-                           href="@Url.Action("Details", "AdminProviders", new { providerId = c.ProviderId, status = StatusParam(), page = Model.Page })">View Details</a>
-                    }
-                </div>
-            </article>
-        }
-    </div>
-}
+
+                    <div class="sv-pcard__foot">
+                        <div class="sv-pcard__badges">
+                            @foreach (var b in c.Badges)
+                            {
+                                <span class="sv-tag sv-tag--@b.Tone">@b.Text</span>
+                            }
+                        </div>
+                        @if (c.ApprovalStatus == "Pending")
+                        {
+                            <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                               href="@Url.Action("Review", "AdminApplications", new { providerId = c.ProviderId, returnTo = "providers", status = StatusParam(), page = Model.Page })">Review Application</a>
+                        }
+                        else
+                        {
+                            <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
+                               href="@Url.Action("Details", "AdminProviders", new { providerId = c.ProviderId, status = StatusParam(), page = Model.Page })">View Details</a>
+                        }
+                    </div>
+                </article>
+            }
+        </div>
+    }
+</div>
 
 @if (Model.PageCount > 1)
 {

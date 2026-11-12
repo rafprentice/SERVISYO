@@ -7,8 +7,6 @@
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "users";
 
-    var soon = "Available in an upcoming update";
-
     var tabs = new (string Key, string Label, int Count)[]
     {
         ("All", "All", Model.CountAll),
@@ -86,7 +84,8 @@
                     <td><span class="sv-tag sv-tag--@u.StatusTone">@u.Status</span></td>
                     <td class="sv-table__right">
                         <div class="sv-table__acts">
-                            <button type="button" class="sv-act sv-act--view" disabled title="@soon">View</button>
+                            <a class="sv-act sv-act--view" data-review-link="true" aria-label="View @u.Name"
+                               href="@Url.Action("Details", "AdminUsers", new { userId = u.UserId, q = Q(), status = StatusParam(), page = Model.Page })">View</a>
                             @foreach (var a in u.Actions)
                             {
                                 <button type="button" class="sv-act sv-act--@a.Tone"
@@ -151,6 +150,10 @@
     </form>
 </dialog>
 
+<!-- The "View" pop-up: admin-approval.js fills it with the customer's details. -->
+<partial name="_ApplicationReviewDialog" />
+
 @section Scripts {
     <script src="~/js/admin-users.js" asp-append-version="true"></script>
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
 }

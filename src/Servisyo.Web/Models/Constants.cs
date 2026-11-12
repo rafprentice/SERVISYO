@@ -38,6 +38,16 @@ public static class PaymentStatuses
     public const string Refunded = "Refunded";
 }
 
+/// A provider's day-off request (database v2.7, PROVIDER_DAY_OFF_REQUESTS.STATUS). Pending holds its dates (no other
+/// provider can ask for them) but does not stop bookings; Approved blocks bookings on its dates; Rejected gives the
+/// dates back (its days are deleted, the request stays as the record of the decision).
+public static class DayOffStatuses
+{
+    public const string Pending = "Pending";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+}
+
 public static class ReviewStatuses
 {
     public const string Visible = "Visible";

@@ -12,8 +12,10 @@ public static class NotificationKinds
     public const string ApplicationNew = "application-new";
     public const string Application = "application";
     public const string General = "general";
+    public const string DayOff = "day-off";              // v2.7: the provider's answer to a day-off request (or an extra day given)
+    public const string DayOffNew = "day-off-new";       // v2.7: the administrator's list of requests waiting for an answer
 
-    public static readonly IReadOnlyList<string> All = new[] { BookingNew, BookingCancelled, BookingUpdate, ApplicationNew, Application, General };
+    public static readonly IReadOnlyList<string> All = new[] { BookingNew, BookingCancelled, BookingUpdate, ApplicationNew, Application, General, DayOff, DayOffNew };
 
     /// The kind comes from dbo.usp_GetNotifications (database v2.3); anything unknown is shown as a general notification.
     public static string Normalize(string? kind) => All.Contains(kind ?? string.Empty) ? kind! : General;
@@ -25,13 +27,15 @@ public static class NotificationKinds
         BookingUpdate => "Booking Update",
         ApplicationNew => "New Provider Application",
         Application => "Provider Application",
+        DayOff => "Day Off",
+        DayOffNew => "Day Off Request",
         _ => "Notification"
     };
 
     /// The icon name (same names as the Icons helper).
     public static string IconOf(string kind) => kind switch
     {
-        BookingNew or BookingCancelled or BookingUpdate => "calendar",
+        BookingNew or BookingCancelled or BookingUpdate or DayOff or DayOffNew => "calendar",
         ApplicationNew or Application => "user",
         _ => "bell"
     };

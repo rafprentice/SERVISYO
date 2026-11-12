@@ -14,6 +14,7 @@ public class ServisyoDbContext : DbContext
     public DbSet<ProviderAvailability> ProviderAvailabilities => Set<ProviderAvailability>();
     public DbSet<ProviderBreak> ProviderBreaks => Set<ProviderBreak>();
     public DbSet<ProviderUnavailableDate> ProviderUnavailableDates => Set<ProviderUnavailableDate>();
+    public DbSet<ProviderDayOffRequest> DayOffRequests => Set<ProviderDayOffRequest>();   // v2.7
     public DbSet<ServiceCategory> ServiceCategories => Set<ServiceCategory>();
     public DbSet<ProviderCategory> ProviderCategories => Set<ProviderCategory>();
     public DbSet<Service> Services => Set<Service>();
@@ -28,6 +29,13 @@ public class ServisyoDbContext : DbContext
 
     /// CK_PROVIDERS_LIMITS (database v2.6): MAX_JOBS_PER_DAY from 1 to 20 (ProviderLimits.MaxJobsPerDay).
     public const string ProviderLimitsCheck = "[MIN_NOTICE_DAYS] >= 0 AND [MAX_JOBS_PER_DAY] BETWEEN 1 AND 20";
+
+    /// Database v2.7: the day-off requests.
+    public const string DayOffStatusCheck = "[STATUS] IN ('Pending','Approved','Rejected')";
+    /// A Pending request has no decision yet; an Approved or Rejected one points to the ADMIN_ACTIONS row that decided it.
+    public const string DayOffDecisionCheck = "([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL)";
+    /// A day off comes from a request OR from an administrator's extra day, never both.
+    public const string DayOffSourceCheck = "[REQUEST_ID] IS NULL OR [APPROVED_BY_ACTION_ID] IS NULL";
 
     /// CK_ADMIN_ACTIONS_TARGET (database v2.2): exactly one target column is filled, and it is the one TARGET_TYPE names.
     public const string AdminActionTargetCheck =
@@ -121,13 +129,33 @@ public class ServisyoDbContext : DbContext
 
         mb.Entity<ProviderUnavailableDate>(e =>
         {
-            e.ToTable("PROVIDER_UNAVAILABLE_DATES");
+            e.ToTable("PROVIDER_UNAVAILABLE_DATES", t => t.HasCheckConstraint("CK_PROVIDER_UNAVAILABLE_DATES_SOURCE", DayOffSourceCheck));   // v2.7
             e.HasOne(x => x.Provider).WithMany(p => p.UnavailableDates).HasForeignKey(x => x.ProviderId);
             e.HasIndex(x => new { x.ProviderId, x.UnavailableDate }).IsUnique();
             // database v2.5: only ONE provider can be off on any date (first come, first served) - the database refuses a second
             e.HasIndex(x => x.UnavailableDate).IsUnique();
             // database v2.4: an extra day off approved by an administrator points to the ADMIN_ACTIONS row that approved it
             e.HasOne(x => x.ApprovedBy).WithMany().HasForeignKey(x => x.ApprovedByActionId).OnDelete(DeleteBehavior.Restrict);
+            // database v2.7: a day of a provider's day-off request (no cascade: the app removes a request's days itself)
+            e.HasOne(x => x.Request).WithMany(r => r.Days).HasForeignKey(x => x.RequestId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // database v2.7: a provider's request for 1 to 7 days off (its days are PROVIDER_UNAVAILABLE_DATES rows)
+        mb.Entity<ProviderDayOffRequest>(e =>
+        {
+            e.ToTable("PROVIDER_DAY_OFF_REQUESTS", t =>
+            {
+                t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_STATUS", DayOffStatusCheck);
+                t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_DECISION", DayOffDecisionCheck);
+            });
+            e.HasKey(x => x.RequestId);
+            e.Property(x => x.Status).HasMaxLength(20).HasDefaultValue(DayOffStatuses.Pending);
+            e.Property(x => x.RequestedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+            e.HasOne(x => x.Provider).WithMany(p => p.DayOffRequests).HasForeignKey(x => x.ProviderId);
+            // the decision is in the admin history, which is never deleted with it; one admin action decides one request
+            e.HasOne(x => x.DecidedBy).WithMany().HasForeignKey(x => x.DecidedByActionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.DecidedByActionId).IsUnique();
+            e.HasIndex(x => new { x.ProviderId, x.Status });
         });
 
         mb.Entity<ServiceCategory>(e =>

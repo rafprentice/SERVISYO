@@ -259,10 +259,11 @@ public class NotificationServiceTests
 /// The stored procedures and the C# classes that read them must use the same column names (EF matches them by name).
 public class DerivedQueryColumnTests
 {
+    /// The procedure as the database has it now: the v2.7 version when database v2.7 changed it, otherwise v2.3.
     private static string ProcedureText(string name)
     {
-        var sql = Assert.Single(DerivedDataSql.CreateAll, s => s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\n")
-                                                            || s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\r\n"));
+        bool Is(string s) => s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\n") || s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\r\n");
+        var sql = DayOffRequestsSql.CreateAll.SingleOrDefault(Is) ?? Assert.Single(DerivedDataSql.CreateAll, Is);
         return sql.Replace("''", "'");
     }
 
@@ -298,7 +299,7 @@ public class DerivedQueryColumnTests
     public void TheNotificationKinds_OfTheProcedure_AreTheOnesTheAppKnows()
     {
         var sql = ProcedureText("usp_GetNotifications");
-        var kinds = Regex.Matches(sql, @"N'(booking-[a-z]+|application(?:-new)?|general)'").Select(m => m.Groups[1].Value).Distinct();
+        var kinds = Regex.Matches(sql, @"N'(booking-[a-z]+|application(?:-new)?|general|day-off(?:-new)?)'").Select(m => m.Groups[1].Value).Distinct();
         Assert.All(kinds, k => Assert.Contains(k, NotificationKinds.All));
         Assert.Equal(NotificationKinds.All.OrderBy(x => x), kinds.OrderBy(x => x));
     }

@@ -86,6 +86,44 @@ public class UsersPageViewModel
     public bool FlashIsError { get; set; }
 }
 
+/// The admin "View" pop-up of one customer (Users page).
+public class CustomerDetailsViewModel
+{
+    public PortalShellViewModel Shell { get; set; } = new() { Role = "Admin" };
+
+    public int UserId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Initials { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string StatusTone => Status switch
+    {
+        AccountStatuses.Active => "completed",     // green
+        AccountStatuses.Suspended => "pending",    // yellow
+        AccountStatuses.Deactivated => "danger",   // red
+        _ => "muted"
+    };
+
+    public string Email { get; set; } = string.Empty;
+    public string? Phone { get; set; }
+    public string? Address { get; set; }                   // the saved Cebu City address (CUSTOMERS.ADDRESS)
+    public string MemberSince { get; set; } = string.Empty;
+
+    public int TotalBookings { get; set; }
+    public IReadOnlyList<CustomerBookingLine> RecentBookings { get; set; } = Array.Empty<CustomerBookingLine>();
+
+    // remembered so "Close" comes back to the same filtered list
+    public string? ReturnQ { get; set; }
+    public string ReturnStatus { get; set; } = "All";
+    public int ReturnPage { get; set; } = 1;
+}
+
+/// One of the customer's recent bookings: "Pipe Leak Repair", "Marco's Plumbing", "Nov 20, 2026 · 9:00 AM", "₱800", "Accepted".
+public sealed record CustomerBookingLine(int BookingId, string ServiceTitle, string ProviderName, string WhenText, string AmountText, string Status, string Tone);
+
+public enum CustomerDetailsOutcome { Ok, NotAllowed, NotFound }
+
+public sealed record CustomerDetailsLookup(CustomerDetailsOutcome Outcome, CustomerDetailsViewModel? Details);
+
 public enum ChangeStatusOutcome { Success, NotAllowed, NotFound, InvalidTransition, ReasonTooLong }
 
 public sealed record ChangeStatusResult(ChangeStatusOutcome Outcome, string Message);

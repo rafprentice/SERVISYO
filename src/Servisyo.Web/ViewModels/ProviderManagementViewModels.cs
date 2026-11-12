@@ -73,4 +73,11 @@ public class ProvidersPageViewModel
     public int Page { get; set; } = 1;
     public int PageCount { get; set; } = 1;
     public IReadOnlyList<ProviderCardViewModel> Cards { get; set; } = Array.Empty<ProviderCardViewModel>();
+
+    /// Database v2.7: every day-off request still waiting for an answer (all providers, oldest first), so the
+    /// administrator can open it in one click. The page updates it live when a provider sends or cancels one.
+    public IReadOnlyList<WaitingDayOffLine> WaitingDayOffs { get; set; } = Array.Empty<WaitingDayOffLine>();
 }
+
+/// "Vincent Valencia · Dec 1 to Dec 7, 2026 · 7 days" - a request waiting for the administrator.
+public sealed record WaitingDayOffLine(int ProviderId, string Name, string DatesText, string DaysText);

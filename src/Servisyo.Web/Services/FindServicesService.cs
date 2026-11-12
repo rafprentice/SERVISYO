@@ -164,7 +164,7 @@ public class FindServicesService : IFindServicesService
             .Select(a => new { a.ProviderId, a.DayOfWeek, a.EndTime })
             .ToListAsync(ct);
         var lastDay = today.AddDays(AvailabilityHint.LookAheadDays);
-        var offRows = await _db.ProviderUnavailableDates.AsNoTracking()
+        var offRows = await _db.ProviderUnavailableDates.AsNoTracking().BlockingBookings()      // v2.7: not Pending requests
             .Where(u => ids.Contains(u.ProviderId) && u.UnavailableDate >= today && u.UnavailableDate <= lastDay)
             .Select(u => new { u.ProviderId, u.UnavailableDate })
             .ToListAsync(ct);

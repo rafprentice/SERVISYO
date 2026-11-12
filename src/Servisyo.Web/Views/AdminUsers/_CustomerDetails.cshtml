@@ -1,0 +1,81 @@
+@using Servisyo.Web.ViewModels
+@model CustomerDetailsViewModel
+@{
+    // Where "Close" goes when JavaScript is not opening this as a pop-up.
+    var closeUrl = Url.Action("Index", "AdminUsers", new { q = Model.ReturnQ, status = Model.ReturnStatus == "All" ? null : Model.ReturnStatus, page = Model.ReturnPage });
+}
+<div class="sv-rv sv-pd" data-sv-review>
+    <div class="sv-rv__head">
+        <div>
+            <h2 class="sv-rv__title" id="sv-rv-title">Customer Details</h2>
+            <p class="sv-rv__id">Contact details, saved address and booking activity</p>
+        </div>
+        <a class="sv-rv__x" href="@closeUrl" data-sv-close aria-label="Close">&times;</a>
+    </div>
+
+    <div class="sv-pd__banner">
+        <span class="sv-avatar sv-avatar--lg" aria-hidden="true">@Model.Initials</span>
+        <div class="sv-pd__who">
+            <div class="sv-pd__name">@Model.Name</div>
+            <div class="sv-pd__biz">Customer</div>
+        </div>
+        <div class="sv-pd__badges">
+            <span class="sv-tag sv-tag--@Model.StatusTone">@Model.Status</span>
+        </div>
+    </div>
+
+    <dl class="sv-pd__grid">
+        <div class="sv-pd__cell">
+            <dt>Email Address</dt>
+            <dd>@Model.Email</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Phone Number</dt>
+            <dd>@if (Model.Phone is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.Phone }</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Saved Address</dt>
+            <dd>@if (Model.Address is null) { <span class="sv-rv__none">Not provided</span> } else { @Model.Address }</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Member Since</dt>
+            <dd>@Model.MemberSince</dd>
+        </div>
+        <div class="sv-pd__cell">
+            <dt>Total Bookings</dt>
+            <dd>@Model.TotalBookings</dd>
+        </div>
+    </dl>
+
+    <div class="sv-pd__section">
+        <h3 class="sv-pd__h">Recent Bookings</h3>
+        @if (Model.RecentBookings.Count == 0)
+        {
+            <p class="sv-rv__none sv-pd__none">No bookings yet.</p>
+        }
+        else
+        {
+            <ul class="sv-cd__bookings">
+                @foreach (var b in Model.RecentBookings)
+                {
+                    <li>
+                        <div class="sv-cd__what">
+                            <span class="sv-cd__service">@b.ServiceTitle <span class="sv-cd__id">#@b.BookingId</span></span>
+                            <span class="sv-cd__meta">@b.ProviderName · @b.WhenText</span>
+                        </div>
+                        <span class="sv-cd__amount">@b.AmountText</span>
+                        <span class="sv-tag sv-tag--@b.Tone">@b.Status</span>
+                    </li>
+                }
+            </ul>
+            @if (Model.TotalBookings > Model.RecentBookings.Count)
+            {
+                <p class="sv-cd__more">Showing the newest @Model.RecentBookings.Count of @Model.TotalBookings bookings.</p>
+            }
+        }
+    </div>
+
+    <div class="sv-rv__foot">
+        <a class="sv-btn sv-btn--sm sv-btn--outline" href="@closeUrl" data-sv-close>Close</a>
+    </div>
+</div>

@@ -1,0 +1,15 @@
+@using Servisyo.Web.ViewModels
+@model CustomerDetailsViewModel
+@{
+    // The same content as the pop-up, shown as a normal page. It is used when JavaScript is off or could not open the pop-up.
+    ViewData["Title"] = "Customer Details";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "users";
+}
+
+<p class="sv-eyebrow">Accounts</p>
+
+<div class="sv-panel sv-rv-page">
+    <partial name="_CustomerDetails" model="Model" />
+</div>

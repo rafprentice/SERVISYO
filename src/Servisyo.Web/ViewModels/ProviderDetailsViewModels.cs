@@ -32,8 +32,10 @@ public class ProviderDetailsViewModel
     /// Only the buttons that make sense for the account's CURRENT status.
     public IReadOnlyList<UserActionInfo> Actions { get; set; } = Array.Empty<UserActionInfo>();
 
-    /// The provider's days off from today to December 31 (their own ones and extra days approved by an administrator).
+    /// The provider's days off from today to December 31: their requests (Pending ones first need an answer) and
+    /// single days (older days off, or extra days an administrator gave).
     public IReadOnlyList<ProviderDayOffLine> DaysOff { get; set; } = Array.Empty<ProviderDayOffLine>();
+    public int PendingRequests => DaysOff.Count(d => d.IsPending);
 
     /// "Approve an extra day off" is offered for approved providers; the date box allows today to December 31.
     public bool CanApproveDayOff { get; set; }
@@ -56,8 +58,26 @@ public sealed record ProviderDetailsLookup(ProviderDetailsOutcome Outcome, Provi
 
 /// What the browser posts to change a provider's account status. It says WHAT to do;
 /// WHO is doing it comes from the sign-in cookie, and WHICH provider is in the address.
-/// One day off in the admin pop-up: "Nov 20, 2026", the reason, and whether an administrator approved it as an extra day.
-public sealed record ProviderDayOffLine(string DateText, string? Reason, bool ApprovedByAdmin);
+/// One line of "Days Off" in the admin pop-up: a request ("Nov 20 to Nov 22, 2026", 3 days, Pending or Approved) or a
+/// single day ("Extra day off" given by an administrator, or an older "Day off" from before requests existed).
+public sealed record ProviderDayOffLine(int? RequestId, string DateText, string DaysText, string? Reason, string Label, string Tone, bool IsPending)
+{
+    public bool IsExtra => Label == ProviderDayOffLine.ExtraLabel;
+    public const string ExtraLabel = "Extra day off";
+}
+
+/// "Approve" / "Reject" on a provider's day-off request (admin pop-up). The administrator comes from the sign-in cookie;
+/// the provider and the request are in the address. Decision: "Approve" or "Reject".
+public class DayOffDecisionForm
+{
+    public string? Decision { get; set; }
+    public string? ReturnStatus { get; set; }
+    public int ReturnPage { get; set; } = 1;
+}
+
+public enum AdminDayOffOutcome { Success, NotAllowed, NotFound, Invalid }
+
+public sealed record AdminDayOffResult(AdminDayOffOutcome Outcome, string Message);
 
 /// "Approve an extra day off" (admin pop-up). The administrator comes from the sign-in cookie; the provider is in the address.
 public class ExtraDayOffForm

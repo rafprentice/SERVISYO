@@ -109,11 +109,30 @@
 
     connection.on("MessagesRead", function (data) { setMessageBadge(data && data.unreadTotal); });
 
+    // ---- day-off requests (database v2.7): a provider asked, cancelled, or an administrator answered.
+    // The bell asks for its news again, and the page's own script (admin-approval.js / provider-availability.js)
+    // fetches the Days Off list again when it shows the provider in { providerId }.
+    connection.on("dayOffChanged", function (data) {
+        document.dispatchEvent(new CustomEvent("sv:notifications-refresh"));
+        document.dispatchEvent(new CustomEvent("sv:dayoff-changed", { detail: data || {} }));
+    });
+
+    // other scripts check this before they fall back to asking the server every 30 seconds
+    function connected(on) { document.documentElement.setAttribute("data-sv-live-connected", on ? "true" : "false"); }
+    connection.onreconnecting(function () { connected(false); });
+    connection.onclose(function () { connected(false); });
+
     // after a lost connection, catch up once (something may have changed while we were away)
-    connection.onreconnected(function () { refresh({ bookingId: "" }); });
+    connection.onreconnected(function () {
+        connected(true);
+        refresh({ bookingId: "" });
+        document.dispatchEvent(new CustomEvent("sv:dayoff-changed", { detail: {} }));
+    });
 
     function start() {
-        connection.start().catch(function () { setTimeout(start, 10000); });   // server asleep / offline: try again later
+        connection.start()
+            .then(function () { connected(true); })
+            .catch(function () { setTimeout(start, 10000); });   // server asleep / offline: try again later
     }
     start();
 })();

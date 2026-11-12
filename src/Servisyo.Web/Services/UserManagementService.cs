@@ -11,6 +11,10 @@ public interface IUserManagementService
     /// The customer list for the admin Users page. Returns null when the signed-in user is not an Active administrator.
     Task<UsersPageViewModel?> GetCustomersAsync(int adminUserId, UserListQuery query, CancellationToken ct = default);
 
+    /// Everything the "View" pop-up shows for ONE customer: contact details, saved address and their recent bookings.
+    /// NotAllowed when the signed-in user is not an Active administrator; NotFound for anything that is not a customer.
+    Task<CustomerDetailsLookup> GetCustomerDetailsAsync(int adminUserId, int userId, CancellationToken ct = default);
+
     /// Suspend / deactivate / reactivate / restore ONE customer account and record it in ADMIN_ACTIONS.
     Task<ChangeStatusResult> ChangeStatusAsync(int adminUserId, int targetUserId, AccountAction action,
                                                string? reason, CancellationToken ct = default);
@@ -106,6 +110,64 @@ public class UserManagementService : IUserManagementService
                 };
             }).ToList()
         };
+    }
+
+    // ------------------------------------------------------------------ "View" pop-up
+
+    /// How many of the customer's bookings the pop-up lists (newest first); the total is counted separately.
+    public const int RecentBookingsShown = 5;
+    private const int ManilaOffsetHours = 8;          // the Philippines has no daylight saving
+
+    public async Task<CustomerDetailsLookup> GetCustomerDetailsAsync(int adminUserId, int userId, CancellationToken ct = default)
+    {
+        var shell = await AdminShell.BuildAsync(_db, adminUserId, ct);
+        if (shell is null) return new(CustomerDetailsOutcome.NotAllowed, null);
+
+        // only CUSTOMER accounts are shown here (the user id comes from the address, so it is checked)
+        var c = await _db.Customers.AsNoTracking()
+            .Where(x => x.UserId == userId && x.User.Role == Roles.Customer)
+            .Select(x => new
+            {
+                x.CustomerId, x.Address, x.User.FirstName, x.User.LastName, x.User.Email, x.User.PhoneNumber,
+                x.User.AccountStatus, x.User.CreatedAt
+            })
+            .FirstOrDefaultAsync(ct);
+        if (c is null) return new(CustomerDetailsOutcome.NotFound, null);
+
+        var total = await _db.Bookings.AsNoTracking().CountAsync(b => b.CustomerId == c.CustomerId, ct);
+        var recent = await _db.Bookings.AsNoTracking()
+            .Where(b => b.CustomerId == c.CustomerId)
+            .OrderByDescending(b => b.BookingDate).ThenByDescending(b => b.BookingTime).ThenByDescending(b => b.BookingId)
+            .Take(RecentBookingsShown)
+            .Select(b => new
+            {
+                b.BookingId, b.BookingDate, b.BookingTime, b.TotalFee, b.Status, Provider = b.Provider.BusinessName,
+                Services = b.Services.OrderBy(s => s.BookingServiceId).Select(s => s.Service.ServiceName).ToList()
+            })
+            .ToListAsync(ct);
+
+        var name = $"{c.FirstName} {c.LastName}".Trim();
+        return new(CustomerDetailsOutcome.Ok, new CustomerDetailsViewModel
+        {
+            Shell = shell,
+            UserId = userId,
+            Name = name,
+            Initials = NameFormat.Initials(name),
+            Status = c.AccountStatus,
+            Email = c.Email,
+            Phone = string.IsNullOrWhiteSpace(c.PhoneNumber) ? null : c.PhoneNumber.Trim(),
+            Address = string.IsNullOrWhiteSpace(c.Address) ? null : c.Address.Trim(),
+            MemberSince = c.CreatedAt.AddHours(ManilaOffsetHours).ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture),
+            TotalBookings = total,
+            RecentBookings = recent.Select(b => new CustomerBookingLine(
+                b.BookingId,
+                b.Services.Count == 0 ? "Service" : b.Services.Count == 1 ? b.Services[0] : $"{b.Services[0]} +{b.Services.Count - 1} more",
+                b.Provider,
+                BookingFormat.DateTimeText(b.BookingDate, b.BookingTime),
+                ServiceFormat.Peso(b.TotalFee),
+                b.Status,
+                ProviderBookingBadge.Tone(b.Status))).ToList()
+        });
     }
 
     // ---------------------------------------------------------------- change

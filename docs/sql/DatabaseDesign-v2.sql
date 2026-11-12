@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.6  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.7  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -15,7 +15,9 @@
    HOW THIS FILE IS USED
      - The web app applies PARTS 2-5 itself with the EF migrations "DatabaseV2", "ProfileCleanup", "AdminTargets" and "DerivedData" (dotnet ef database update);
        "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY, "OneDayOffPerDate" (v2.5) one UNIQUE index (PART 1),
-       "MaxJobsPerDay20" (v2.6) the 20-job limit (CK_PROVIDERS_LIMITS and usp_RegisterProvider):
+       "MaxJobsPerDay20" (v2.6) the 20-job limit (CK_PROVIDERS_LIMITS and usp_RegisterProvider), "DayOffRequests"
+       (v2.7) the table PROVIDER_DAY_OFF_REQUESTS, the column PROVIDER_UNAVAILABLE_DATES.REQUEST_ID (PART 1) and the
+       new versions of fn_IsProviderAvailable, usp_CreateBooking and usp_GetNotifications:
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -102,6 +104,26 @@
      - usp_RegisterProvider: THROW 50110 for anything outside 1 to 20 (was 1 to 50).
      - Providers saved with more than 20 are set to 20 by the migration (tools\set-max-jobs-20.ps1 lists them and
        asks first).
+
+   WHAT CHANGED IN v2.7 (EF migration "DayOffRequests") - providers REQUEST days off, an administrator answers
+     - New table PROVIDER_DAY_OFF_REQUESTS: one row per request (PROVIDER_ID, REASON, STATUS, REQUESTED_AT,
+       DECIDED_BY_ACTION_ID). CHECK CK_PROVIDER_DAY_OFF_REQUESTS_STATUS: Pending, Approved or Rejected.
+       CHECK CK_PROVIDER_DAY_OFF_REQUESTS_DECISION: a Pending request has no decision yet; an Approved or Rejected one
+       REFERENCES the ADMIN_ACTIONS row that decided it (who, when; FOREIGN KEY, no cascade, UNIQUE: one action
+       decides one request). Nothing is copied: the dates are the request's PROVIDER_UNAVAILABLE_DATES rows.
+     - PROVIDER_UNAVAILABLE_DATES.REQUEST_ID (nullable FOREIGN KEY -> PROVIDER_DAY_OFF_REQUESTS, no cascade): the days
+       of a request, one row per date, so the v2.5 UNIQUE index still allows only one provider per date - a Pending
+       request already holds its dates (first come, first served). CHECK CK_PROVIDER_UNAVAILABLE_DATES_SOURCE: a day
+       comes from a request OR is an administrator's extra day (APPROVED_BY_ACTION_ID), never both.
+     - A request covers 1 to 7 days in a row ("Maximum Day Off is 1 week or 7 days"), from tomorrow to December 31,
+       never a day with an active booking, one waiting request per provider at a time (all checked by the app).
+       The 5-days-a-month limit of v2.4 is gone: the administrator decides.
+     - Which days stop bookings: a day without a request (older days off, extra days) or a day of an APPROVED
+       request. fn_IsProviderAvailable and usp_CreateBooking now check exactly that (a Pending request does not
+       block yet). Rejecting a request deletes its days, so the dates are free again; the request row stays as the
+       record of the decision.
+     - usp_GetNotifications: providers see the answer to their request (and an extra day an administrator gave);
+       administrators see every request that is still Pending.
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -119,9 +141,10 @@ BEGIN
     SET NOEXEC ON;
 END
 GO
--- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), so the EF migration comes first
+-- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), and v2.7 reads the table and
+-- column of the "DayOffRequests" migration, so the EF migrations come first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]DerivedData')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]DayOffRequests')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -234,17 +257,39 @@ CREATE TABLE PROVIDER_BREAKS (
 );
 CREATE INDEX IX_PROVIDER_BREAKS_AVAILABILITY_ID ON PROVIDER_BREAKS (AVAILABILITY_ID);
 
+-- v2.7: a provider's request for 1 to 7 days off; its dates are its PROVIDER_UNAVAILABLE_DATES rows (below)
+CREATE TABLE PROVIDER_DAY_OFF_REQUESTS (
+    REQUEST_ID                   INT             IDENTITY(1,1) NOT NULL,
+    DECIDED_BY_ACTION_ID         INT             NULL,              -- the administrator's answer (NULL while Pending)
+    PROVIDER_ID                  INT             NOT NULL,
+    REASON                       NVARCHAR(255)   NULL,
+    REQUESTED_AT                 DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
+    STATUS                       NVARCHAR(20)    NOT NULL DEFAULT N'Pending',
+    CONSTRAINT PK_PROVIDER_DAY_OFF_REQUESTS PRIMARY KEY (REQUEST_ID),
+    CONSTRAINT FK_PROVIDER_DAY_OFF_REQUESTS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID) ON DELETE CASCADE,
+    CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_STATUS CHECK ([STATUS] IN ('Pending','Approved','Rejected')),
+    CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_DECISION CHECK (([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL))
+);
+CREATE UNIQUE INDEX IX_PROVIDER_DAY_OFF_REQUESTS_DECIDED_BY_ACTION_ID ON PROVIDER_DAY_OFF_REQUESTS (DECIDED_BY_ACTION_ID) WHERE [DECIDED_BY_ACTION_ID] IS NOT NULL;
+CREATE INDEX IX_PROVIDER_DAY_OFF_REQUESTS_PROVIDER_ID_STATUS ON PROVIDER_DAY_OFF_REQUESTS (PROVIDER_ID, STATUS);
+-- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
+
 CREATE TABLE PROVIDER_UNAVAILABLE_DATES (
     UNAVAILABLE_ID               INT             IDENTITY(1,1) NOT NULL,
     APPROVED_BY_ACTION_ID        INT             NULL,              -- v2.4: an extra day approved by an administrator
     PROVIDER_ID                  INT             NOT NULL,
     REASON                       NVARCHAR(255)   NULL,
+    REQUEST_ID                   INT             NULL,              -- v2.7: a day of a provider's day-off request
     UNAVAILABLE_DATE             DATE            NOT NULL,
     CONSTRAINT PK_PROVIDER_UNAVAILABLE_DATES PRIMARY KEY (UNAVAILABLE_ID),
-    CONSTRAINT FK_PROVIDER_UNAVAILABLE_DATES_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID)
+    CONSTRAINT FK_PROVIDER_UNAVAILABLE_DATES_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID),
+    CONSTRAINT FK_PROVIDER_UNAVAILABLE_DATES_PROVIDER_DAY_OFF_REQUESTS_REQUEST_ID FOREIGN KEY (REQUEST_ID) REFERENCES PROVIDER_DAY_OFF_REQUESTS(REQUEST_ID),
+    -- v2.7: a day comes from a request OR is an administrator's extra day, never both
+    CONSTRAINT CK_PROVIDER_UNAVAILABLE_DATES_SOURCE CHECK ([REQUEST_ID] IS NULL OR [APPROVED_BY_ACTION_ID] IS NULL)
 );
 CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_PROVIDER_ID_UNAVAILABLE_DATE ON PROVIDER_UNAVAILABLE_DATES (PROVIDER_ID, UNAVAILABLE_DATE);
 CREATE INDEX IX_PROVIDER_UNAVAILABLE_DATES_APPROVED_BY_ACTION_ID ON PROVIDER_UNAVAILABLE_DATES (APPROVED_BY_ACTION_ID);
+CREATE INDEX IX_PROVIDER_UNAVAILABLE_DATES_REQUEST_ID ON PROVIDER_UNAVAILABLE_DATES (REQUEST_ID);
 CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE ON PROVIDER_UNAVAILABLE_DATES (UNAVAILABLE_DATE);   -- v2.5: one provider off per day
 -- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
@@ -412,6 +457,9 @@ CREATE INDEX IX_ADMIN_ACTIONS_TARGET_REVIEW_ID ON ADMIN_ACTIONS (TARGET_REVIEW_I
 -- v2.4 (EF migration "ExtraDayOff")
 ALTER TABLE PROVIDER_UNAVAILABLE_DATES ADD CONSTRAINT FK_PROVIDER_UNAVAILABLE_DATES_ADMIN_ACTIONS_APPROVED_BY_ACTION_ID
     FOREIGN KEY (APPROVED_BY_ACTION_ID) REFERENCES ADMIN_ACTIONS(ACTION_ID);
+-- v2.7 (EF migration "DayOffRequests")
+ALTER TABLE PROVIDER_DAY_OFF_REQUESTS ADD CONSTRAINT FK_PROVIDER_DAY_OFF_REQUESTS_ADMIN_ACTIONS_DECIDED_BY_ACTION_ID
+    FOREIGN KEY (DECIDED_BY_ACTION_ID) REFERENCES ADMIN_ACTIONS(ACTION_ID);
 
 CREATE TABLE SYSTEM_LOGS (
     SYSTEM_LOG_ID                INT             IDENTITY(1,1) NOT NULL,
@@ -537,7 +585,8 @@ BEGIN
     DECLARE @AvailabilityId INT;
 
     IF EXISTS (SELECT 1 FROM dbo.PROVIDER_UNAVAILABLE_DATES u
-               WHERE u.PROVIDER_ID = @ProviderId AND u.UNAVAILABLE_DATE = @BookingDate)
+               WHERE u.PROVIDER_ID = @ProviderId AND u.UNAVAILABLE_DATE = @BookingDate
+                 AND (u.REQUEST_ID IS NULL OR EXISTS (SELECT 1 FROM dbo.PROVIDER_DAY_OFF_REQUESTS r WHERE r.REQUEST_ID = u.REQUEST_ID AND r.STATUS = N'Approved')))   -- v2.7: a Pending day-off request does not block yet
         RETURN 0;
 
     SELECT @AvailabilityId = a.AVAILABILITY_ID
@@ -1453,7 +1502,8 @@ BEGIN
             THROW 50137, N'That date is too soon for this provider''s minimum notice (or it has passed). Please pick a later date.', 1;
         IF @BookingDate > DATEADD(DAY, 90, @Today)
             THROW 50137, N'Bookings can only be made up to 90 days ahead.', 1;
-        IF EXISTS (SELECT 1 FROM dbo.PROVIDER_UNAVAILABLE_DATES WHERE PROVIDER_ID = @ProviderId AND UNAVAILABLE_DATE = @BookingDate)
+        IF EXISTS (SELECT 1 FROM dbo.PROVIDER_UNAVAILABLE_DATES u WHERE u.PROVIDER_ID = @ProviderId AND u.UNAVAILABLE_DATE = @BookingDate
+                   AND (u.REQUEST_ID IS NULL OR EXISTS (SELECT 1 FROM dbo.PROVIDER_DAY_OFF_REQUESTS r WHERE r.REQUEST_ID = u.REQUEST_ID AND r.STATUS = N'Approved')))   -- v2.7: a Pending day-off request does not block yet
             THROW 50137, N'The provider is not available on that date.', 1;
         IF NOT EXISTS (SELECT 1 FROM dbo.PROVIDER_AVAILABILITY
                        WHERE PROVIDER_ID = @ProviderId AND DAY_OF_WEEK = dbo.fn_DayOfWeek(@BookingDate) AND IS_AVAILABLE = 1)
@@ -2025,6 +2075,18 @@ BEGIN
         JOIN dbo.USERS cu ON cu.USER_ID = c.USER_ID
         WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId AND r.STATUS <> N'Removed'
         UNION ALL
+        -- provider: the answer to a day-off request, or a day off an administrator gave (v2.7)
+        SELECT CONCAT(N'D', a.ACTION_ID), 1, N'day-off',
+               CASE a.ACTION_TYPE
+                    WHEN N'Day Off Approved' THEN CONCAT(N'Your day off request for ', a.REASON, N' was approved.')
+                    WHEN N'Day Off Rejected' THEN CONCAT(N'Your day off request for ', a.REASON, N' was not approved, so you stay available on those days.')
+                    ELSE CONCAT(N'An administrator gave you a day off: ', a.REASON, N'.')
+               END,
+               a.CREATED_AT, NULL
+        FROM dbo.ADMIN_ACTIONS a
+        WHERE @Role = N'Service Provider' AND a.TARGET_PROVIDER_ID = @ProviderId
+          AND a.ACTION_TYPE IN (N'Day Off Approved', N'Day Off Rejected', N'Extra Day Off Approved')
+        UNION ALL
         -- provider: the administrator's decision on the application (only the latest one is shown)
         SELECT N'A', 1, N'application',
                CONCAT(N'Your provider application was ', a.ACTION_TYPE, N'.'),
@@ -2040,6 +2102,20 @@ BEGIN
         FROM dbo.SERVICE_PROVIDERS sp
         JOIN dbo.USERS pu ON pu.USER_ID = sp.USER_ID
         WHERE @Role = N'Administrator' AND sp.APPROVAL_STATUS = N'Pending'
+        UNION ALL
+        -- administrator: every day-off request that is still Pending (v2.7)
+        SELECT CONCAT(N'Q', r.REQUEST_ID), 1, N'day-off-new',
+               CONCAT(pu.FIRST_NAME, N' ', pu.LAST_NAME, N' (', sp.BUSINESS_NAME, N') asks for a day off: ',
+                      FORMAT(d.FIRST_DAY, 'MMM d, yyyy', 'en-US'),
+                      CASE WHEN d.DAYS > 1 THEN CONCAT(N' to ', FORMAT(d.LAST_DAY, 'MMM d, yyyy', 'en-US'), N' (', d.DAYS, N' days)') ELSE N'' END,
+                      N'. Open Providers to approve or reject it.'),
+               r.REQUESTED_AT, NULL
+        FROM dbo.PROVIDER_DAY_OFF_REQUESTS r
+        JOIN dbo.SERVICE_PROVIDERS sp ON sp.PROVIDER_ID = r.PROVIDER_ID
+        JOIN dbo.USERS pu ON pu.USER_ID = sp.USER_ID
+        CROSS APPLY (SELECT MIN(u.UNAVAILABLE_DATE) AS FIRST_DAY, MAX(u.UNAVAILABLE_DATE) AS LAST_DAY, COUNT(*) AS DAYS
+                     FROM dbo.PROVIDER_UNAVAILABLE_DATES u WHERE u.REQUEST_ID = r.REQUEST_ID) d
+        WHERE @Role = N'Administrator' AND r.STATUS = N'Pending'
     ),
     Latest AS (
         -- one row per group: the newest news of each booking (ties: the payment / cancellation wins)

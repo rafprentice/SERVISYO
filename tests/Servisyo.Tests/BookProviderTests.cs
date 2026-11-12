@@ -731,6 +731,31 @@ public class BookProviderServiceTests
     }
 
     [Fact]
+    public async Task APendingDayOffRequest_DoesNotStopBookings_AnApprovedOneDoes()
+    {
+        // database v2.7: the day of a request blocks bookings only once an administrator approved it
+        var (svc, db) = Create();
+        var (c, p, s) = await StandardAsync(db);
+        var request = new ProviderDayOffRequest { ProviderId = p.ProviderId, Status = DayOffStatuses.Pending };
+        request.Days.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = Tuesday });
+        db.DayOffRequests.Add(request);
+        await db.SaveChangesAsync();
+
+        Assert.Equal(BookOutcome.Created, (await svc.CreateAsync(c.UserId, p.ProviderId, Form(s, new TimeOnly(9, 0)))).Outcome);
+
+        var admin = new User { FirstName = "Ada", LastName = "Admin", Email = $"{Guid.NewGuid():N}@test.com", PasswordHash = "x", Role = Roles.Administrator, AccountStatus = AccountStatuses.Active };
+        db.Users.Add(admin);
+        await db.SaveChangesAsync();
+        request.Status = DayOffStatuses.Approved;
+        request.DecidedBy = AdminAction.ForProvider(admin.UserId, "Day Off Approved", p.ProviderId, "Oct 20, 2026");
+        await db.SaveChangesAsync();
+
+        var refused = await svc.CreateAsync(c.UserId, p.ProviderId, Form(s, new TimeOnly(14, 0)));
+        Assert.Equal(BookingSlotRules.Explain(SlotCheck.DayOff, 1), refused.FieldErrors["Date"]);
+        Assert.Single(db.Bookings);
+    }
+
+    [Fact]
     public async Task Create_RefusesTimesOutsideTheWorkingHours_OrInsideABreak()
     {
         var (svc, db) = Create();

@@ -21,11 +21,15 @@ public interface IProviderManagementService
     /// their Accepted / In Progress bookings in the message so the administrator can follow them up.
     Task<ChangeStatusResult> ChangeStatusAsync(int adminUserId, int providerId, AccountAction action, string? reason, CancellationToken ct = default);
 
-    /// An emergency (for example the provider is sick) beyond the provider's 5 days off a month: the administrator
-    /// marks the day off for them. The ADMIN_ACTIONS row (who, when, why) and the PROVIDER_UNAVAILABLE_DATES row that
-    /// points to it are saved together; that day does not count toward the provider's 5. Refused on a day with an
-    /// active booking, like the provider's own days off.
+    /// An emergency (for example the provider is sick today, which they cannot request themselves): the administrator
+    /// gives the day off at once. The ADMIN_ACTIONS row (who, when, why) and the PROVIDER_UNAVAILABLE_DATES row that
+    /// points to it are saved together. Refused on a day with an active booking or a day another provider has.
     Task<ExtraDayOffResult> ApproveExtraDayOffAsync(int adminUserId, int providerId, DateOnly? date, string? reason, CancellationToken ct = default);
+
+    /// Database v2.7: approve or reject a provider's Pending day-off request, with an ADMIN_ACTIONS row saved in the
+    /// same transaction. Approving blocks bookings on its days (refused while a day has an active booking);
+    /// rejecting deletes its days, so the provider stays bookable and other providers can ask for those dates.
+    Task<AdminDayOffResult> DecideDayOffRequestAsync(int adminUserId, int providerId, int requestId, bool approve, CancellationToken ct = default);
 }
 
 public class ProviderManagementService : IProviderManagementService
@@ -44,6 +48,13 @@ public class ProviderManagementService : IProviderManagementService
     /// ADMIN_ACTIONS.ACTION_TYPE of an approved extra day off.
     public const string ExtraDayOffActionType = "Extra Day Off Approved";
 
+    /// The badge on a provider's card while one of their day-off requests waits for an answer (database v2.7).
+    public const string DayOffRequestBadge = "Day off request";
+
+    /// ADMIN_ACTIONS.ACTION_TYPE of the answer to a day-off request (database v2.7); REASON holds its dates.
+    public const string DayOffApprovedActionType = "Day Off Approved";
+    public const string DayOffRejectedActionType = "Day Off Rejected";
+
     /// The reason is also written to ADMIN_ACTIONS.REASON (255) after the date ("Nov 20, 2026: "), so it is kept shorter.
     public const int MaxExtraDayReasonLength = 200;
 
@@ -51,12 +62,20 @@ public class ProviderManagementService : IProviderManagementService
     private readonly TimeProvider _clock;
     private readonly ILogger<ProviderManagementService> _logger;
 
-    public ProviderManagementService(ServisyoDbContext db, ILogger<ProviderManagementService>? logger = null, TimeProvider? clock = null)
+    private readonly IDayOffLiveUpdates? _live;
+
+    public ProviderManagementService(ServisyoDbContext db, ILogger<ProviderManagementService>? logger = null, TimeProvider? clock = null,
+        IDayOffLiveUpdates? live = null)
     {
         _db = db;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ProviderManagementService>.Instance;
+        _live = live;
     }
+
+    /// Every administrator's open pages and the provider's own pages show the change at once (database v2.7).
+    private Task PushDayOffAsync(int providerId, int providerUserId, string what) =>
+        _live?.DayOffChangedAsync(providerId, providerUserId, what) ?? Task.CompletedTask;
 
     private DateOnly TodayInCebu() => DateOnly.FromDateTime(_clock.GetUtcNow().ToOffset(TimeSpan.FromHours(ManilaOffsetHours)).DateTime);
 
@@ -107,6 +126,22 @@ public class ProviderManagementService : IProviderManagementService
             .Select(pc => new { pc.ProviderId, Category = pc.Category.CategoryName })
             .ToListAsync(ct);
 
+        // Database v2.7: the day-off requests still waiting for an answer (all providers): the list at the top and
+        // a "Day off request" badge on the cards of this page.
+        var today = TodayInCebu();
+        var waitingDays = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.RequestId != null && d.Request!.Status == DayOffStatuses.Pending)
+            .Select(d => new { RequestId = d.RequestId!.Value, d.ProviderId, d.UnavailableDate, RequestedAt = d.Request!.RequestedAt,
+                               d.Provider.User.FirstName, d.Provider.User.LastName })
+            .ToListAsync(ct);
+        var waiting = waitingDays.GroupBy(d => d.RequestId)
+            .Select(g => new { g.First().ProviderId, g.First().RequestedAt, First = g.Min(d => d.UnavailableDate), Last = g.Max(d => d.UnavailableDate),
+                               Days = g.Count(), Name = $"{g.First().FirstName} {g.First().LastName}".Trim() })
+            .Where(w => w.Last >= today)
+            .OrderBy(w => w.RequestedAt).ThenBy(w => w.First)
+            .ToList();
+        var waitingProviders = waiting.Select(w => w.ProviderId).ToHashSet();
+
         var cards = rows.Select(r =>
         {
             var name = $"{r.First} {r.Last}".Trim();
@@ -120,6 +155,7 @@ public class ProviderManagementService : IProviderManagementService
             var badges = new List<ProviderBadge> { ApprovalBadge(r.ApprovalStatus) };
             if (r.Account == AccountStatuses.Suspended) badges.Add(new("Suspended", "danger"));
             else if (r.Account == AccountStatuses.Deactivated) badges.Add(new("Deactivated", "muted"));
+            if (waitingProviders.Contains(r.ProviderId)) badges.Add(new(DayOffRequestBadge, "pending"));
 
             return new ProviderCardViewModel
             {
@@ -150,7 +186,8 @@ public class ProviderManagementService : IProviderManagementService
             TotalMatching = matching,
             Page = page,
             PageCount = pageCount,
-            Cards = cards
+            Cards = cards,
+            WaitingDayOffs = waiting.Select(w => new WaitingDayOffLine(w.ProviderId, w.Name, DayOffFormat.Range(w.First, w.Last), DayOffFormat.Days(w.Days))).ToList()
         };
     }
 
@@ -190,11 +227,7 @@ public class ProviderManagementService : IProviderManagementService
 
         var today = TodayInCebu();
         var lastDay = UnavailableDateRules.LastAllowed(today);
-        var daysOff = await _db.ProviderUnavailableDates.AsNoTracking()
-            .Where(d => d.ProviderId == providerId && d.UnavailableDate >= today && d.UnavailableDate <= lastDay)
-            .OrderBy(d => d.UnavailableDate)
-            .Select(d => new { d.UnavailableDate, d.Reason, Approved = d.ApprovedByActionId != null })
-            .ToListAsync(ct);
+        var daysOff = await DayOffLinesAsync(providerId, today, ct);
 
         var name = $"{p.First} {p.Last}".Trim();
         var category = declared ?? services.Select(s => s.Category).FirstOrDefault();
@@ -226,8 +259,7 @@ public class ProviderManagementService : IProviderManagementService
             Services = services.Select(s => new ProviderServiceLine(
                 s.ServiceName, s.Category, ServiceFormat.Peso(s.Price), ServiceFormat.Duration(s.DurationMinutes))).ToList(),
             Actions = AccountTransitions.AvailableFor(p.Account).Select(UserActionInfo.For).ToList(),
-            DaysOff = daysOff.Select(d => new ProviderDayOffLine(
-                d.UnavailableDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture), d.Reason, d.Approved)).ToList(),
+            DaysOff = daysOff,
             CanApproveDayOff = p.ApprovalStatus == ApprovalStatuses.Approved,
             DayOffMin = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             DayOffMax = lastDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
@@ -277,15 +309,17 @@ public class ProviderManagementService : IProviderManagementService
         if (provider.ApprovalStatus != ApprovalStatuses.Approved)
             return new(ExtraDayOffOutcome.Invalid, $"{name} is not an approved provider, so there is no schedule to change.");
 
-        // 4. Not a day that is already off, and not a day with an active booking (a customer is waiting for them).
+        // 4. Not a day that is already off (or asked for), and not a day with an active booking (a customer is waiting for them).
         var existing = await _db.ProviderUnavailableDates.AsNoTracking()
             .Where(d => d.ProviderId == providerId && d.UnavailableDate == day)
-            .Select(d => new { Approved = d.ApprovedByActionId != null })
+            .Select(d => new { Approved = d.ApprovedByActionId != null, Pending = d.RequestId != null && d.Request!.Status == DayOffStatuses.Pending })
             .FirstOrDefaultAsync(ct);
         if (existing is not null)
             return new(ExtraDayOffOutcome.Invalid, existing.Approved
                 ? $"An extra day off on {label} was already approved for {name}."
-                : $"{name} has already marked {label} as a day off.");
+                : existing.Pending
+                    ? $"{name} already asked for {label} off. Approve their request in the Days Off list instead."
+                    : $"{name} has already marked {label} as a day off.");
 
         // only ONE provider can be off on any date (database v2.5), an administrator's approval included
         var other = await _db.ProviderUnavailableDates.AsNoTracking()
@@ -328,8 +362,117 @@ public class ProviderManagementService : IProviderManagementService
         }
 
         _logger.LogInformation("Admin {AdminUserId} approved an extra day off for provider {ProviderId} on {Date}.", adminUserId, providerId, day);
-        return new(ExtraDayOffOutcome.Success,
-            $"Extra day off approved for {name} on {label}. It does not count toward their {UnavailableDateRules.MaxPerMonth} days that month.");
+        await PushDayOffAsync(providerId, provider.UserId, "extra-day");
+        return new(ExtraDayOffOutcome.Success, $"Extra day off approved for {name} on {label}. Customers cannot book them on that day.");
+    }
+
+    // ------------------------------------------------------------------ approve / reject a day-off request (v2.7)
+
+    public async Task<AdminDayOffResult> DecideDayOffRequestAsync(int adminUserId, int providerId, int requestId, bool approve, CancellationToken ct = default)
+    {
+        // 1. The actor must be an Active administrator (checked in the database, not trusted from the browser).
+        var isAdmin = await _db.Users.AsNoTracking().AnyAsync(u => u.UserId == adminUserId
+            && u.Role == Roles.Administrator && u.AccountStatus == AccountStatuses.Active, ct);
+        if (!isAdmin)
+        {
+            _logger.LogWarning("Day off decision refused: user {UserId} is not an active administrator.", adminUserId);
+            return new(AdminDayOffOutcome.NotAllowed, "You don't have permission to do that.");
+        }
+
+        var today = TodayInCebu();
+
+        // Serializable: "no active booking on these days" is checked and the approval saved as ONE step, so a customer
+        // cannot book one of the days in between (BookProviderService reads the days off the same way).
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+
+        // 2. The request must belong to THIS provider (both come from the address and are checked together).
+        var request = await _db.DayOffRequests
+            .Include(r => r.Days)
+            .Include(r => r.Provider).ThenInclude(p => p.User)
+            .FirstOrDefaultAsync(r => r.RequestId == requestId && r.ProviderId == providerId, ct);
+        if (request is null || (request.Days.Count == 0 && request.Status == DayOffStatuses.Pending))
+            return new(AdminDayOffOutcome.NotFound, "That day off request was not found. It may have been cancelled by the provider.");
+
+        var name = $"{request.Provider.User.FirstName} {request.Provider.User.LastName}".Trim();
+        if (request.Status != DayOffStatuses.Pending)
+            return new(AdminDayOffOutcome.Invalid, $"This day off request of {name} was already {request.Status.ToLowerInvariant()}.");
+
+        var first = request.Days.Min(d => d.UnavailableDate);
+        var last = request.Days.Max(d => d.UnavailableDate);
+        var rangeText = DayOffFormat.Range(first, last);
+        var daysText = DayOffFormat.Days(request.Days.Count);
+
+        // 3. Approving: no active booking on any of its days from today on (a customer is waiting for the provider).
+        if (approve)
+        {
+            var dates = request.Days.Where(d => d.UnavailableDate >= today).Select(d => d.UnavailableDate).ToList();
+            var job = await _db.Bookings.AsNoTracking()
+                .Where(b => b.ProviderId == providerId && dates.Contains(b.BookingDate) && ActiveBookingRules.Statuses.Contains(b.Status))
+                .OrderBy(b => b.BookingDate).ThenBy(b => b.BookingTime)
+                .Select(b => new { b.BookingId, b.Status, b.BookingDate })
+                .FirstOrDefaultAsync(ct);
+            if (job is not null)
+                return new(AdminDayOffOutcome.Invalid,
+                    $"{name} has booking #{job.BookingId} ({job.Status}) on {DayOffFormat.Date(job.BookingDate)}. That booking has to be settled first (or reject the request), so the customer is not left without a provider.");
+        }
+
+        // 4. The admin log entry and the answer that points to it: one SaveChanges = one database transaction.
+        var adminLog = AdminAction.ForProvider(adminUserId, approve ? DayOffApprovedActionType : DayOffRejectedActionType, providerId, rangeText);
+        adminLog.CreatedAt = DateTime.UtcNow;
+        _db.AdminActions.Add(adminLog);
+        request.Status = approve ? DayOffStatuses.Approved : DayOffStatuses.Rejected;
+        request.DecidedBy = adminLog;
+        if (!approve) _db.ProviderUnavailableDates.RemoveRange(request.Days);       // the dates are free again
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogWarning(ex, "The decision on day off request {RequestId} was not saved.", requestId);
+            return new(AdminDayOffOutcome.Invalid, $"The answer to {name}'s request could not be saved. Please open the provider again and retry.");
+        }
+
+        _logger.LogInformation("Admin {AdminUserId} {Decision} day off request {RequestId} of provider {ProviderId} ({Dates}).",
+            adminUserId, approve ? "approved" : "rejected", requestId, providerId, rangeText);
+        await PushDayOffAsync(providerId, request.Provider.UserId, approve ? "approved" : "rejected");
+        return new(AdminDayOffOutcome.Success, approve
+            ? $"Day off approved for {name}: {rangeText} ({daysText}). Customers cannot book them on those days."
+            : $"Day off request of {name} for {rangeText} was rejected. They stay available on those days.");
+    }
+
+    /// The admin pop-up's "Days Off": requests (Pending first in the eye: they need an answer) and single days, by date.
+    private async Task<IReadOnlyList<ProviderDayOffLine>> DayOffLinesAsync(int providerId, DateOnly today, CancellationToken ct)
+    {
+        var rows = await _db.ProviderUnavailableDates.AsNoTracking()
+            .Where(d => d.ProviderId == providerId)
+            .Select(d => new
+            {
+                d.UnavailableDate, d.Reason, d.RequestId,
+                Status = d.Request != null ? d.Request.Status : null,
+                RequestReason = d.Request != null ? d.Request.Reason : null,
+                ByAdmin = d.ApprovedByActionId != null
+            })
+            .ToListAsync(ct);
+
+        var lines = new List<(DateOnly First, ProviderDayOffLine Line)>();
+        foreach (var g in rows.Where(r => r.RequestId != null).GroupBy(r => r.RequestId!.Value))
+        {
+            var first = g.Min(r => r.UnavailableDate);
+            var last = g.Max(r => r.UnavailableDate);
+            if (last < today) continue;
+            var pending = g.First().Status == DayOffStatuses.Pending;
+            lines.Add((first, new ProviderDayOffLine(g.Key, DayOffFormat.Range(first, last), DayOffFormat.Days(g.Count()), g.First().RequestReason,
+                pending ? UnavailableDateRules.PendingLabel : UnavailableDateRules.ApprovedLabel, pending ? "pending" : "completed", pending)));
+        }
+        foreach (var r in rows.Where(r => r.RequestId == null && r.UnavailableDate >= today))
+            lines.Add((r.UnavailableDate, new ProviderDayOffLine(null, DayOffFormat.Date(r.UnavailableDate), DayOffFormat.Days(1), r.Reason,
+                r.ByAdmin ? ProviderDayOffLine.ExtraLabel : "Day off", r.ByAdmin ? "scheduled" : "muted", false)));
+        return lines.OrderBy(l => l.First).Select(l => l.Line).ToList();
     }
 
     // ------------------------------------------------------------------ suspend / deactivate / ...

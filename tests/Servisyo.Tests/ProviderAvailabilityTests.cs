@@ -127,18 +127,18 @@ public class ProviderAvailabilityServiceTests
     }
 
     [Fact]
-    public async Task SavedSchedule_IsShownBack_WithTheBreaks_AndOnlyUpcomingDates()
+    public async Task SavedSchedule_IsShownBack_WithTheBreaks_AndOnlyUpcomingDaysOff()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
         var form = ValidForm();
         Day(form, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(13) });
         Day(form, 2).Breaks.Add(new BreakForm { Start = T(15) });             // the page sends only the start
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 25), Reason = "Personal Leave" });
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 20), Reason = null });
         Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
-        // an old date that is already in the past
-        db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 1), Reason = "Old" });
+        db.ProviderUnavailableDates.AddRange(
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 25), Reason = "Personal Leave" },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 20) },
+            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 1), Reason = "Old" });   // already passed
         await db.SaveChangesAsync();
 
         var page = (await svc.GetAsync(p.UserId)).Page!;
@@ -148,8 +148,8 @@ public class ProviderAvailabilityServiceTests
         Assert.Equal((T(12), T(13)), (monday.Start!.Value, monday.End!.Value));
         var tuesday = Assert.Single(Day(page.Form, 2).Breaks);
         Assert.Equal((T(15), T(16)), (tuesday.Start!.Value, tuesday.End!.Value));   // the end is start + 1 hour
-        Assert.Equal(new[] { new DateOnly(2026, 10, 20), new DateOnly(2026, 10, 25) }, page.Form.Dates.Select(d => d.Date!.Value));
-        Assert.Equal("Personal Leave", page.Form.Dates[1].Reason);
+        Assert.Equal(new[] { "Oct 20, 2026", "Oct 25, 2026" }, page.DaysOff.Select(d => d.DatesText));
+        Assert.Equal("Personal Leave", page.DaysOff[1].Reason);
         Assert.False(Day(page.Form, 6).IsAvailable);
         Assert.Equal(4, page.Form.MaxJobsPerDay);
     }
@@ -201,15 +201,16 @@ public class ProviderAvailabilityServiceTests
     // ------------------------------------------------------------------- save
 
     [Fact]
-    public async Task Save_WritesOneRowPerDay_WithBreaksDatesAndSettings()
+    public async Task Save_WritesOneRowPerDay_WithBreaksAndSettings()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
+        db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 25), Reason = "Trip" });
+        await db.SaveChangesAsync();
         var form = ValidForm();
         form.MinNoticeDays = 2;
         form.MaxJobsPerDay = 6;
         Day(form, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(13) });
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 25), Reason = "  Personal Leave  " });
 
         var result = await svc.SaveAsync(p.UserId, form);
 
@@ -226,9 +227,9 @@ public class ProviderAvailabilityServiceTests
         Assert.Equal(T(12), brk.BreakStart);
         Assert.Equal(T(13), brk.BreakEnd);
 
+        // days off are not part of "Save Schedule" (they are requests): saving leaves them alone
         var date = await db.ProviderUnavailableDates.SingleAsync();
         Assert.Equal(new DateOnly(2026, 10, 25), date.UnavailableDate);
-        Assert.Equal("Personal Leave", date.Reason);
 
         var saved = await db.Providers.SingleAsync();
         Assert.Equal(2, saved.MinNoticeDays);
@@ -290,7 +291,7 @@ public class ProviderAvailabilityServiceTests
     }
 
     [Fact]
-    public async Task EmptyBreakAndDateRows_AreIgnored_AndTheBreakEndIsWorkedOut()
+    public async Task EmptyBreakRows_AreIgnored_AndTheBreakEndIsWorkedOut()
     {
         var (svc, db) = Create();
         var p = await AddProviderAsync(db);
@@ -298,7 +299,6 @@ public class ProviderAvailabilityServiceTests
         var monday = Day(form, 1);
         monday.Breaks.Add(new BreakForm());                                              // nothing chosen
         monday.Breaks.Add(new BreakForm { Start = T(12, 30) });                          // the dropdown sends only the start
-        form.Dates.Add(new UnavailableDateForm());                                       // nothing typed
 
         var result = await svc.SaveAsync(p.UserId, form);
 
@@ -333,21 +333,9 @@ public class ProviderAvailabilityServiceTests
                 Day(f, 1).End = T(16, 30);
                 Day(f, 1).Breaks.Add(new BreakForm { Start = T(12) });
                 break;
-            case "dateNextYear": f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2027, 1, 5) }); break;
-            case "date2030": f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2030, 11, 11), Reason = "Sick" }); break;
-            case "sixInAMonth":
-                for (var day = 2; day <= 7; day++) f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 11, day) });
-                break;
             case "missingDay": f.Days.RemoveAll(d => d.DayOfWeek == 0); break;
             case "duplicateDay": f.Days[6].DayOfWeek = 1; break;
             case "dayOutOfRange": f.Days[6].DayOfWeek = 7; break;
-            case "pastDate": f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 13) }); break;
-            case "duplicateDate":
-                f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 25) });
-                f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 25), Reason = "again" });
-                break;
-            case "reasonWithoutDate": f.Dates.Add(new UnavailableDateForm { Reason = "Leave" }); break;
-            case "longReason": f.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 25), Reason = new string('x', 256) }); break;
             case "noticeNegative": f.MinNoticeDays = -1; break;
             case "noticeTooBig": f.MinNoticeDays = 31; break;
             case "jobsZero": f.MaxJobsPerDay = 0; break;
@@ -369,16 +357,9 @@ public class ProviderAvailabilityServiceTests
     [InlineData("breakEndOnly", "Monday: choose when your break starts.")]
     [InlineData("twoBreaks", "Monday: you can add only one 1-hour break.")]
     [InlineData("shortShiftBreak", "Monday: Break is only available for work shifts longer than 8 hours.")]
-    [InlineData("dateNextYear", "Jan 5, 2027 is not in 2026. You can only mark unavailable days until December 31, 2026.")]
-    [InlineData("date2030", "Nov 11, 2030 is not in 2026.")]
-    [InlineData("sixInAMonth", "You can only set up to 5 unavailable days per month. November 2026 would have 6.")]
     [InlineData("missingDay", "The weekly schedule was incomplete.")]
     [InlineData("duplicateDay", "The weekly schedule was incomplete.")]
     [InlineData("dayOutOfRange", "The weekly schedule was incomplete.")]
-    [InlineData("pastDate", "Oct 13, 2026 is in the past.")]
-    [InlineData("duplicateDate", "Oct 25, 2026 is listed more than once.")]
-    [InlineData("reasonWithoutDate", "Every unavailable date needs a date.")]
-    [InlineData("longReason", "the reason can be at most 255 characters.")]
     [InlineData("noticeNegative", "Minimum booking notice must be between 0 and 30 days.")]
     [InlineData("noticeTooBig", "Minimum booking notice must be between 0 and 30 days.")]
     [InlineData("jobsZero", "Maximum jobs per day must be between 1 and 20.")]
@@ -435,96 +416,6 @@ public class ProviderAvailabilityServiceTests
         Assert.Equal(3, (await db.Providers.SingleAsync()).MaxJobsPerDay);
     }
 
-    // ----------------------------------------------------------------- dates
-
-    [Fact]
-    public async Task Today_IsRefused_TomorrowIsAllowed_ByCebuTime()
-    {
-        // 20:00 UTC on Oct 13 is already 04:00 on Oct 14 in Cebu
-        var (svc, db) = Create(new DateTimeOffset(2026, 10, 13, 20, 0, 0, TimeSpan.Zero));
-        var p = await AddProviderAsync(db);
-        Assert.Equal(new DateOnly(2026, 10, 15), (await svc.GetAsync(p.UserId)).Page!.FirstDate);      // the date picker starts tomorrow
-
-        var today = ValidForm();
-        today.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 14), Reason = "Sick" });
-        var refused = await svc.SaveAsync(p.UserId, today);
-        Assert.False(refused.Saved);
-        Assert.Equal(new[] { "Oct 14, 2026: Same-day unavailable date selection is not permitted. Unavailable dates must be marked at least 1 day in advance." },
-            refused.Errors);
-        Assert.Empty(db.ProviderUnavailableDates);
-
-        var tomorrow = ValidForm();
-        tomorrow.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 15), Reason = "Check-up" });
-        Assert.True((await svc.SaveAsync(p.UserId, tomorrow)).Saved);
-
-        var yesterday = ValidForm();
-        yesterday.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 13) });
-        var result = await svc.SaveAsync(p.UserId, yesterday);
-        Assert.False(result.Saved);
-        Assert.Contains(result.Errors, e => e.Contains("is in the past"));
-    }
-
-    [Fact]
-    public async Task ADayOffForToday_SavedBeforeToday_CanStay()
-    {
-        // marked yesterday (allowed then): saving the schedule today must still work, and it is shown as saved
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-        db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = Today, Reason = "Planned" });
-        await db.SaveChangesAsync();
-
-        var page = (await svc.GetAsync(p.UserId)).Page!;
-        var row = Assert.Single(page.Form.Dates);
-        Assert.True(row.AlreadySaved);
-
-        Assert.True((await svc.SaveAsync(p.UserId, page.Form)).Saved);
-        Assert.Equal(Today, (await db.ProviderUnavailableDates.SingleAsync()).UnavailableDate);
-
-        // a rejected form still knows which day was saved before (from the database, not the browser)
-        var form = page.Form;
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2027, 1, 5) });
-        form.Dates[0].AlreadySaved = false;
-        var again = (await svc.GetAsync(p.UserId, form)).Page!;
-        Assert.True(again.Form.Dates.Single(d => d.Date == Today).AlreadySaved);
-        Assert.False(again.Form.Dates.Single(d => d.Date == new DateOnly(2027, 1, 5)).AlreadySaved);
-    }
-
-    [Fact]
-    public async Task Dates_AreAddedUpdatedAndRemoved_AndOldOnesAreLeftAlone()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-        db.ProviderUnavailableDates.AddRange(
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 1), Reason = "Old" },
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 20), Reason = "Leave" },
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 25), Reason = "Trip" });
-        await db.SaveChangesAsync();
-
-        var form = ValidForm();
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 20), Reason = "Family event" });   // reason changed
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 11, 2), Reason = "Holiday" });        // new
-        // 25 Oct is not listed any more: removed
-
-        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
-
-        var all = await db.ProviderUnavailableDates.OrderBy(d => d.UnavailableDate).ToListAsync();
-        Assert.Equal(new[] { new DateOnly(2026, 10, 1), new DateOnly(2026, 10, 20), new DateOnly(2026, 11, 2) }, all.Select(d => d.UnavailableDate));
-        Assert.Equal(new[] { "Old", "Family event", "Holiday" }, all.Select(d => d.Reason));
-    }
-
-    [Fact]
-    public async Task RemovingEveryDate_ClearsTheList()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-        db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 25), Reason = "Trip" });
-        await db.SaveChangesAsync();
-
-        Assert.True((await svc.SaveAsync(p.UserId, ValidForm())).Saved);
-
-        Assert.Empty(db.ProviderUnavailableDates);
-    }
-
     // -------------------------------------------------------------- ownership
 
     [Fact]
@@ -537,8 +428,9 @@ public class ProviderAvailabilityServiceTests
         var lizaForm = ValidForm();
         lizaForm.MaxJobsPerDay = 9;
         Day(lizaForm, 1).Breaks.Add(new BreakForm { Start = T(12), End = T(13) });
-        lizaForm.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, 30), Reason = "Leave" });
         Assert.True((await svc.SaveAsync(liza.UserId, lizaForm)).Saved);
+        db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = liza.ProviderId, UnavailableDate = new DateOnly(2026, 10, 30), Reason = "Leave" });
+        await db.SaveChangesAsync();
 
         var marcoForm = ValidForm();
         marcoForm.MaxJobsPerDay = 2;
@@ -627,90 +519,38 @@ public class ProviderAvailabilityServiceTests
         Assert.Null(BreakRules.Nearest(T(12), T(9), T(15)));                     // 6-hour shift: no break at all
     }
 
-    // ------------------------------------------- unavailable dates: this year, 5 a month
+    // ------------------------------------------- the yearly reset
 
     [Fact]
-    public async Task Dec31_IsTheLastDayThatCanBeMarked()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-
-        var page = (await svc.GetAsync(p.UserId)).Page!;
-        Assert.Equal(new DateOnly(2026, 12, 31), page.LastDate);
-
-        var dec31 = ValidForm();
-        dec31.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 12, 31), Reason = "New Year's Eve" });
-        Assert.True((await svc.SaveAsync(p.UserId, dec31)).Saved);
-
-        var jan1 = ValidForm();
-        jan1.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2027, 1, 1) });
-        var result = await svc.SaveAsync(p.UserId, jan1);
-        Assert.False(result.Saved);
-        Assert.Contains(result.Errors, e => e.StartsWith("Jan 1, 2027 is not in 2026."));
-    }
-
-    [Fact]
-    public async Task FiveDaysAMonth_IsTheLimit_ForEachMonthSeparately()
-    {
-        var (svc, db) = Create();
-        var p = await AddProviderAsync(db);
-        var form = ValidForm();
-        for (var day = 2; day <= 6; day++) form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 11, day) });
-        for (var day = 21; day <= 25; day++) form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 12, day) });
-
-        Assert.True((await svc.SaveAsync(p.UserId, form)).Saved);
-        Assert.Equal(10, await db.ProviderUnavailableDates.CountAsync());
-
-        form.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 12, 28) });       // a 6th day in December
-        var result = await svc.SaveAsync(p.UserId, form);
-        Assert.False(result.Saved);
-        Assert.Equal(new[] { "You can only set up to 5 unavailable days per month. December 2026 would have 6." }, result.Errors);
-        Assert.Equal(10, await db.ProviderUnavailableDates.CountAsync());                    // nothing changed
-    }
-
-    [Fact]
-    public async Task DaysOfThisMonthThatAlreadyPassed_CountTowardTheFive()
-    {
-        var (svc, db) = Create();                                                             // today: Oct 14, 2026
-        var p = await AddProviderAsync(db);
-        db.ProviderUnavailableDates.AddRange(
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 1) },
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 10, 5) },
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 9, 30) });   // last month: not counted
-        await db.SaveChangesAsync();
-
-        Assert.Equal(2, (await svc.GetAsync(p.UserId)).Page!.PastDaysThisMonth);
-
-        var three = ValidForm();
-        for (var day = 20; day <= 22; day++) three.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, day) });
-        Assert.True((await svc.SaveAsync(p.UserId, three)).Saved);                           // 2 + 3 = 5
-
-        var four = ValidForm();
-        for (var day = 20; day <= 23; day++) four.Dates.Add(new UnavailableDateForm { Date = new DateOnly(2026, 10, day) });
-        var result = await svc.SaveAsync(p.UserId, four);                                     // 2 + 4 = 6
-        Assert.False(result.Saved);
-        Assert.Contains("You can only set up to 5 unavailable days per month. October 2026 would have 6 (2 of them already passed).", result.Errors);
-    }
-
-    [Fact]
-    public async Task TheYearlyReset_DeletesOnlyLastYearsDates()
+    public async Task TheYearlyReset_DeletesOnlyLastYearsDates_AndTheRequestsLeftWithoutDays()
     {
         var (_, db) = Create();
         var p = await AddProviderAsync(db);
         db.ProviderUnavailableDates.AddRange(
             new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2025, 12, 30) },
             new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 6, 1) },
-            new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 12, 31) },
             new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2027, 1, 4) });
+        // database v2.7: a 2026 request with its 2 days, and a request that was rejected in 2026 (its days were given back)
+        var december = new ProviderDayOffRequest { ProviderId = p.ProviderId, Status = DayOffStatuses.Pending, RequestedAt = new DateTime(2026, 12, 1, 2, 0, 0, DateTimeKind.Utc) };
+        december.Days.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 12, 30) });
+        december.Days.Add(new ProviderUnavailableDate { ProviderId = p.ProviderId, UnavailableDate = new DateOnly(2026, 12, 31) });
+        db.DayOffRequests.AddRange(december,
+            new ProviderDayOffRequest
+            {
+                ProviderId = p.ProviderId, Status = DayOffStatuses.Rejected, RequestedAt = new DateTime(2026, 11, 2, 2, 0, 0, DateTimeKind.Utc),
+                DecidedBy = AdminAction.ForProvider(p.UserId, ProviderManagementService.DayOffRejectedActionType, p.ProviderId, "Nov 20, 2026")
+            });
         await db.SaveChangesAsync();
 
-        // still 2026: only the 2025 date goes
+        // still 2026: only the 2025 date goes, and no request
         Assert.Equal(1, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2026, 12, 31)));
-        Assert.Equal(3, await db.ProviderUnavailableDates.CountAsync());
+        Assert.Equal(4, await db.ProviderUnavailableDates.CountAsync());
+        Assert.Equal(1, await db.DayOffRequests.CountAsync(r => r.RequestId != december.RequestId));       // the one without days stays in 2026
 
-        // January 1, 2027: every 2026 date goes; running it again deletes nothing more
-        Assert.Equal(2, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2027, 1, 1)));
+        // January 1, 2027: every 2026 date goes, then both 2026 requests; running it again deletes nothing more
+        Assert.Equal(3, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2027, 1, 1)));
         Assert.Equal(0, await UnavailableDatesResetService.DeleteLastYearsDatesAsync(db, new DateOnly(2027, 1, 1)));
         Assert.Equal(new DateOnly(2027, 1, 4), (await db.ProviderUnavailableDates.SingleAsync()).UnavailableDate);
+        Assert.Empty(db.DayOffRequests);
     }
 }

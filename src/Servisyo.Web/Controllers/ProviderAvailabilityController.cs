@@ -42,8 +42,8 @@ public class ProviderAvailabilityController : Controller
 
         if (!ModelState.IsValid)
         {
-            // e.g. a time or date the server could not read
-            errors = new[] { "Some times or dates could not be read. Please check them and try again." };
+            // e.g. a time the server could not read
+            errors = new[] { "Some times could not be read. Please check them and try again." };
         }
         else
         {
@@ -68,10 +68,69 @@ public class ProviderAvailabilityController : Controller
         var page = again.Page!;
         page.Errors = errors;
 
-        // 400 Bad Request: nothing was saved (e.g. a same-day day off); the page shows what to fix
+        // 400 Bad Request: nothing was saved (e.g. a break on a short shift); the page shows what to fix
         var view = View(nameof(Index), page);
         view.StatusCode = StatusCodes.Status400BadRequest;
         return view;
+    }
+
+    // ---------------------------------------------------------- day-off requests (database v2.7)
+
+    [HttpPost("day-off")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RequestDayOff(DayOffRequestForm form, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Forbid();
+
+        var result = ModelState.IsValid
+            ? await _availability.RequestDayOffAsync(userId, form, ct)
+            : DayOffResult.Refused("The dates could not be read. Please choose them again.");
+        var denied = Denied(result.Access);
+        if (denied is not null) return await denied;
+
+        if (result.Done)
+        {
+            TempData["Flash"] = result.Message;
+            TempData["FlashKind"] = "ok";
+            return RedirectToAction(nameof(Index));
+        }
+
+        // 400 Bad Request: nothing was sent (e.g. more than 7 days, a same-day request); the form opens again with the problems
+        var again = await _availability.GetAsync(userId, null, ct);
+        var deniedAgain = Denied(again.Access);
+        if (deniedAgain is not null) return await deniedAgain;
+
+        var page = again.Page!;
+        page.DayOffForm = form;
+        page.DayOffErrors = result.Errors;
+        var view = View(nameof(Index), page);
+        view.StatusCode = StatusCodes.Status400BadRequest;
+        return view;
+    }
+
+    [HttpPost("day-off/{requestId:int}/remove")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemoveRequest(int requestId, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Forbid();
+        return await AfterAsync(await _availability.RemoveRequestAsync(userId, requestId, ct));
+    }
+
+    [HttpPost("days-off/{unavailableId:int}/remove")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemoveDay(int unavailableId, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Forbid();
+        return await AfterAsync(await _availability.RemoveDayAsync(userId, unavailableId, ct));
+    }
+
+    private async Task<IActionResult> AfterAsync(DayOffResult result)
+    {
+        var denied = Denied(result.Access);
+        if (denied is not null) return await denied;
+        TempData["Flash"] = result.Message;
+        TempData["FlashKind"] = result.Done ? "ok" : "error";
+        return RedirectToAction(nameof(Index));
     }
 
     // Pending applicants wait on their own page; rejected providers see the dashboard message; anything else is signed out.

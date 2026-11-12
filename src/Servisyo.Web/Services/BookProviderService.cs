@@ -120,7 +120,7 @@ public class BookProviderService : IBookProviderService
                 breaks.Where(b => b.AvailabilityId == s.AvailabilityId).Select(b => (b.Start, b.End)).ToList()))
             .ToList();
 
-        var unavailable = await _db.ProviderUnavailableDates.AsNoTracking()
+        var unavailable = await _db.ProviderUnavailableDates.AsNoTracking().BlockingBookings()   // v2.7: not Pending requests
             .AnyAsync(u => u.ProviderId == providerId && u.UnavailableDate == date, ct);
 
         var busy = (await _db.Bookings.AsNoTracking()

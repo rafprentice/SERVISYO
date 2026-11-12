@@ -9,11 +9,11 @@ using Xunit;
 
 namespace Servisyo.Tests;
 
-/// Days off and bookings (database v2.4):
-///   - a day with an active booking (Pending, Accepted, In Progress) cannot be marked unavailable, so no customer is
-///     left without their provider - by the provider (Availability) or by an administrator;
-///   - an administrator can approve an EXTRA day off (an emergency beyond the 5 a month). It is saved with an
-///     ADMIN_ACTIONS row and points to it (APPROVED_BY_ACTION_ID); it does not count toward the provider's 5.
+/// Days off and bookings (database v2.4, requests since v2.7):
+///   - a day with an active booking (Pending, Accepted, In Progress) cannot be requested, so no customer is left
+///     without their provider - by the provider (Request Day Off) or by an administrator;
+///   - an administrator can give an EXTRA day off at once (an emergency, even today). It is saved with an
+///     ADMIN_ACTIONS row and points to it (APPROVED_BY_ACTION_ID).
 public class ProviderExtraDayOffTests
 {
     // 10:00 in Cebu on Wed Oct 14, 2026
@@ -57,19 +57,10 @@ public class ProviderExtraDayOffTests
         return b;
     }
 
-    private static TimeOnly T(int h) => new(h, 0);
-
-    /// Monday-Friday 8:00-17:00, plus these days off.
-    private static AvailabilityForm Week(params DateOnly[] daysOff)
-    {
-        var form = new AvailabilityForm { MinNoticeDays = 1, MaxJobsPerDay = 4 };
-        foreach (var dow in AvailabilityDays.DisplayOrder)
-            form.Days.Add(new DayScheduleForm { DayOfWeek = dow, IsAvailable = dow is >= 1 and <= 5, Start = T(8), End = T(17) });
-        foreach (var d in daysOff) form.Dates.Add(new UnavailableDateForm { Date = d, Reason = "Leave" });
-        return form;
-    }
-
     private static DateOnly Nov(int day) => new(2026, 11, day);
+
+    private static Task<DayOffResult> AskAsync(World w, DateOnly first, DateOnly? last = null) =>
+        w.Schedule.RequestDayOffAsync(w.Vince.UserId, new DayOffRequestForm { Start = first, End = last, Reason = "Leave" });
 
     // ------------------------------------------------------------ the provider's own days off vs bookings
 
@@ -77,16 +68,17 @@ public class ProviderExtraDayOffTests
     [InlineData(BookingStatuses.Pending)]
     [InlineData(BookingStatuses.Accepted)]
     [InlineData(BookingStatuses.InProgress)]
-    public async Task AProvider_CannotMarkADayOff_ThatHasAnActiveBooking(string status)
+    public async Task AProvider_CannotRequestADayOff_ThatHasAnActiveBooking(string status)
     {
         var w = await WorldAsync();
         var b = await BookAsync(w, Nov(20), status);
 
-        var result = await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(20)));
+        var result = await AskAsync(w, Nov(19), Nov(21));
 
-        Assert.False(result.Saved);
-        Assert.Contains($"Nov 20, 2026: you already have booking #{b.BookingId} ({status}) on this day. A day with an active booking cannot be marked unavailable.", result.Errors);
+        Assert.False(result.Done);
+        Assert.Equal(new[] { $"Nov 20, 2026: you already have booking #{b.BookingId} ({status}) on this day. A day with an active booking cannot be marked unavailable." }, result.Errors);
         Assert.Empty(w.Db.ProviderUnavailableDates);
+        Assert.Empty(w.Db.DayOffRequests);
     }
 
     [Theory]
@@ -98,7 +90,7 @@ public class ProviderExtraDayOffTests
         var w = await WorldAsync();
         await BookAsync(w, Nov(20), status);
 
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(20)))).Saved);
+        Assert.True((await AskAsync(w, Nov(20))).Done);
     }
 
     [Fact]
@@ -110,19 +102,7 @@ public class ProviderExtraDayOffTests
         await w.Db.SaveChangesAsync();
         await BookAsync(w, Nov(20), BookingStatuses.Accepted, other);
 
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(20)))).Saved);
-    }
-
-    [Fact]
-    public async Task ADayOffSavedEarlier_IsKept_EvenIfABookingIsOnIt()
-    {
-        // saved before this rule existed: saving the schedule again must still work (only NEW days are checked)
-        var w = await WorldAsync();
-        w.Db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = Nov(20), Reason = "Old" });
-        await w.Db.SaveChangesAsync();
-        await BookAsync(w, Nov(20), BookingStatuses.Accepted);
-
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(20)))).Saved);
+        Assert.True((await AskAsync(w, Nov(20))).Done);
     }
 
     // ------------------------------------------------------------ the administrator's extra day off
@@ -135,7 +115,7 @@ public class ProviderExtraDayOffTests
         var result = await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(20), "  Sick (called the office)  ");
 
         Assert.Equal(ExtraDayOffOutcome.Success, result.Outcome);
-        Assert.Equal("Extra day off approved for Vincent Reyes on Nov 20, 2026. It does not count toward their 5 days that month.", result.Message);
+        Assert.Equal("Extra day off approved for Vincent Reyes on Nov 20, 2026. Customers cannot book them on that day.", result.Message);
 
         var log = await w.Db.AdminActions.AsNoTracking().SingleAsync();
         Assert.Equal(ProviderManagementService.ExtraDayOffActionType, log.ActionType);
@@ -148,52 +128,6 @@ public class ProviderExtraDayOffTests
         Assert.Equal(Nov(20), day.UnavailableDate);
         Assert.Equal("Sick (called the office)", day.Reason);
         Assert.Equal(log.ActionId, day.ApprovedByActionId);
-    }
-
-    [Fact]
-    public async Task AnApprovedExtraDay_DoesNotCountTowardTheProvidersFive()
-    {
-        var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(2), Nov(3), Nov(4), Nov(5), Nov(6)))).Saved);     // 5 of their own
-        Assert.Equal(ExtraDayOffOutcome.Success, (await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(20), "Sick")).Outcome);
-
-        var page = (await w.Schedule.GetAsync(w.Vince.UserId)).Page!;
-        Assert.Equal(6, page.Form.Dates.Count);
-        Assert.True(page.Form.Dates.Single(d => d.Date == Nov(20)).ApprovedByAdmin);
-
-        // saving the page again (all 6 listed) still works; a 6th day of their own does not
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, page.Form)).Saved);
-        Assert.Equal(Nov(20), (await w.Db.ProviderUnavailableDates.AsNoTracking().SingleAsync(d => d.ApprovedByActionId != null)).UnavailableDate);
-
-        var seventh = await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(2), Nov(3), Nov(4), Nov(5), Nov(6), Nov(20), Nov(25)));
-        Assert.False(seventh.Saved);
-        Assert.Contains("You can only set up to 5 unavailable days per month. November 2026 would have 6.", seventh.Errors);
-    }
-
-    [Fact]
-    public async Task TheApprovedMark_NeverComesFromTheBrowser()
-    {
-        var w = await WorldAsync();
-        var form = Week(Nov(2), Nov(3), Nov(4), Nov(5), Nov(6), Nov(9));
-        form.Dates[5].ApprovedByAdmin = true;                    // pretending the 6th day was approved
-
-        var result = await w.Schedule.SaveAsync(w.Vince.UserId, form);
-
-        Assert.False(result.Saved);
-        Assert.Contains("You can only set up to 5 unavailable days per month. November 2026 would have 6.", result.Errors);
-    }
-
-    [Fact]
-    public async Task AnApprovedDayEarlierThisMonth_IsNotCountedEither()
-    {
-        var w = await WorldAsync();                                                   // today: Oct 14
-        var log = AdminAction.ForProvider(w.AdminUser.UserId, ProviderManagementService.ExtraDayOffActionType, w.Vince.ProviderId, "Oct 2, 2026: Sick");
-        w.Db.ProviderUnavailableDates.AddRange(
-            new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = new DateOnly(2026, 10, 2), ApprovedBy = log },
-            new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = new DateOnly(2026, 10, 5) });
-        await w.Db.SaveChangesAsync();
-
-        Assert.Equal(1, (await w.Schedule.GetAsync(w.Vince.UserId)).Page!.PastDaysThisMonth);
     }
 
     [Theory]
@@ -214,13 +148,17 @@ public class ProviderExtraDayOffTests
     }
 
     [Fact]
-    public async Task Approve_ADayThatIsAlreadyOff_IsRefused()
+    public async Task Approve_ADayThatIsAlreadyOff_OrAskedFor_IsRefused()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(20)))).Saved);
+        w.Db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = Nov(20), Reason = "Old" });
+        await w.Db.SaveChangesAsync();
+        Assert.True((await AskAsync(w, Nov(26))).Done);
 
         var own = await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(20), "Sick");
         Assert.Equal("Vincent Reyes has already marked Nov 20, 2026 as a day off.", own.Message);
+        var asked = await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(26), "Sick");
+        Assert.Equal("Vincent Reyes already asked for Nov 26, 2026 off. Approve their request in the Days Off list instead.", asked.Message);
 
         Assert.Equal(ExtraDayOffOutcome.Success, (await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(23), "Sick")).Outcome);
         var twice = await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(23), "Sick");
@@ -290,12 +228,17 @@ public class ProviderExtraDayOffTests
     public async Task TheAdminPopUp_ListsTheDaysOff_AndOffersTheForm()
     {
         var w = await WorldAsync();
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, Week(Nov(3)))).Saved);
+        w.Db.ProviderUnavailableDates.Add(new ProviderUnavailableDate { ProviderId = w.Vince.ProviderId, UnavailableDate = Nov(3), Reason = "Old" });
+        await w.Db.SaveChangesAsync();
+        Assert.True((await AskAsync(w, Nov(24), Nov(26))).Done);
         await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, Nov(20), "Sick");
 
         var d = (await w.Admin.GetDetailsAsync(w.AdminUser.UserId, w.Vince.ProviderId)).Details!;
 
-        Assert.Equal(new[] { ("Nov 3, 2026", false), ("Nov 20, 2026", true) }, d.DaysOff.Select(x => (x.DateText, x.ApprovedByAdmin)));
+        Assert.Equal(new[] { ("Nov 3, 2026", "Day off"), ("Nov 20, 2026", ProviderDayOffLine.ExtraLabel), ("Nov 24 to Nov 26, 2026", UnavailableDateRules.PendingLabel) },
+            d.DaysOff.Select(x => (x.DateText, x.Label)));
+        Assert.Equal(1, d.PendingRequests);
+        Assert.NotNull(d.DaysOff[2].RequestId);
         Assert.True(d.CanApproveDayOff);
         Assert.Equal("2026-10-14", d.DayOffMin);
         Assert.Equal("2026-12-31", d.DayOffMax);
@@ -316,38 +259,17 @@ public class ProviderExtraDayOffTests
     // ------------------------------------------------------------ no same-day requests, together with the other rules
 
     [Fact]
-    public async Task TheSameDayRule_WorksTogetherWithTheOtherDateRules()
-    {
-        var w = await WorldAsync();                                                   // today: Oct 14, 2026
-        var b = await BookAsync(w, Nov(20), BookingStatuses.Accepted);
-        var form = Week(new DateOnly(2026, 10, 14),                                   // today
-                        Nov(2), Nov(3), Nov(4), Nov(5), Nov(6), Nov(9),             // 6 in November
-                        Nov(20),                                                      // booked
-                        new DateOnly(2027, 1, 5));                                    // next year
-
-        var result = await w.Schedule.SaveAsync(w.Vince.UserId, form);
-
-        Assert.False(result.Saved);
-        Assert.Contains("Oct 14, 2026: Same-day unavailable date selection is not permitted. Unavailable dates must be marked at least 1 day in advance.", result.Errors);
-        Assert.Contains($"Nov 20, 2026: you already have booking #{b.BookingId} (Accepted) on this day. A day with an active booking cannot be marked unavailable.", result.Errors);
-        Assert.Contains(result.Errors, e => e.StartsWith("Jan 5, 2027 is not in 2026."));
-        Assert.Contains("You can only set up to 5 unavailable days per month. November 2026 would have 6.", result.Errors);
-        Assert.Equal(4, result.Errors.Count);
-        Assert.Empty(w.Db.ProviderUnavailableDates);
-    }
-
-    [Fact]
-    public async Task AnAdministrator_CanStillApproveToday_AsAnEmergency()
+    public async Task AnAdministrator_CanStillGiveToday_AsAnEmergency()
     {
         var w = await WorldAsync();
         var today = new DateOnly(2026, 10, 14);
 
         Assert.Equal(ExtraDayOffOutcome.Success, (await w.Admin.ApproveExtraDayOffAsync(w.AdminUser.UserId, w.Vince.ProviderId, today, "Sick this morning")).Outcome);
 
-        // the provider's page keeps it, and saving the schedule still works
-        var page = (await w.Schedule.GetAsync(w.Vince.UserId)).Page!;
-        var row = Assert.Single(page.Form.Dates);
-        Assert.True(row.AlreadySaved && row.ApprovedByAdmin);
-        Assert.True((await w.Schedule.SaveAsync(w.Vince.UserId, page.Form)).Saved);
+        // the provider's page lists it, marked as given by an administrator (a provider cannot request today)
+        var item = Assert.Single((await w.Schedule.GetAsync(w.Vince.UserId)).Page!.DaysOff);
+        Assert.Equal("Oct 14, 2026", item.DatesText);
+        Assert.Equal(UnavailableDateRules.ApprovedNote, item.Note);
+        Assert.False((await AskAsync(w, today)).Done);
     }
 }

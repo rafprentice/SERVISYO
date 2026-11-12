@@ -639,6 +639,58 @@ namespace Servisyo.Web.Migrations
                     b.ToTable("PROVIDER_CATEGORIES", (string)null);
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.ProviderDayOffRequest", b =>
+                {
+                    b.Property<int>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("REQUEST_ID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RequestId"));
+
+                    b.Property<int?>("DecidedByActionId")
+                        .HasColumnType("int")
+                        .HasColumnName("DECIDED_BY_ACTION_ID");
+
+                    b.Property<int>("ProviderId")
+                        .HasColumnType("int")
+                        .HasColumnName("PROVIDER_ID");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)")
+                        .HasColumnName("REASON");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("REQUESTED_AT")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Pending")
+                        .HasColumnName("STATUS");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("DecidedByActionId")
+                        .IsUnique()
+                        .HasFilter("[DECIDED_BY_ACTION_ID] IS NOT NULL");
+
+                    b.HasIndex("ProviderId", "Status");
+
+                    b.ToTable("PROVIDER_DAY_OFF_REQUESTS", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_DECISION", "([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_STATUS", "[STATUS] IN ('Pending','Approved','Rejected')");
+                        });
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.ProviderUnavailableDate", b =>
                 {
                     b.Property<int>("UnavailableId")
@@ -661,6 +713,10 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("nvarchar(255)")
                         .HasColumnName("REASON");
 
+                    b.Property<int?>("RequestId")
+                        .HasColumnType("int")
+                        .HasColumnName("REQUEST_ID");
+
                     b.Property<DateOnly>("UnavailableDate")
                         .HasColumnType("date")
                         .HasColumnName("UNAVAILABLE_DATE");
@@ -669,13 +725,18 @@ namespace Servisyo.Web.Migrations
 
                     b.HasIndex("ApprovedByActionId");
 
+                    b.HasIndex("RequestId");
+
                     b.HasIndex("UnavailableDate")
                         .IsUnique();
 
                     b.HasIndex("ProviderId", "UnavailableDate")
                         .IsUnique();
 
-                    b.ToTable("PROVIDER_UNAVAILABLE_DATES", (string)null);
+                    b.ToTable("PROVIDER_UNAVAILABLE_DATES", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PROVIDER_UNAVAILABLE_DATES_SOURCE", "[REQUEST_ID] IS NULL OR [APPROVED_BY_ACTION_ID] IS NULL");
+                        });
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Review", b =>
@@ -1142,6 +1203,24 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Provider");
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.ProviderDayOffRequest", b =>
+                {
+                    b.HasOne("Servisyo.Web.Models.AdminAction", "DecidedBy")
+                        .WithMany()
+                        .HasForeignKey("DecidedByActionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Servisyo.Web.Models.Provider", "Provider")
+                        .WithMany("DayOffRequests")
+                        .HasForeignKey("ProviderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("DecidedBy");
+
+                    b.Navigation("Provider");
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.ProviderUnavailableDate", b =>
                 {
                     b.HasOne("Servisyo.Web.Models.AdminAction", "ApprovedBy")
@@ -1155,9 +1234,16 @@ namespace Servisyo.Web.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("Servisyo.Web.Models.ProviderDayOffRequest", "Request")
+                        .WithMany("Days")
+                        .HasForeignKey("RequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ApprovedBy");
 
                     b.Navigation("Provider");
+
+                    b.Navigation("Request");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Review", b =>
@@ -1215,6 +1301,8 @@ namespace Servisyo.Web.Migrations
 
                     b.Navigation("Bookings");
 
+                    b.Navigation("DayOffRequests");
+
                     b.Navigation("ProviderCategories");
 
                     b.Navigation("Services");
@@ -1225,6 +1313,11 @@ namespace Servisyo.Web.Migrations
             modelBuilder.Entity("Servisyo.Web.Models.ProviderAvailability", b =>
                 {
                     b.Navigation("Breaks");
+                });
+
+            modelBuilder.Entity("Servisyo.Web.Models.ProviderDayOffRequest", b =>
+                {
+                    b.Navigation("Days");
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.User", b =>

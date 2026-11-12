@@ -157,7 +157,7 @@ public class ProviderDashboardService : IProviderDashboardService
 
         // ---- Availability today ----
         var dow = (byte)today.DayOfWeek;
-        var offToday = await _db.ProviderUnavailableDates.AnyAsync(u => u.ProviderId == p.ProviderId && u.UnavailableDate == today, ct);
+        var offToday = await _db.ProviderUnavailableDates.BlockingBookings().AnyAsync(u => u.ProviderId == p.ProviderId && u.UnavailableDate == today, ct);
         var endToday = await _db.ProviderAvailabilities.AsNoTracking()
             .Where(a => a.ProviderId == p.ProviderId && a.IsAvailable && a.DayOfWeek == dow)
             .Select(a => (TimeOnly?)a.EndTime).FirstOrDefaultAsync(ct);

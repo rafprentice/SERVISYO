@@ -129,55 +129,6 @@
         </ul>
     </section>
 
-    <!-- Unavailable dates -->
-    <section class="sv-panel sv-av__panel" aria-labelledby="av-dates-title">
-        <div class="sv-panel__head">
-            <div>
-                <h2 id="av-dates-title" class="sv-panel__title">Unavailable Dates</h2>
-                <p class="sv-av__hint">Mark specific dates when you are not available, at least 1 day in advance (no same-day requests): up to @UnavailableDateRules.MaxPerMonth days a month, until Dec 31, @Model.Today.Year. Only one provider can be off on any day (first come, first served). Days with an active booking cannot be marked. For an emergency beyond that, contact an administrator. The list starts empty again every January 1.</p>
-            </div>
-            <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" id="sv-av-add-date">+ Add date</button>
-        </div>
-
-        <p class="sv-av__dateerr" id="sv-av-dates-error" role="alert" hidden></p>
-        <ul class="sv-av__dates" id="sv-av-dates" data-today="@Model.Today.ToString("yyyy-MM-dd", inv)" data-first="@Model.FirstDate.ToString("yyyy-MM-dd", inv)"
-            data-last="@Model.LastDate.ToString("yyyy-MM-dd", inv)" data-same-day-message="@UnavailableDateRules.SameDayAdvice"
-            data-taken="@(string.Join(",", Model.TakenDates.Select(x => x.ToString("yyyy-MM-dd", inv))))" data-taken-message="@UnavailableDateRules.TakenMessage"
-            data-past-this-month="@Model.PastDaysThisMonth" data-max-per-month="@UnavailableDateRules.MaxPerMonth"
-            data-month-message="@UnavailableDateRules.MonthlyLimitMessage">
-            @for (var j = 0; j < form.Dates.Count; j++)
-            {
-                var dt = form.Dates[j];
-                var saved = dt.Date is not null && !hasErrors;
-                var outOfYear = dt.Date is not null && dt.Date > Model.LastDate;      // saved before the "this year only" rule
-                @* a day saved earlier keeps its own date as the lowest choice (e.g. today); a new day starts tomorrow *@
-                var minDate = dt.AlreadySaved && dt.Date is not null && dt.Date < Model.FirstDate ? dt.Date.Value : Model.FirstDate;
-                <li class="sv-av__date @(saved ? "is-saved" : "") @(outOfYear ? "is-out" : "")" data-date-row data-approved="@(dt.ApprovedByAdmin ? "true" : null)"
-                    data-saved-date="@(dt.AlreadySaved ? dt.Date?.ToString("yyyy-MM-dd", inv) : null)">
-                    <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
-                    <div class="sv-av__dateview">
-                        <strong>@(dt.Date?.ToString("MMM d, yyyy", inv))</strong>
-                        <span>@(string.IsNullOrWhiteSpace(dt.Reason) ? "No reason given" : dt.Reason)</span>
-                        @if (outOfYear)
-                        {
-                            <em class="sv-av__dateout">Only dates in @Model.Today.Year can be set. Remove this date before saving.</em>
-                        }
-                        @if (dt.ApprovedByAdmin)
-                        {
-                            <em class="sv-av__dateok">@UnavailableDateRules.ApprovedNote</em>
-                        }
-                    </div>
-                    <div class="sv-av__dateedit">
-                        <input type="date" name="Dates[@j].Date" value="@(dt.Date?.ToString("yyyy-MM-dd", inv))" min="@minDate.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
-                        <input type="text" name="Dates[@j].Reason" value="@dt.Reason" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
-                    </div>
-                    <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>
-                </li>
-            }
-        </ul>
-        <p class="sv-av__empty" id="sv-av-dates-empty" @(form.Dates.Count > 0 ? "hidden" : null)>No unavailable dates. Add one when you need a day off.</p>
-    </section>
-
     <!-- Booking settings -->
     <section class="sv-panel sv-av__panel" aria-labelledby="av-settings-title">
         <div class="sv-panel__head">
@@ -217,6 +168,125 @@
     <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" id="sv-av-save">Save Schedule</button>
 </form>
 
+<!-- Unavailable dates (database v2.7): requests that an administrator approves; not part of "Save Schedule" -->
+@{
+    var dayOffForm = Model.DayOffForm;
+    var openDialog = Model.DayOffErrors.Count > 0;
+    string D(DateOnly? d) => d?.ToString("yyyy-MM-dd", inv) ?? string.Empty;
+}
+@* data-sv-dayoff-live: provider-availability.js fetches this section again when an administrator answers a request
+   (pushed by SignalR), so "Pending Admin Approval" turns into "Approved" without reloading the page. *@
+<section class="sv-panel sv-av__panel" aria-labelledby="av-dates-title" id="sv-av-daysoff" data-sv-dayoff-live="true"
+         data-refresh-url="@Url.Action("Index", "ProviderAvailability")"
+         data-taken="@(string.Join(",", Model.TakenDates.Select(x => x.ToString("yyyy-MM-dd", inv))))">
+    <div class="sv-panel__head">
+        <div>
+            <h2 id="av-dates-title" class="sv-panel__title">Unavailable Dates</h2>
+            <p class="sv-av__hint">Request the days you are not available, at least 1 day in advance (no same-day requests), until Dec 31, @Model.Today.Year: up to @UnavailableDateRules.MaxDaysPerRequest days in a row per request. An administrator approves or rejects each request; until it is approved, customers can still book you on those days. Only one provider can be off on any day (first come, first served), and days with an active booking cannot be requested. For an emergency today, contact an administrator. The list starts empty again every January 1.</p>
+        </div>
+        <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" id="sv-av-request" aria-haspopup="dialog"
+                aria-disabled="@(Model.HasPendingRequest ? "true" : null)">Request Day Off</button>
+    </div>
+
+    @if (Model.HasPendingRequest)
+    {
+        <p class="sv-av__dayoffnote" id="sv-av-waiting">You can send a new request when your waiting request is answered (or after you cancel it).</p>
+    }
+    @if (openDialog)
+    {
+        <div class="sv-av__dayofferr" role="alert">
+            <strong>Your day off request was not sent.</strong>
+            <ul class="sv-av__errors">
+                @foreach (var e in Model.DayOffErrors)
+                {
+                    <li>@e</li>
+                }
+            </ul>
+        </div>
+    }
+
+    @if (Model.DaysOff.Count == 0)
+    {
+        <p class="sv-av__empty">No days off. Use <strong>Request Day Off</strong> when you need one.</p>
+    }
+    else
+    {
+        <ul class="sv-av__dates">
+            @foreach (var item in Model.DaysOff)
+            {
+                <li class="sv-av__date is-saved @(item.IsPending ? "is-pending" : "")" data-day-off>
+                    <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
+                    <div class="sv-av__dateview">
+                        <strong>@item.DatesText <span class="sv-av__days">· @item.DaysText</span></strong>
+                        <span>@(string.IsNullOrWhiteSpace(item.Reason) ? "No reason given" : item.Reason)</span>
+                        @if (item.Badge is not null)
+                        {
+                            <span class="sv-tag sv-tag--@item.BadgeTone sv-av__badge">@item.Badge</span>
+                        }
+                        @if (item.Note is not null)
+                        {
+                            <em class="sv-av__dateok">@item.Note</em>
+                        }
+                    </div>
+                    @{
+                        var confirmText = item.IsPending
+                            ? $"Cancel your day off request for {item.DatesText}?"
+                            : $"Remove your day off for {item.DatesText}? Customers will be able to book you on those days again.";
+                    }
+                    @if (item.RequestId is not null)
+                    {
+                        <form method="post" asp-action="RemoveRequest" asp-route-requestId="@item.RequestId" class="sv-av__remove">
+                            <button type="submit" class="sv-av__x" data-confirm="@confirmText" aria-label="@(item.RemoveLabel): @(item.DatesText)" title="@item.RemoveLabel">✕</button>
+                        </form>
+                    }
+                    else
+                    {
+                        <form method="post" asp-action="RemoveDay" asp-route-unavailableId="@item.UnavailableId" class="sv-av__remove">
+                            <button type="submit" class="sv-av__x" data-confirm="@confirmText" aria-label="@(item.RemoveLabel): @(item.DatesText)" title="@item.RemoveLabel">✕</button>
+                        </form>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+<!-- "Request Day Off" (provider-availability.js opens it; the server checks everything again) -->
+<dialog id="sv-av-dayoff" class="sv-dialog" aria-labelledby="sv-av-dayoff-title" data-open="@(openDialog ? "true" : "false")">
+    <form method="post" asp-action="RequestDayOff" class="sv-dialog__form" id="sv-av-dayoff-form" novalidate
+          data-today="@Model.Today.ToString("yyyy-MM-dd", inv)" data-first="@Model.FirstDate.ToString("yyyy-MM-dd", inv)"
+          data-last="@Model.LastDate.ToString("yyyy-MM-dd", inv)" data-max-days="@UnavailableDateRules.MaxDaysPerRequest"
+          data-max-days-message="@UnavailableDateRules.MaxDaysMessage" data-same-day-message="@UnavailableDateRules.SameDayAdvice"
+          data-taken="@(string.Join(",", Model.TakenDates.Select(x => x.ToString("yyyy-MM-dd", inv))))" data-taken-message="@UnavailableDateRules.TakenMessage">
+        <h2 id="sv-av-dayoff-title" class="sv-dialog__title">Request Day Off</h2>
+        <p class="sv-dialog__text">Up to @UnavailableDateRules.MaxDaysPerRequest days in a row, from tomorrow until Dec 31, @Model.Today.Year. An administrator approves or rejects it.</p>
+
+        <div class="sv-av__dofields">
+            <label class="sv-av__dofield">
+                <span>Start date</span>
+                <input type="date" name="Start" id="sv-av-do-start" required value="@D(dayOffForm?.Start)"
+                       min="@Model.FirstDate.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" />
+            </label>
+            <label class="sv-av__dofield">
+                <span>End date <em>(empty = one day)</em></span>
+                <input type="date" name="End" id="sv-av-do-end" value="@D(dayOffForm?.End)"
+                       min="@Model.FirstDate.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" />
+            </label>
+        </div>
+        <label class="sv-av__dofield">
+            <span>Reason <em>(optional)</em></span>
+            <input type="text" name="Reason" id="sv-av-do-reason" value="@(dayOffForm?.Reason)" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="e.g. family event" />
+        </label>
+        <p class="sv-av__dosum" id="sv-av-do-sum" aria-live="polite"></p>
+        <p class="sv-av__daterr" id="sv-av-do-error" role="alert" hidden></p>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" id="sv-av-do-send">Send request</button>
+        </div>
+    </form>
+</dialog>
+
 <!-- Templates used by provider-availability.js -->
 <template id="sv-break-tpl">
     <div class="sv-av__break" data-break>
@@ -229,17 +299,6 @@
     </div>
 </template>
 
-<template id="sv-date-tpl">
-    <li class="sv-av__date" data-date-row>
-        <span class="sv-av__dateicon">@Icons.Svg("calendar", 16)</span>
-        <div class="sv-av__dateview"><strong></strong><span></span></div>
-        <div class="sv-av__dateedit">
-            <input type="date" min="@Model.FirstDate.ToString("yyyy-MM-dd", inv)" max="@Model.LastDate.ToString("yyyy-MM-dd", inv)" aria-label="Unavailable date" data-d-date />
-            <input type="text" maxlength="@ProviderAvailabilityService.MaxReasonLength" placeholder="Reason (optional)" aria-label="Reason" data-d-reason />
-        </div>
-        <button type="button" class="sv-av__x" data-remove-date aria-label="Remove this date">✕</button>
-    </li>
-</template>
 
 @section Scripts {
     <script src="~/js/provider-availability.js" asp-append-version="true"></script>

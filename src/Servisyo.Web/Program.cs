@@ -23,6 +23,7 @@ builder.Services.AddScoped<IAdminReportService, AdminReportService>();
 builder.Services.AddScoped<IProfilePhotoService, ProfilePhotoService>();
 builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();
 builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();
+builder.Services.AddScoped<IDayOffLiveUpdates, DayOffLiveUpdates>();      // database v2.7: day-off requests, live
 builder.Services.AddSignalR();
 builder.Services.AddScoped<ICustomerReviewService, CustomerReviewService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));

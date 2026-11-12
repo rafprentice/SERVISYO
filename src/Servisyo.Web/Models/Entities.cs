@@ -62,6 +62,7 @@ public class Provider
     public User User { get; set; } = null!;
     public ICollection<ProviderAvailability> Availabilities { get; set; } = new List<ProviderAvailability>();
     public ICollection<ProviderUnavailableDate> UnavailableDates { get; set; } = new List<ProviderUnavailableDate>();
+    public ICollection<ProviderDayOffRequest> DayOffRequests { get; set; } = new List<ProviderDayOffRequest>();
     public ICollection<ProviderCategory> ProviderCategories { get; set; } = new List<ProviderCategory>();
     public ICollection<Service> Services { get; set; } = new List<Service>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
@@ -97,13 +98,37 @@ public class ProviderUnavailableDate
     public DateOnly UnavailableDate { get; set; }
     public string? Reason { get; set; }
 
-    /// Database v2.4: set when an ADMINISTRATOR approved this day as an extra day off (an emergency beyond the
-    /// 5 a month). It points to the ADMIN_ACTIONS row that says who approved it, when and why; such a day does not
-    /// count toward the provider's 5. Null for the provider's own days off.
+    /// Database v2.4: set when an ADMINISTRATOR gave this day as an extra day off (an emergency, e.g. sick today).
+    /// It points to the ADMIN_ACTIONS row that says who gave it, when and why.
     public int? ApprovedByActionId { get; set; }
+
+    /// Database v2.7: set when this day belongs to a provider's day-off REQUEST (1 to 7 days). The request says
+    /// whether it is Pending or Approved; only an Approved request (or a day without a request) stops bookings.
+    /// A day has a request OR an administrator's approval, never both (CK_PROVIDER_UNAVAILABLE_DATES_SOURCE).
+    public int? RequestId { get; set; }
 
     public Provider Provider { get; set; } = null!;
     public AdminAction? ApprovedBy { get; set; }
+    public ProviderDayOffRequest? Request { get; set; }
+}
+
+/// Database v2.7: a provider's request for 1 to 7 days off in a row. Its days are PROVIDER_UNAVAILABLE_DATES rows
+/// (one per date, so the database still allows only one provider per date); the request holds what is said once:
+/// who asked, why, when, and the administrator's answer.
+public class ProviderDayOffRequest
+{
+    public int RequestId { get; set; }
+    public int ProviderId { get; set; }
+    public string? Reason { get; set; }
+    public string Status { get; set; } = DayOffStatuses.Pending;
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
+
+    /// The ADMIN_ACTIONS row of the decision (who approved or rejected it, and when). Null while Pending.
+    public int? DecidedByActionId { get; set; }
+
+    public Provider Provider { get; set; } = null!;
+    public AdminAction? DecidedBy { get; set; }
+    public ICollection<ProviderUnavailableDate> Days { get; set; } = new List<ProviderUnavailableDate>();
 }
 
 public class ServiceCategory

@@ -30,6 +30,23 @@ public class AdminUsersController : Controller
         return View(vm);
     }
 
+    /// The "View" pop-up (partial=true, fetched by admin-approval.js) or the same content as a normal page.
+    [HttpGet("{userId:int}")]
+    public async Task<IActionResult> Details(int userId, string? q, string? status, int page = 1, bool partial = false, CancellationToken ct = default)
+    {
+        if (!TryGetUserId(out var adminId)) return Forbid();
+
+        var lookup = await _users.GetCustomerDetailsAsync(adminId, userId, ct);
+        if (lookup.Outcome == CustomerDetailsOutcome.NotAllowed) return await EndSessionAsync();
+        if (lookup.Outcome == CustomerDetailsOutcome.NotFound) return NotFound();
+
+        var vm = lookup.Details!;
+        vm.ReturnQ = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+        vm.ReturnStatus = status is "Active" or "Suspended" or "Deactivated" ? status : "All";
+        vm.ReturnPage = Math.Max(1, page);
+        return partial ? PartialView("_CustomerDetails", vm) : View("Details", vm);
+    }
+
     [HttpPost("status")]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ChangeStatus(ChangeStatusForm form, CancellationToken ct)

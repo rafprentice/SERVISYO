@@ -285,6 +285,7 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-act--ok { background: #DCFCE7; color: #166534; border-color: #BBF7D0; }
 .sv-act:not([disabled]):hover { filter: brightness(.96); }
 .sv-act[disabled] { opacity: .55; cursor: not-allowed; }
+a.sv-act { display: inline-block; text-decoration: none; }
 
 .sv-table__foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 12px 2px; font-size: .75rem; color: var(--color-text-muted); }
 .sv-pager { display: flex; align-items: center; gap: 10px; }
@@ -486,6 +487,29 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-av__date.is-saved .sv-av__dateedit { display: none; }
 .sv-av__empty { margin: 0; padding: 18px; font-size: .8125rem; color: var(--color-text-muted); }
 .sv-av__empty[hidden] { display: none; }
+
+/* day-off requests (database v2.7) */
+#sv-av-daysoff { margin-top: 24px; }
+.sv-av__days { font-weight: 400; color: var(--color-text-muted); }
+.sv-av__badge { display: inline-block; margin-left: 6px; vertical-align: 1px; }
+.sv-av__date.is-pending { background: #FFFBEB; }
+.sv-av__remove { margin: 0; }
+#sv-av-request { flex: none; white-space: nowrap; }
+#sv-av-request[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.sv-av__dayoffnote { margin: 0; padding: 10px 18px; border-bottom: 1px solid #FDE68A; background: #FFFBEB; font-size: .75rem; color: #92400E; }
+.sv-av__dayofferr { margin: 0; padding: 10px 18px; border-bottom: 1px solid #FECACA; background: #FEF2F2; font-size: .75rem; color: #991B1B; }
+.sv-av__dayofferr .sv-av__errors { margin: 4px 0 0; }
+.sv-av__dofields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sv-av__dofield { display: grid; gap: 4px; font-size: .75rem; font-weight: 600; }
+.sv-av__dofield em { font-style: normal; font-weight: 400; color: var(--color-text-muted); }
+.sv-av__dofield input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: #fff; font: .8125rem var(--font-body); }
+.sv-av__dofield input:focus { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.sv-av__dofield input[aria-invalid="true"] { border-color: #DC2626; }
+.sv-av__dosum { margin: 0; font-size: .75rem; color: var(--color-text-muted); }
+.sv-av__dosum:empty { display: none; }
+#sv-av-do-error { padding: 8px 10px; border-radius: 6px; background: #FEF2F2; font-size: .75rem; }
+#sv-av-do-error[hidden] { display: none; }
+@media (max-width: 480px) { .sv-av__dofields { grid-template-columns: 1fr; } }
 
 /* settings */
 .sv-av__settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; padding: 16px 18px 18px; }
@@ -1003,6 +1027,27 @@ a.sv-side__link:hover { background: var(--color-surface-soft); color: var(--colo
 .sv-pd__daysoff li:last-child { border-bottom: 0; }
 .sv-pd__dodate { flex: none; font-weight: 600; }
 .sv-pd__doreason { flex: 1 1 120px; min-width: 0; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.sv-pd__dodays { font-weight: 400; color: var(--color-text-muted); }
+/* admin > providers: day-off requests waiting for an answer (database v2.7, updated live) */
+.sv-dow { margin: 0 0 16px; padding: 14px 18px; border-color: #FDE68A; background: #FFFBEB; }
+.sv-dow__title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: .875rem; font-weight: 600; }
+.sv-dow__list { margin: 0; padding: 0; list-style: none; }
+.sv-dow__list li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 7px 0; border-top: 1px solid #FDE68A; font-size: .8125rem; }
+.sv-dow__who { font-weight: 600; }
+.sv-dow__when { flex: 1 1 160px; color: var(--color-text-muted); }
+/* admin > users > "View" (customer details) */
+.sv-cd__bookings { margin: 0; padding: 0; list-style: none; border: 1px solid var(--color-border); border-radius: 6px; }
+.sv-cd__bookings li { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; padding: 9px 12px; border-bottom: 1px solid #EEF1F7; font-size: .8125rem; }
+.sv-cd__bookings li:last-child { border-bottom: 0; }
+.sv-cd__what { flex: 1 1 200px; min-width: 0; }
+.sv-cd__service { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.sv-cd__id { font-weight: 400; color: var(--color-text-muted); }
+.sv-cd__meta { display: block; font-size: .75rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.sv-cd__amount { flex: none; font-weight: 600; }
+.sv-cd__more { margin: 6px 0 0; font-size: .75rem; color: var(--color-text-muted); }
+.sv-pd__daysoff li.is-pending { background: #FFFBEB; }
+.sv-pd__dodecide { display: flex; gap: 6px; margin: 0 0 0 auto; }
+.sv-pd__h .sv-tag { margin-left: 6px; vertical-align: 1px; }
 .sv-pd__dayoff { margin-top: 10px; }
 .sv-pd__dohint { margin: 0 0 6px; font-size: .6875rem; color: var(--color-text-muted); }
 .sv-pd__dorow { display: flex; flex-wrap: wrap; gap: 8px; }
