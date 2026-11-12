@@ -10,13 +10,19 @@ using Servisyo.Web.ViewModels;
 namespace Servisyo.Web.Controllers;
 
 /// "My Profile": a provider's own business information. Provider accounts only; the provider is always taken from the sign-in cookie.
+/// Database v2.8: an approved provider's name is locked, so they send a name change request here (an administrator answers).
 [Authorize(Roles = Roles.ServiceProvider)]
 [Route("provider/profile")]
 public class ProviderProfileController : Controller
 {
     private readonly IProviderProfileService _profile;
+    private readonly INameChangeRequestService _nameChanges;
 
-    public ProviderProfileController(IProviderProfileService profile) => _profile = profile;
+    public ProviderProfileController(IProviderProfileService profile, INameChangeRequestService nameChanges)
+    {
+        _profile = profile;
+        _nameChanges = nameChanges;
+    }
 
     [HttpGet("")]
     public async Task<IActionResult> Index(CancellationToken ct)
@@ -30,7 +36,75 @@ public class ProviderProfileController : Controller
         var page = result.Page!;
         page.FlashMessage = TempData["Flash"] as string;
         page.FlashIsError = TempData["FlashKind"] as string == "error";
+        page.NameChange = await _nameChanges.GetSectionAsync(userId, ct);
+
+        // an administrator may have approved a name change since the provider signed in: the public pages show the
+        // name from the sign-in cookie, so bring it up to date (the database is always the source)
+        if (!string.Equals((User.FindFirstValue(ClaimTypes.Name) ?? string.Empty).Trim(), page.FullName, StringComparison.Ordinal))
+            await RefreshSignInAsync(page.FullName, page.Form.Email ?? User.FindFirstValue(ClaimTypes.Email) ?? string.Empty);
+
         return View(page);
+    }
+
+    // ---------------------------------------------------------- name change requests (database v2.8)
+
+    [HttpPost("name-change")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RequestNameChange(NameChangeForm form, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Forbid();
+
+        // the provider comes from the sign-in cookie; the service checks they are an Active, Approved provider
+        var result = await _nameChanges.RequestAsync(userId, form, ct);
+        if (result.Done || result.Outcome == NameChangeOutcome.NotAllowed)
+        {
+            if (result.Done)
+            {
+                TempData["Flash"] = result.Message;
+                TempData["FlashKind"] = "ok";
+            }
+            return RedirectToAction(nameof(Index));     // NotAllowed: Index sends a pending / rejected / inactive account away
+        }
+
+        // refused: the page again (400) with what was typed and the problems, the pop-up open
+        var shown = await _profile.GetAsync(userId, null, null, ct);
+        var denied = Denied(shown.Access);
+        if (denied is not null) return await denied;
+
+        var page = shown.Page!;
+        var section = await _nameChanges.GetSectionAsync(userId, ct);
+        if (section is not null)
+        {
+            section.Form = form;
+            section.FieldErrors = result.FieldErrors;
+            section.FormError = result.FieldErrors.Count == 0 ? result.Message : null;
+            section.OpenDialog = section.CanRequest;
+        }
+        if (section is null || !section.CanRequest)
+        {
+            // e.g. a request is already waiting: say it at the top (the pop-up cannot open while one waits)
+            page.FlashMessage = result.Message;
+            page.FlashIsError = true;
+        }
+        page.NameChange = section;
+        Response.StatusCode = StatusCodes.Status400BadRequest;
+        return View(nameof(Index), page);
+    }
+
+    [HttpPost("name-change/{requestId:int}/cancel")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> CancelNameChange(int requestId, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Forbid();
+
+        // only the signed-in provider's OWN request, and only while it is Pending (checked by the service)
+        var result = await _nameChanges.CancelAsync(userId, requestId, ct);
+        if (result.Outcome != NameChangeOutcome.NotAllowed)
+        {
+            TempData["Flash"] = result.Message;
+            TempData["FlashKind"] = result.Done ? "ok" : "error";
+        }
+        return RedirectToAction(nameof(Index));
     }
 
     [HttpPost("")]
@@ -56,6 +130,7 @@ public class ProviderProfileController : Controller
             var shown = await _profile.GetAsync(userId, form, refused, ct);   // also checks the account is an approved, active provider
             var deniedShown = Denied(shown.Access);
             if (deniedShown is not null) return await deniedShown;
+            shown.Page!.NameChange = await _nameChanges.GetSectionAsync(userId, ct);
             return View(nameof(Index), shown.Page!);
         }
 
@@ -82,6 +157,7 @@ public class ProviderProfileController : Controller
         var deniedAgain = Denied(again.Access);
         if (deniedAgain is not null) return await deniedAgain;
 
+        again.Page!.NameChange = await _nameChanges.GetSectionAsync(userId, ct);
         return View(nameof(Index), again.Page!);
     }
 

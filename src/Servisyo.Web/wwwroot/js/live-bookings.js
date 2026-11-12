@@ -117,6 +117,14 @@
         document.dispatchEvent(new CustomEvent("sv:dayoff-changed", { detail: data || {} }));
     });
 
+    // ---- name change requests (database v2.8): a provider asked or cancelled, or an administrator answered.
+    // The bell asks again; admin-approval.js (dashboard, Name Changes) and provider-profile.js (My Profile) fetch
+    // their part of the page again.
+    connection.on("nameChangeChanged", function (data) {
+        document.dispatchEvent(new CustomEvent("sv:notifications-refresh"));
+        document.dispatchEvent(new CustomEvent("sv:namechange-changed", { detail: data || {} }));
+    });
+
     // other scripts check this before they fall back to asking the server every 30 seconds
     function connected(on) { document.documentElement.setAttribute("data-sv-live-connected", on ? "true" : "false"); }
     connection.onreconnecting(function () { connected(false); });
@@ -127,6 +135,7 @@
         connected(true);
         refresh({ bookingId: "" });
         document.dispatchEvent(new CustomEvent("sv:dayoff-changed", { detail: {} }));
+        document.dispatchEvent(new CustomEvent("sv:namechange-changed", { detail: {} }));
     });
 
     function start() {

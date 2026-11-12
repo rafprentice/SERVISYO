@@ -63,6 +63,7 @@ public class Provider
     public ICollection<ProviderAvailability> Availabilities { get; set; } = new List<ProviderAvailability>();
     public ICollection<ProviderUnavailableDate> UnavailableDates { get; set; } = new List<ProviderUnavailableDate>();
     public ICollection<ProviderDayOffRequest> DayOffRequests { get; set; } = new List<ProviderDayOffRequest>();
+    public ICollection<ProviderNameChangeRequest> NameChangeRequests { get; set; } = new List<ProviderNameChangeRequest>();   // v2.8
     public ICollection<ProviderCategory> ProviderCategories { get; set; } = new List<ProviderCategory>();
     public ICollection<Service> Services { get; set; } = new List<Service>();
     public ICollection<Booking> Bookings { get; set; } = new List<Booking>();
@@ -129,6 +130,31 @@ public class ProviderDayOffRequest
     public Provider Provider { get; set; } = null!;
     public AdminAction? DecidedBy { get; set; }
     public ICollection<ProviderUnavailableDate> Days { get; set; } = new List<ProviderUnavailableDate>();
+}
+
+/// Database v2.8: an approved provider asks an administrator to change the name on their account (their name is
+/// locked once they are approved). Only the NEW name is kept here: the current name is in USERS, and when the
+/// request is approved the new name is copied there (the USERS audit trigger logs the old one in SYSTEM_LOGS).
+public class ProviderNameChangeRequest
+{
+    public int RequestId { get; set; }
+    public int ProviderId { get; set; }
+
+    /// The name the provider asks for (the same rules as at registration).
+    public string FirstName { get; set; } = string.Empty;
+    public string? MiddleName { get; set; }
+    public string LastName { get; set; } = string.Empty;
+
+    /// Why (for example "Married, new last name" or "Spelling mistake"). Required.
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = NameChangeStatuses.Pending;
+    public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
+
+    /// The ADMIN_ACTIONS row of the decision (who approved or rejected it, and when). Null while Pending.
+    public int? DecidedByActionId { get; set; }
+
+    public Provider Provider { get; set; } = null!;
+    public AdminAction? DecidedBy { get; set; }
 }
 
 public class ServiceCategory

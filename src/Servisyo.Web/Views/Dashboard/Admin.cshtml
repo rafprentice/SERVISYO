@@ -6,9 +6,6 @@
     Layout = "_PortalLayout";
     ViewData["Shell"] = Model.Shell;
     ViewData["ActiveNav"] = "dashboard";
-
-    // Buttons for screens that are built in later stages stay visible but greyed out.
-    var soon = "Available in an upcoming update";
 }
 
 <partial name="_AdminToast" />
@@ -25,54 +22,65 @@
     </a>
 </div>
 
-<!-- Needs admin attention: only rows that are really waiting -->
-<section class="sv-panel sv-attn" aria-labelledby="attn-title">
+<!-- Needs admin attention: only rows that are really waiting. Live: fetched again when a provider sends or cancels a
+     day-off or name change request, or an administrator answers one (SignalR, see admin-approval.js). -->
+<section class="sv-panel sv-attn" id="sv-attn" aria-labelledby="attn-title" data-sv-admin-live="dayoff namechange"
+         data-refresh-url="@Url.Action("Admin", "Dashboard")">
     <div class="sv-panel__head sv-panel__head--soft">
-        <h2 id="attn-title" class="sv-panel__title">Needs Admin Attention</h2>
+        <h2 id="attn-title" class="sv-panel__title sv-attn__title">
+            Needs Admin Attention
+            @if (Model.Attention.Count > 0)
+            {
+                <span class="sv-attn__count">@Model.Attention.Count</span>
+            }
+        </h2>
     </div>
     @if (Model.Attention.Count == 0)
     {
-        <p class="sv-panel__empty">All clear. Applications, flagged reviews, suspended accounts and bookings that need you will show up here.</p>
+        <p class="sv-panel__empty sv-attn__clear">@Icons.Svg("check", 16) @AdminAttention.AllCaughtUp</p>
     }
     else
     {
         <ul class="sv-list">
             @foreach (var a in Model.Attention)
             {
-                <li class="sv-attn__row">
+                string? HrefOf(AdminAttentionAction action) => action switch
+                {
+                    AdminAttentionAction.ReviewApplication => Url.Action("Review", "AdminApplications", new { providerId = a.TargetId, returnTo = "dashboard" }),
+                    AdminAttentionAction.ApplicationList => Url.Action("Index", "AdminProviders", new { status = "Pending" }),
+                    AdminAttentionAction.ModerateReviews => Url.Action("Index", "AdminReviews", new { status = "Flagged" }),
+                    AdminAttentionAction.BookingList => Url.Action("Index", "AdminBookings"),
+                    // opens Admin > Service Providers with the provider of the oldest waiting request already open
+                    AdminAttentionAction.ReviewDayOffs => Url.Action("Index", "AdminProviders", new { review = a.TargetId }),
+                    AdminAttentionAction.NameChangeList => Url.Action("Index", "AdminNameChanges"),
+                    AdminAttentionAction.SuspendedCustomers => Url.Action("Index", "AdminUsers", new { status = "Suspended" }),
+                    AdminAttentionAction.SuspendedProviders => Url.Action("Index", "AdminProviders", new { status = "Suspended" }),
+                    _ => null
+                };
+                var href = HrefOf(a.Action);
+                var secondHref = a.SecondaryLabel is null ? null : HrefOf(a.SecondaryAction);
+
+                <li class="sv-attn__row" data-sv-attn="@a.Key">
                     <span class="sv-attn__text">
-                        <span class="sv-attn__mark" aria-hidden="true">
-                            @if (a.Tone == "alert")
-                            {
-                                <span class="sv-attn__icon">@Icons.Svg("alert", 16)</span>
-                            }
-                            else
-                            {
-                                <span class="sv-dot sv-dot--@a.Tone"></span>
-                            }
-                        </span>
+                        <span class="sv-attn__mark" aria-hidden="true"><span class="sv-dot sv-dot--@a.Tone"></span></span>
                         @a.Text
                     </span>
-                    @{
-                        // Where the button goes. Screens that are not built yet keep a greyed-out button.
-                        string? href = a.Action switch
+                    <span class="sv-attn__acts">
+                        @if (secondHref is not null)
                         {
-                            AdminAttentionAction.ReviewApplication => Url.Action("Review", "AdminApplications", new { providerId = a.TargetId, returnTo = "dashboard" }),
-                            AdminAttentionAction.ApplicationList => Url.Action("Index", "AdminProviders", new { status = "Pending" }),
-                            AdminAttentionAction.ModerateReviews => Url.Action("Index", "AdminReviews", new { status = "Flagged" }),
-                            AdminAttentionAction.BookingList => Url.Action("Index", "AdminBookings"),
-                            _ => null
-                        };
-                    }
-                    @if (href is null)
-                    {
-                        <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled title="@soon">@a.ActionLabel</button>
-                    }
-                    else
-                    {
-                        <a class="sv-btn sv-btn--soft sv-btn--xs" href="@href"
-                           data-review-link="@(a.Action == AdminAttentionAction.ReviewApplication ? "true" : null)">@a.ActionLabel</a>
-                    }
+                            <a class="sv-attn__second" href="@secondHref">@a.SecondaryLabel</a>
+                        }
+                        @if (href is null)
+                        {
+                            <button type="button" class="sv-btn sv-btn--soft sv-btn--xs" disabled>@a.ActionLabel</button>
+                        }
+                        else
+                        {
+                            @* the oldest application opens in the review pop-up (admin-approval.js); the others are normal links *@
+                            <a class="sv-btn sv-btn--soft sv-btn--xs sv-attn__btn" href="@href"
+                               data-review-link="@(a.Action == AdminAttentionAction.ReviewApplication ? "true" : "false")">@a.ActionLabel @Icons.Svg("arrow-right", 12)</a>
+                        }
+                    </span>
                 </li>
             }
         </ul>

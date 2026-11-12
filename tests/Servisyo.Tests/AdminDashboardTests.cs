@@ -37,43 +37,107 @@ public class AdminBookingDisplayTests
 
 public class AdminAttentionTests
 {
+    private static List<AdminAttentionItem> Build(int dayOffs = 0, int nameChanges = 0, int applications = 0, int suspendedCustomers = 0,
+        int suspendedProviders = 0, int flagged = 0, int bookings = 0) =>
+        AdminAttention.Build(new AdminAttentionCounts
+        {
+            DayOffRequests = dayOffs, NameChangeRequests = nameChanges, PendingApplications = applications,
+            SuspendedCustomers = suspendedCustomers, SuspendedProviders = suspendedProviders, FlaggedReviews = flagged,
+            BookingsNeedingAttention = bookings
+        });
+
     [Fact]
-    public void NothingWaiting_GivesNoRows()
-        => Assert.Empty(AdminAttention.Build(0, 0, 0, 0));
+    public void NothingWaiting_GivesNoRows_AndTheEmptyTextIsTheRequestedOne()
+    {
+        Assert.Empty(Build());
+        Assert.Equal("All caught up! No pending requests requiring admin attention.", AdminAttention.AllCaughtUp);
+    }
 
     [Fact]
     public void OneOfEach_UsesSingularWording_InFixedOrder()
     {
-        var rows = AdminAttention.Build(1, 1, 1, 1);
+        var rows = Build(1, 1, 1, 1, 0, 1, 1);
 
-        Assert.Equal(4, rows.Count);
-        Assert.Equal("1 provider application waiting for review", rows[0].Text);
-        Assert.Equal("1 flagged review needs moderation", rows[1].Text);
-        Assert.Equal("1 suspended account requiring review", rows[2].Text);
-        Assert.Equal("1 booking needs attention (low rating or date passed)", rows[3].Text);
-        Assert.Equal("View Booking", rows[3].ActionLabel);
-        Assert.Equal(AdminAttentionAction.BookingList, rows[3].Action);
+        Assert.Equal(6, rows.Count);
+        Assert.Equal("1 provider day-off request awaiting approval", rows[0].Text);
+        Assert.Equal("Review Day Offs", rows[0].ActionLabel);
+        Assert.Equal("1 name change request pending review", rows[1].Text);
+        Assert.Equal("Review Requests", rows[1].ActionLabel);
+        Assert.Equal("1 new service provider application pending", rows[2].Text);
+        Assert.Equal("Review Providers", rows[2].ActionLabel);
+        Assert.Equal("1 suspended account requiring review", rows[3].Text);
+        Assert.Equal("View Accounts", rows[3].ActionLabel);
+        Assert.Equal("1 flagged review needs moderation", rows[4].Text);
+        Assert.Equal("1 booking needs attention (low rating or date passed)", rows[5].Text);
+        Assert.Equal("View Booking", rows[5].ActionLabel);
+        Assert.Equal(AdminAttentionAction.BookingList, rows[5].Action);
     }
 
     [Fact]
     public void Many_UsesPluralWording()
     {
-        var rows = AdminAttention.Build(2, 3, 2, 4);
+        var rows = Build(3, 2, 2, 2, 0, 3, 4);
 
-        Assert.Equal("2 provider applications waiting for review", rows[0].Text);
-        Assert.Equal("3 flagged reviews need moderation", rows[1].Text);
-        Assert.Equal("2 suspended accounts requiring review", rows[2].Text);
-        Assert.Equal("4 bookings need attention (low ratings or dates passed)", rows[3].Text);
-        Assert.Equal("View Bookings", rows[3].ActionLabel);
+        Assert.Equal("3 provider day-off requests awaiting approval", rows[0].Text);
+        Assert.Equal("2 name change requests pending review", rows[1].Text);
+        Assert.Equal("2 new service provider applications pending", rows[2].Text);
+        Assert.Equal("2 suspended accounts requiring review", rows[3].Text);
+        Assert.Equal("3 flagged reviews need moderation", rows[4].Text);
+        Assert.Equal("4 bookings need attention (low ratings or dates passed)", rows[5].Text);
+        Assert.Equal("View Bookings", rows[5].ActionLabel);
     }
 
     [Fact]
     public void OnlyRowsWithWork_AreShown()
     {
-        var rows = AdminAttention.Build(0, 2, 0, 0);
-
-        var row = Assert.Single(rows);
+        var row = Assert.Single(Build(flagged: 2));
         Assert.Equal("Moderate Reviews", row.ActionLabel);
+    }
+
+    [Fact]
+    public void RequestsAreAmber_AccountsAndApplicantsAreRed()
+    {
+        var rows = Build(1, 1, 1, 1);
+        Assert.Equal(new[] { "warning", "warning", "danger", "danger" }, rows.Select(r => r.Tone));
+        Assert.Equal(new[] { "day-off", "name-change", "application", "suspended" }, rows.Select(r => r.Key));
+    }
+
+    [Fact]
+    public void EveryButton_GoesSomewhere()
+    {
+        var rows = Build(1, 1, 1, 1, 1, 1, 1);
+        Assert.DoesNotContain(rows, r => r.Action == AdminAttentionAction.None);
+    }
+
+    [Fact]
+    public void DayOffs_OpenTheOldestRequestsProvider_NameChanges_OpenTheList()
+    {
+        var rows = AdminAttention.Build(new AdminAttentionCounts { DayOffRequests = 2, FirstDayOffProviderId = 7, NameChangeRequests = 1 });
+
+        Assert.Equal(AdminAttentionAction.ReviewDayOffs, rows[0].Action);
+        Assert.Equal(7, rows[0].TargetId);
+        Assert.Equal(AdminAttentionAction.NameChangeList, rows[1].Action);
+    }
+
+    [Fact]
+    public void SuspendedAccounts_GoWhereTheyAreManaged()
+    {
+        // only customers: Admin > Users, Suspended tab
+        var customers = Assert.Single(Build(suspendedCustomers: 2));
+        Assert.Equal(AdminAttentionAction.SuspendedCustomers, customers.Action);
+        Assert.Null(customers.SecondaryLabel);
+
+        // only providers: Admin > Service Providers, Suspended tab
+        var providers = Assert.Single(Build(suspendedProviders: 1));
+        Assert.Equal(AdminAttentionAction.SuspendedProviders, providers.Action);
+        Assert.Equal("1 suspended account requiring review", providers.Text);
+
+        // both: the customers first, plus a link to the providers
+        var both = Assert.Single(Build(suspendedCustomers: 2, suspendedProviders: 1));
+        Assert.Equal("3 suspended accounts requiring review (2 customers, 1 provider)", both.Text);
+        Assert.Equal(AdminAttentionAction.SuspendedCustomers, both.Action);
+        Assert.Equal(AdminAttentionAction.SuspendedProviders, both.SecondaryAction);
+        Assert.Equal("Suspended providers", both.SecondaryLabel);
     }
 }
 
@@ -217,9 +281,13 @@ public class AdminDashboardServiceTests
         Assert.Equal(1, vm.FlaggedReviews);
 
         Assert.Collection(vm.Attention,
-            a => Assert.Equal("2 provider applications waiting for review", a.Text),
-            a => Assert.Equal("1 flagged review needs moderation", a.Text),
-            a => Assert.Equal("1 suspended account requiring review", a.Text));
+            a => Assert.Equal("2 new service provider applications pending", a.Text),
+            a =>
+            {
+                Assert.Equal("1 suspended account requiring review", a.Text);
+                Assert.Equal(AdminAttentionAction.SuspendedCustomers, a.Action);      // Brent is a customer
+            },
+            a => Assert.Equal("1 flagged review needs moderation", a.Text));
         // database v2.3: "bookings that need attention" comes from usp_GetBookingsNeedingAttention (SQL self-test 33);
         // the in-memory test database has no stored procedures, so that row is not here
     }
@@ -290,5 +358,93 @@ public class AdminDashboardServiceTests
         Assert.Equal("Maricel Bautista", second.Name);
         Assert.Equal("MB", second.Initials);
         Assert.Equal("Maricel Cleaning", second.Details);   // no category yet -> business name
+    }
+}
+
+/// The dashboard's "Needs Admin Attention" counts every kind of request that waits (day-off requests v2.7, name change
+/// requests v2.8, applications, suspended accounts) from the real data.
+public class AdminDashboardRequestCountTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 11, 12, 2, 0, 0, TimeSpan.Zero);     // Thu Nov 12, 10:00 in Cebu
+
+    private sealed class FixedClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private static User NewUser(string first, string role, string status = AccountStatuses.Active) => new()
+    {
+        FirstName = first, LastName = "Reyes", Email = $"{Guid.NewGuid():N}@test.com", PasswordHash = "x", Role = role, AccountStatus = status
+    };
+
+    private static Provider Approved(string first, string status = AccountStatuses.Active) =>
+        new() { BusinessName = first + " Works", ApprovalStatus = ApprovalStatuses.Approved, User = NewUser(first, Roles.ServiceProvider, status) };
+
+    private static ProviderDayOffRequest DayOff(Provider p, DateTime requestedAt, params DateOnly[] days)
+    {
+        var r = new ProviderDayOffRequest { Provider = p, Status = DayOffStatuses.Pending, RequestedAt = requestedAt, Reason = "Trip" };
+        foreach (var d in days) r.Days.Add(new ProviderUnavailableDate { Provider = p, UnavailableDate = d });
+        return r;
+    }
+
+    [Fact]
+    public async Task DayOffs_NameChanges_AndSuspendedProviders_AreCounted_WithWhereEachButtonGoes()
+    {
+        var db = new ServisyoDbContext(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var admin = NewUser("Ada", Roles.Administrator);
+        var vince = Approved("Vince");
+        var liza = Approved("Liza");
+        var old = Approved("Olga");
+        var off = Approved("Sam", AccountStatuses.Suspended);
+        db.Users.Add(admin);
+        db.Providers.AddRange(vince, liza, old, off);
+        await db.SaveChangesAsync();
+
+        db.DayOffRequests.AddRange(
+            DayOff(liza, Now.UtcDateTime.AddHours(-1), new DateOnly(2026, 11, 20)),
+            DayOff(vince, Now.UtcDateTime.AddHours(-5), new DateOnly(2026, 11, 25), new DateOnly(2026, 11, 26)),   // waited longest
+            DayOff(old, Now.UtcDateTime.AddDays(-9), new DateOnly(2026, 11, 2)));                                // its day has passed: not counted
+        db.NameChangeRequests.Add(new ProviderNameChangeRequest { ProviderId = liza.ProviderId, FirstName = "Liza", MiddleName = "Lim", LastName = "Uy", Reason = "Married" });
+        await db.SaveChangesAsync();
+
+        var vm = (await new AdminDashboardService(db, new FixedClock()).GetAsync(admin.UserId))!;
+
+        Assert.Collection(vm.Attention,
+            a =>
+            {
+                Assert.Equal("2 provider day-off requests awaiting approval", a.Text);
+                Assert.Equal(AdminAttentionAction.ReviewDayOffs, a.Action);
+                Assert.Equal(vince.ProviderId, a.TargetId);
+            },
+            a =>
+            {
+                Assert.Equal("1 name change request pending review", a.Text);
+                Assert.Equal(AdminAttentionAction.NameChangeList, a.Action);
+            },
+            a =>
+            {
+                Assert.Equal("1 suspended account requiring review", a.Text);
+                Assert.Equal(AdminAttentionAction.SuspendedProviders, a.Action);       // Sam is a provider: Admin > Service Providers
+            });
+    }
+
+    [Fact]
+    public async Task AnsweredRequests_LeaveTheList()
+    {
+        var db = new ServisyoDbContext(new DbContextOptionsBuilder<ServisyoDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var admin = NewUser("Ada", Roles.Administrator);
+        var liza = Approved("Liza");
+        db.Users.Add(admin);
+        db.Providers.Add(liza);
+        await db.SaveChangesAsync();
+        var requests = new NameChangeRequestService(db);
+        Assert.True((await requests.RequestAsync(liza.UserId, new NameChangeForm { FirstName = "Liza", MiddleName = "Lim", LastName = "Uy", Reason = "Married" })).Done);
+        var dashboard = new AdminDashboardService(db, new FixedClock());
+
+        Assert.Single((await dashboard.GetAsync(admin.UserId))!.Attention);
+
+        await requests.DecideAsync(admin.UserId, (await db.NameChangeRequests.SingleAsync()).RequestId, approve: true);
+
+        Assert.Empty((await dashboard.GetAsync(admin.UserId))!.Attention);
     }
 }

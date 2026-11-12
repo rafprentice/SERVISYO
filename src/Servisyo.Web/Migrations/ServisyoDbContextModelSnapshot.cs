@@ -691,6 +691,81 @@ namespace Servisyo.Web.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.ProviderNameChangeRequest", b =>
+                {
+                    b.Property<int>("RequestId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("REQUEST_ID");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("RequestId"));
+
+                    b.Property<int?>("DecidedByActionId")
+                        .HasColumnType("int")
+                        .HasColumnName("DECIDED_BY_ACTION_ID");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("FIRST_NAME");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("LAST_NAME");
+
+                    b.Property<string>("MiddleName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("MIDDLE_NAME");
+
+                    b.Property<int>("ProviderId")
+                        .HasColumnType("int")
+                        .HasColumnName("PROVIDER_ID");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)")
+                        .HasColumnName("REASON");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("REQUESTED_AT")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Pending")
+                        .HasColumnName("STATUS");
+
+                    b.HasKey("RequestId");
+
+                    b.HasIndex("DecidedByActionId")
+                        .IsUnique()
+                        .HasFilter("[DECIDED_BY_ACTION_ID] IS NOT NULL");
+
+                    b.HasIndex("ProviderId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PROVIDER_NAME_CHANGE_REQUESTS_ONE_PENDING")
+                        .HasFilter("[STATUS] = 'Pending'");
+
+                    b.HasIndex("ProviderId", "Status");
+
+                    b.ToTable("PROVIDER_NAME_CHANGE_REQUESTS", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION", "([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS", "[STATUS] IN ('Pending','Approved','Rejected')");
+                        });
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.ProviderUnavailableDate", b =>
                 {
                     b.Property<int>("UnavailableId")
@@ -1221,6 +1296,24 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Provider");
                 });
 
+            modelBuilder.Entity("Servisyo.Web.Models.ProviderNameChangeRequest", b =>
+                {
+                    b.HasOne("Servisyo.Web.Models.AdminAction", "DecidedBy")
+                        .WithMany()
+                        .HasForeignKey("DecidedByActionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Servisyo.Web.Models.Provider", "Provider")
+                        .WithMany("NameChangeRequests")
+                        .HasForeignKey("ProviderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("DecidedBy");
+
+                    b.Navigation("Provider");
+                });
+
             modelBuilder.Entity("Servisyo.Web.Models.ProviderUnavailableDate", b =>
                 {
                     b.HasOne("Servisyo.Web.Models.AdminAction", "ApprovedBy")
@@ -1302,6 +1395,8 @@ namespace Servisyo.Web.Migrations
                     b.Navigation("Bookings");
 
                     b.Navigation("DayOffRequests");
+
+                    b.Navigation("NameChangeRequests");
 
                     b.Navigation("ProviderCategories");
 

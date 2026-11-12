@@ -12,7 +12,8 @@
      v2.2 AdminTargets    every admin log row must point to something that still exists
      v2.3 DerivedData     every payment must be convertible
      v2.5 OneDayOffPerDate only one provider may be off on any date
-     v2.6 MaxJobsPerDay20 (INFO) providers above 20 jobs a day become 20 */
+     v2.6 MaxJobsPerDay20 (INFO) providers above 20 jobs a day become 20
+   v2.7 DayOffRequests and v2.8 NameChangeRequests only add new (empty) tables: there is nothing to check for them. */
 SET NOCOUNT ON;
 DECLARE @out TABLE (SEQ INT IDENTITY(1, 1) PRIMARY KEY, KIND NVARCHAR(4) NOT NULL, LINE NVARCHAR(1000) NOT NULL);
 

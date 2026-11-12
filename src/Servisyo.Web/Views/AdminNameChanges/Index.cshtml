@@ -1,0 +1,140 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.Models
+@using Servisyo.Web.ViewModels
+@model NameChangesPageViewModel
+@{
+    ViewData["Title"] = "Name Changes";
+    Layout = "_PortalLayout";
+    ViewData["Shell"] = Model.Shell;
+    ViewData["ActiveNav"] = "namechanges";
+
+    var tabs = new (string Key, string Label, int Count)[]
+    {
+        (NameChangeStatuses.Pending, "Pending", Model.CountPending),
+        (NameChangeStatuses.Approved, "Approved", Model.CountApproved),
+        (NameChangeStatuses.Rejected, "Rejected", Model.CountRejected),
+        (NameChangeTabs.All, "All", Model.CountAll)
+    };
+
+    // Pending is the default tab, so it has no ?status= in the address
+    string? StatusParam() => Model.Status == NameChangeStatuses.Pending ? null : Model.Status;
+}
+
+<partial name="_AdminToast" />
+
+<p class="sv-eyebrow">Requests</p>
+<h1 class="sv-dash__title">Name Change Requests</h1>
+<p class="sv-dash__sub">Approved providers cannot edit their own name. Review what they asked for and approve or reject it.</p>
+
+<nav class="sv-tabs sv-tabs--inline" aria-label="Filter by request status">
+    @foreach (var t in tabs)
+    {
+        <a class="sv-tab @(t.Key == Model.Status ? "is-active" : "")"
+           href="@Url.Action("Index", "AdminNameChanges", new { status = t.Key == NameChangeStatuses.Pending ? null : t.Key })"
+           aria-current="@(t.Key == Model.Status ? "page" : null)">
+            @t.Label <span class="sv-tab__n">(@t.Count)</span>
+        </a>
+    }
+</nav>
+
+@* Live: fetched again when a provider sends or cancels a request, or another administrator answers one
+   (SignalR "nameChangeChanged", see admin-approval.js). *@
+<div id="sv-nc-board" data-sv-admin-live="namechange"
+     data-refresh-url="@Url.Action("Index", "AdminNameChanges", new { status = StatusParam(), page = Model.Page })">
+    <div class="sv-table-wrap">
+        <table class="sv-table sv-nc">
+            <thead>
+                <tr>
+                    <th scope="col">Provider</th>
+                    <th scope="col">New name</th>
+                    <th scope="col">Reason</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" class="sv-table__right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Rows.Count == 0)
+                {
+                    <tr>
+                        <td colspan="5" class="sv-table__empty">
+                            @(Model.Status == NameChangeStatuses.Pending
+                                ? "No name change requests are waiting. New requests from providers will appear here."
+                                : "No name change requests match this filter.")
+                        </td>
+                    </tr>
+                }
+                @foreach (var r in Model.Rows)
+                {
+                    <tr class="@(r.CanDecide ? "is-pending" : "")">
+                        <td>
+                            <div class="sv-table__name">
+                                <span class="sv-avatar sv-avatar--soft" aria-hidden="true">@r.Initials</span>
+                                <span>
+                                    <span class="sv-nc__current">@r.CurrentName</span>
+                                    <span class="sv-nc__biz">@r.BusinessName</span>
+                                    @if (r.AccountNote is not null)
+                                    {
+                                        <span class="sv-tag sv-tag--danger">@r.AccountNote</span>
+                                    }
+                                </span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="sv-nc__new">@r.NewName</span>
+                            <span class="sv-nc__when">Sent @r.RequestedText</span>
+                        </td>
+                        <td class="sv-nc__reason">@r.Reason</td>
+                        <td>
+                            <span class="sv-tag sv-tag--@r.StatusTone">@r.StatusLabel</span>
+                            @if (r.DecidedText is not null)
+                            {
+                                <span class="sv-nc__when">@r.DecidedText</span>
+                            }
+                        </td>
+                        <td class="sv-table__right">
+                            @if (r.CanDecide)
+                            {
+                                @* approving copies the new name to the account; both answers are saved with an admin log entry *@
+                                <form asp-controller="AdminNameChanges" asp-action="Decide" asp-route-requestId="@r.RequestId"
+                                      method="post" class="sv-table__acts" data-sv-decision-form>
+                                    <input type="hidden" name="ReturnStatus" value="@Model.Status" />
+                                    <input type="hidden" name="ReturnPage" value="@Model.Page" />
+                                    <button type="submit" name="Decision" value="Approve" class="sv-act sv-act--ok"
+                                            data-confirm="Change @(r.CurrentName)'s name to @(r.NewName)? Customers will see the new name.">Approve</button>
+                                    <button type="submit" name="Decision" value="Reject" class="sv-act sv-act--danger"
+                                            data-confirm="Reject @(r.CurrentName)'s request? Their name stays the same.">Reject</button>
+                                </form>
+                            }
+                            else
+                            {
+                                <span class="sv-table__muted">Answered</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <div class="sv-table__foot">
+        <span>@Plural.Of(Model.Rows.Count, "request") shown</span>
+        @if (Model.PageCount > 1)
+        {
+            <nav class="sv-pager" aria-label="Pages">
+                @if (Model.Page > 1)
+                {
+                    <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminNameChanges", new { status = StatusParam(), page = Model.Page - 1 })">Previous</a>
+                }
+                <span>Page @Model.Page of @Model.PageCount</span>
+                @if (Model.Page < Model.PageCount)
+                {
+                    <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminNameChanges", new { status = StatusParam(), page = Model.Page + 1 })">Next</a>
+                }
+            </nav>
+        }
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/admin-approval.js" asp-append-version="true"></script>
+}

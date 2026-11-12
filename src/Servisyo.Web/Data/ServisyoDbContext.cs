@@ -15,6 +15,7 @@ public class ServisyoDbContext : DbContext
     public DbSet<ProviderBreak> ProviderBreaks => Set<ProviderBreak>();
     public DbSet<ProviderUnavailableDate> ProviderUnavailableDates => Set<ProviderUnavailableDate>();
     public DbSet<ProviderDayOffRequest> DayOffRequests => Set<ProviderDayOffRequest>();   // v2.7
+    public DbSet<ProviderNameChangeRequest> NameChangeRequests => Set<ProviderNameChangeRequest>();   // v2.8
     public DbSet<ServiceCategory> ServiceCategories => Set<ServiceCategory>();
     public DbSet<ProviderCategory> ProviderCategories => Set<ProviderCategory>();
     public DbSet<Service> Services => Set<Service>();
@@ -36,6 +37,13 @@ public class ServisyoDbContext : DbContext
     public const string DayOffDecisionCheck = "([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL)";
     /// A day off comes from a request OR from an administrator's extra day, never both.
     public const string DayOffSourceCheck = "[REQUEST_ID] IS NULL OR [APPROVED_BY_ACTION_ID] IS NULL";
+
+    /// Database v2.8: the name change requests (the same two rules as the day-off requests).
+    public const string NameChangeStatusCheck = DayOffStatusCheck;
+    public const string NameChangeDecisionCheck = DayOffDecisionCheck;
+    /// Only ONE request per provider can wait for an answer (a filtered UNIQUE index).
+    public const string NameChangeOnePendingIndex = "UX_PROVIDER_NAME_CHANGE_REQUESTS_ONE_PENDING";
+    public const string NameChangeOnePendingFilter = "[STATUS] = 'Pending'";
 
     /// CK_ADMIN_ACTIONS_TARGET (database v2.2): exactly one target column is filled, and it is the one TARGET_TYPE names.
     public const string AdminActionTargetCheck =
@@ -156,6 +164,32 @@ public class ServisyoDbContext : DbContext
             e.HasOne(x => x.DecidedBy).WithMany().HasForeignKey(x => x.DecidedByActionId).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => x.DecidedByActionId).IsUnique();
             e.HasIndex(x => new { x.ProviderId, x.Status });
+        });
+
+        // database v2.8: an approved provider's request to change the name on their account
+        mb.Entity<ProviderNameChangeRequest>(e =>
+        {
+            e.ToTable("PROVIDER_NAME_CHANGE_REQUESTS", t =>
+            {
+                t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS", NameChangeStatusCheck);
+                t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION", NameChangeDecisionCheck);
+            });
+            e.HasKey(x => x.RequestId);
+            e.Property(x => x.FirstName).HasMaxLength(100);      // the same sizes as USERS
+            e.Property(x => x.MiddleName).HasMaxLength(100);
+            e.Property(x => x.LastName).HasMaxLength(100);
+            e.Property(x => x.Status).HasMaxLength(20).HasDefaultValue(NameChangeStatuses.Pending);
+            e.Property(x => x.RequestedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+            e.HasOne(x => x.Provider).WithMany(p => p.NameChangeRequests).HasForeignKey(x => x.ProviderId);
+            // the decision is in the admin history, which is never deleted with it; one admin action decides one request
+            e.HasOne(x => x.DecidedBy).WithMany().HasForeignKey(x => x.DecidedByActionId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.DecidedByActionId).IsUnique();
+            e.HasIndex(x => new { x.ProviderId, x.Status });
+            // one waiting request per provider: the database refuses a second one, even from two clicks at the same moment
+            e.HasIndex(x => x.ProviderId)
+                .IsUnique()
+                .HasDatabaseName(NameChangeOnePendingIndex)
+                .HasFilter(NameChangeOnePendingFilter);
         });
 
         mb.Entity<ServiceCategory>(e =>

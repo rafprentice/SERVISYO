@@ -1274,3 +1274,52 @@ a.sv-act { display: inline-block; text-decoration: none; }
     .sv-rv__head .sv-bd__headright { flex-direction: column-reverse; align-items: flex-end; }
 }
 .sv-rv-page:has(.sv-bd) { max-width: 680px; }
+
+/* ---------- Admin Dashboard: "Needs Admin Attention" (red = an account or applicant waits, amber = a request) ---------- */
+.sv-attn { overflow: hidden; }                      /* the hovered last row keeps the panel's rounded corners */
+.sv-attn__row { transition: background-color .15s ease; }
+.sv-attn__row:hover { background: #F5F6FF; }
+.sv-attn__acts { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.sv-attn__btn { gap: 4px; cursor: pointer; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.sv-attn__btn:hover, .sv-attn__btn:focus-visible { background: #E0E7FF; border-color: #A5B4FC; color: #3730A3; }   /* indigo-100 */
+.sv-attn__btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.sv-attn__btn svg { transition: transform .15s ease; }
+.sv-attn__btn:hover svg { transform: translateX(2px); }
+.sv-attn__second { font-size: .75rem; font-weight: 500; color: var(--color-text-muted); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.sv-attn__second:hover, .sv-attn__second:focus-visible { color: var(--color-primary); }
+.sv-attn__clear { display: flex; align-items: center; gap: 8px; color: #166534; }
+.sv-attn__clear svg { flex: none; color: #16A34A; }
+@media (max-width: 520px) { .sv-attn__acts { align-self: flex-end; } }
+@media (prefers-reduced-motion: reduce) { .sv-attn__row, .sv-attn__btn, .sv-attn__btn svg { transition: none; } }
+
+/* Admin > Service Providers ?review=12: the request the dashboard sent the administrator to */
+.sv-dow__list li.is-highlight { margin: 0 -10px; padding: 7px 10px; border-radius: 6px; background: #FEF3C7; box-shadow: inset 3px 0 0 #D97706; }
+
+/* ---------- Database v2.8: name change requests ---------- */
+/* My Profile: the locked name boxes keep the form's grid; the card under Business Information */
+.sv-pf__names { display: contents; }
+.sv-lockhint__link { display: block; margin-top: 2px; color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.sv-ncard__now { margin: 0 0 6px; font-size: 1rem; font-weight: 600; }
+.sv-ncard__hint { margin: 0 0 14px; font-size: .75rem; line-height: 1.5; color: var(--color-text-muted); }
+.sv-ncard__req { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: #F8FAFC; font-size: .8125rem; }
+.sv-ncard__req.is-pending { border-color: #FDE68A; background: #FFFBEB; }
+.sv-ncard__line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
+.sv-ncard__meta { margin: 4px 0 8px; font-size: .75rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.sv-ncard__req:not(.is-pending) .sv-ncard__meta { margin-bottom: 0; }
+.sv-ncard__wait { margin: 8px 0 0; font-size: .6875rem; color: var(--color-text-muted); }
+#pf-nc-open { gap: 6px; }
+#pf-nc-open[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.sv-ncdlg { width: min(480px, calc(100% - 32px)); }
+.sv-ncdlg::backdrop { background: rgba(0, 0, 0, .45); }
+.sv-ncdlg textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 6px; font: .8125rem var(--font-body); resize: vertical; }
+
+/* Admin > Name Changes */
+.sv-nc td { vertical-align: top; }
+@media (max-width: 900px) { .sv-table-wrap .sv-table.sv-nc { min-width: 820px; } }   /* scrolls sideways in its box instead of squeezing */
+.sv-nc tr.is-pending { background: #FFFDF5; }
+.sv-nc__current, .sv-nc__new { display: block; font-weight: 600; }
+.sv-nc__new { color: var(--color-primary); }
+.sv-nc__biz, .sv-nc__when { display: block; margin-top: 2px; font-size: .6875rem; color: var(--color-text-muted); }
+.sv-nc__reason { max-width: 280px; font-size: .75rem; overflow-wrap: anywhere; }
+.sv-nc .sv-table__acts { display: inline-flex; gap: 6px; }
+.sv-np__icon--user-pen, .sv-np__icon--name-change, .sv-np__icon--name-change-new { background: #EDE9FE; color: #6D28D9; }

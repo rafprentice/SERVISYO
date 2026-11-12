@@ -13,6 +13,7 @@
 #   - every step (migration) runs in one transaction with XACT_ABORT ON: a step that fails changes nothing
 #   - a step only runs when every earlier step is already there, so nothing is put on top of a failed step
 #   - OneDayOffPerDate (v2.5) stops with a clear message if two providers already have the same day off
+#   - ANSI_NULLS and QUOTED_IDENTIFIER are ON first (the filtered UNIQUE indexes of v2.7 / v2.8 need them)
 #   - the last check says whether the database is complete
 #   - safe to import again: steps that are already there are skipped
 # The zip leaves out appsettings.Development.json, appsettings.Production.json (Monster keeps its own settings)
@@ -22,7 +23,7 @@ $Server = "(localdb)\MSSQLLocalDB"
 $Main = "SERVISYO"
 $Web = "src\Servisyo.Web"
 $MigDir = "$Web\Migrations"
-$Latest = "DayOffRequests"
+$Latest = "NameChangeRequests"   # database v2.8 (tools\add-name-change-requests.ps1)
 
 function Conn([string]$db) { "Server=$Server;Database=$db;Trusted_Connection=True;TrustServerCertificate=True" }
 function Say([string]$text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
@@ -56,6 +57,11 @@ function Add-DeployGuards([string]$sql) {
     [void]$sb.Append("/* SERVISYO database update for MonsterASP, made $(Get-Date -Format 'yyyy-MM-dd HH:mm') by tools\make-monster-deploy.ps1.$nl")
     [void]$sb.Append("   Steps already in the database are skipped, so it is safe to import again. A step that fails changes nothing,$nl")
     [void]$sb.Append("   and the steps after it wait. Errors that start with SERVISYO: say what to do. */$nl")
+    # the same settings as the website's own connection: the filtered UNIQUE indexes (v2.7, v2.8) need them, and some
+    # import tools start with QUOTED_IDENTIFIER OFF
+    [void]$sb.Append("SET ANSI_NULLS ON;$nl")
+    [void]$sb.Append("SET QUOTED_IDENTIFIER ON;$nl")
+    [void]$sb.Append("GO$nl")
     $pos = 0
     for ($i = 0; $i -lt $begins.Count; $i++) {
         $id = $ids[$i]
@@ -97,10 +103,10 @@ function Add-DeployGuards([string]$sql) {
 # ---------------------------------------------------------------- 0. the laptop must be on the latest database first
 if (-not (Test-Path "$Web\Servisyo.Web.csproj")) { Stop-Here "run this from the SERVISYO folder (the one with src and tools)." }
 $mig = Get-ChildItem $MigDir -Filter "*_$Latest.cs" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*.Designer.cs" } | Select-Object -Last 1
-if (-not $mig) { Stop-Here "the $Latest migration is missing. Run tools\add-day-off-requests.ps1 first." }
+if (-not $mig) { Stop-Here "the $Latest migration is missing. Run tools\add-name-change-requests.ps1 first." }
 $migId = [System.IO.Path]::GetFileNameWithoutExtension($mig.Name)
 if ((Scalar $Main "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory WHERE MigrationId = N'$migId'") -ne 1) {
-    Stop-Here "your local SERVISYO database is not on $migId yet. Run tools\add-day-off-requests.ps1 first and test the site."
+    Stop-Here "your local SERVISYO database is not on $migId yet. Run tools\add-name-change-requests.ps1 first and test the site."
 }
 Say "Code: branch $(git rev-parse --abbrev-ref HEAD), last commit $(git log -1 --format='%h %s')"
 $dirty = git status --porcelain

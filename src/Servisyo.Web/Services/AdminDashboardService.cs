@@ -17,9 +17,18 @@ public class AdminDashboardService : IAdminDashboardService
     private const int RecentBookingCount = 5;
     private const int PendingApplicationCount = 4;
 
-    private readonly ServisyoDbContext _db;
+    private const int ManilaOffsetHours = 8;          // the Philippines has no daylight saving
 
-    public AdminDashboardService(ServisyoDbContext db) => _db = db;
+    private readonly ServisyoDbContext _db;
+    private readonly TimeProvider _clock;
+
+    public AdminDashboardService(ServisyoDbContext db, TimeProvider? clock = null)
+    {
+        _db = db;
+        _clock = clock ?? TimeProvider.System;
+    }
+
+    private DateOnly TodayInCebu() => DateOnly.FromDateTime(_clock.GetUtcNow().ToOffset(TimeSpan.FromHours(ManilaOffsetHours)).DateTime);
 
     public async Task<AdminDashboardViewModel?> GetAsync(int userId, CancellationToken ct = default)
     {
@@ -38,8 +47,23 @@ public class AdminDashboardService : IAdminDashboardService
         var pending = await _db.Providers.CountAsync(p => p.ApprovalStatus == ApprovalStatuses.Pending, ct);
         var totalBookings = await _db.Bookings.CountAsync(ct);
         var flagged = await _db.Reviews.CountAsync(r => r.Status == ReviewStatuses.Flagged, ct);
-        var suspended = await _db.Users.CountAsync(
-            u => u.AccountStatus == AccountStatuses.Suspended && u.Role != Roles.Administrator, ct);
+        // suspended accounts: customers are managed on Admin > Users, providers on Admin > Service Providers
+        var suspendedCustomers = await _db.Users.CountAsync(
+            u => u.AccountStatus == AccountStatuses.Suspended && u.Role == Roles.Customer, ct);
+        var suspendedProviders = await _db.Users.CountAsync(
+            u => u.AccountStatus == AccountStatuses.Suspended && u.Role == Roles.ServiceProvider, ct);
+
+        // database v2.7: day-off requests still waiting (the same list as Admin > Service Providers: a day from today on),
+        // oldest first, so "Review Day Offs" opens the provider who has waited longest
+        var today = TodayInCebu();
+        var waitingDayOffs = await _db.DayOffRequests.AsNoTracking()
+            .Where(r => r.Status == DayOffStatuses.Pending && r.Days.Any(d => d.UnavailableDate >= today))
+            .OrderBy(r => r.RequestedAt).ThenBy(r => r.RequestId)
+            .Select(r => r.ProviderId)
+            .ToListAsync(ct);
+
+        // database v2.8: name change requests still waiting
+        var nameChanges = await _db.NameChangeRequests.CountAsync(r => r.Status == NameChangeStatuses.Pending, ct);
         // database v2.3: worked out by dbo.usp_GetBookingsNeedingAttention (TotalCount = all of them, not only the 25 rows)
         var needAttention = (await _db.GetBookingsNeedingAttentionAsync(ct)).Select(r => r.TotalCount).FirstOrDefault();
 
@@ -95,8 +119,18 @@ public class AdminDashboardService : IAdminDashboardService
             PendingApprovals = pending,
             TotalBookings = totalBookings,
             FlaggedReviews = flagged,
-            Attention = AdminAttention.Build(pending, flagged, suspended, needAttention,
-                firstPendingProviderId: applicationRows.Select(a => (int?)a.ProviderId).FirstOrDefault()),
+            Attention = AdminAttention.Build(new AdminAttentionCounts
+            {
+                DayOffRequests = waitingDayOffs.Count,
+                FirstDayOffProviderId = waitingDayOffs.Count > 0 ? waitingDayOffs[0] : null,
+                NameChangeRequests = nameChanges,
+                PendingApplications = pending,
+                FirstPendingProviderId = applicationRows.Select(a => (int?)a.ProviderId).FirstOrDefault(),
+                SuspendedCustomers = suspendedCustomers,
+                SuspendedProviders = suspendedProviders,
+                FlaggedReviews = flagged,
+                BookingsNeedingAttention = needAttention
+            }),
             RecentBookings = bookingRows.Select(r => new AdminBookingRowViewModel
             {
                 BookingId = r.BookingId,

@@ -138,6 +138,9 @@ public class ProviderProfilePageViewModel
     public string? FlashMessage { get; set; }
     public bool FlashIsError { get; set; }
 
+    /// Database v2.8: the "Name on Your Account" card (approved providers ask an administrator to change their name).
+    public NameChangeSectionViewModel? NameChange { get; set; }
+
     /// "Marco's Plumbing Works · Cebu City" (SERVISYO serves Cebu City only).
     public string HeaderLine => $"{BusinessName} · {ServiceArea.City}";
 

@@ -24,6 +24,8 @@ builder.Services.AddScoped<IProfilePhotoService, ProfilePhotoService>();
 builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();
 builder.Services.AddScoped<IBookingLiveUpdates, BookingLiveUpdates>();
 builder.Services.AddScoped<IDayOffLiveUpdates, DayOffLiveUpdates>();      // database v2.7: day-off requests, live
+builder.Services.AddScoped<INameChangeLiveUpdates, NameChangeLiveUpdates>();   // database v2.8: name change requests, live
+builder.Services.AddScoped<INameChangeRequestService, NameChangeRequestService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<ICustomerReviewService, CustomerReviewService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection(EmailSettings.SectionName));

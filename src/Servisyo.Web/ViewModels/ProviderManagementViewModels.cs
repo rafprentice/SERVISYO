@@ -77,6 +77,10 @@ public class ProvidersPageViewModel
     /// Database v2.7: every day-off request still waiting for an answer (all providers, oldest first), so the
     /// administrator can open it in one click. The page updates it live when a provider sends or cancels one.
     public IReadOnlyList<WaitingDayOffLine> WaitingDayOffs { get; set; } = Array.Empty<WaitingDayOffLine>();
+
+    /// "Review Day Offs" on the dashboard (?review=12): this provider's pop-up opens by itself and their waiting
+    /// request is highlighted. Only a number from the address; the pop-up itself checks everything again.
+    public int? ReviewProviderId { get; set; }
 }
 
 /// "Vincent Valencia · Dec 1 to Dec 7, 2026 · 7 days" - a request waiting for the administrator.

@@ -10,7 +10,7 @@ using Servisyo.Web.ViewModels;
 namespace Servisyo.Web.Controllers;
 
 /// Admin > Service Providers.
-/// GET  admin/providers                    -> the provider cards
+/// GET  admin/providers                    -> the provider cards (?review=12 also opens provider 12's pop-up)
 /// GET  admin/providers/{id}               -> details page (or just the pop-up contents with ?partial=true)
 /// POST admin/providers/{id}/status        -> suspend / deactivate / reactivate / restore the account
 /// POST admin/providers/{id}/extra-day-off -> approve an extra day off (an emergency beyond the 5 a month)
@@ -23,13 +23,15 @@ public class AdminProvidersController : Controller
     public AdminProvidersController(IProviderManagementService providers) => _providers = providers;
 
     [HttpGet("")]
-    public async Task<IActionResult> Index(string? status, int page = 1, CancellationToken ct = default)
+    public async Task<IActionResult> Index(string? status, int page = 1, int? review = null, CancellationToken ct = default)
     {
         if (!TryGetUserId(out var adminId)) return Forbid();
 
         var vm = await _providers.GetProvidersAsync(adminId, new ProviderListQuery { Status = status, Page = page }, ct);
         if (vm is null) return await EndSessionAsync();     // the signed-in account is no longer an active administrator
 
+        // the dashboard's "Review Day Offs": open this provider's pop-up when the page loads (Details checks it again)
+        vm.ReviewProviderId = review is > 0 ? review : null;
         return View(vm);
     }
 

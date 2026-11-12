@@ -1,13 +1,14 @@
-# Deploy to MonsterASP (database v2.7)
+# Deploy to MonsterASP (database v2.8)
 
 The online database must be updated **before** the new website files go up: the new code reads the column
 `PROVIDER_UNAVAILABLE_DATES.APPROVED_BY_ACTION_ID` (v2.4), which the old database does not have.
 
-Before you start: on the laptop, the newest database script (now `tools\add-day-off-requests.ps1`, v2.7) ended with
+Before you start: on the laptop, the newest database script (now `tools\add-name-change-requests.ps1`, v2.8) ended with
 DONE, the site works with `dotnet run`, and the code is committed and pushed.
 
 Monster may be several steps behind the laptop (each step is one EF migration). For example, in November 2026 it
-still needed v2.1 to v2.6. The file imports every missing step in date order.
+still needed v2.1 to v2.6; after that deploy it still needs v2.7 (day-off requests) and v2.8 (name change requests).
+The file imports every missing step in date order.
 
 ## 1. Make the files (laptop)
 ```powershell
@@ -19,7 +20,8 @@ It builds, runs the tests, and opens a folder `Documents\SERVISYO-deploy\<date-t
   - a step waits if an earlier one is missing;
   - v2.5 refuses to run while two providers share a day off;
   - the last check says whether the update is complete;
-  - steps Monster already has are skipped, so it is safe to import again.
+  - steps Monster already has are skipped, so it is safe to import again;
+  - it starts with `SET QUOTED_IDENTIFIER ON` (the one-request-at-a-time indexes of v2.7 and v2.8 need it).
 - `servisyo-publish.zip`: the website files. It leaves out:
   - `appsettings.Development.json`;
   - `appsettings.Production.json`: Monster keeps its own copy, with your connection string and email settings;
@@ -70,6 +72,11 @@ Do not delete anything else: the `uploads` folder (profile photos) and `appsetti
     a good request shows "Pending Admin Approval".
 - **Admin → Providers → that provider:** the Days Off section shows the request with Approve / Reject.
 - **Admin → Users → View:** the customer's details and recent bookings open.
+- **A provider's My Profile → Request Name Change** (v2.8): the same name is refused, a real change shows
+  "Pending Admin Approval".
+- **Admin → Dashboard:** "Needs Admin Attention" shows the day-off and name change requests; each button opens its page
+  (Review Day Offs opens that provider, View Accounts the Suspended tab). **Admin → Name Changes:** Approve changes the
+  provider's name.
 - **Monster → Logs:** no new errors.
 
 ## If something goes wrong

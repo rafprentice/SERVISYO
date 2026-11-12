@@ -49,7 +49,7 @@
             <ul class="sv-dow__list">
                 @foreach (var w in Model.WaitingDayOffs)
                 {
-                    <li>
+                    <li class="@(w.ProviderId == Model.ReviewProviderId ? "is-highlight" : null)">
                         <span class="sv-dow__who">@w.Name</span>
                         <span class="sv-dow__when">@w.DatesText · @w.DaysText</span>
                         <a class="sv-btn sv-btn--soft sv-btn--xs" data-review-link="true"
@@ -163,6 +163,13 @@
             }
         </span>
     </nav>
+}
+
+@if (Model.ReviewProviderId is int reviewId)
+{
+    @* "Review Day Offs" on the dashboard: admin-approval.js opens this provider's pop-up once the page has loaded *@
+    <a hidden data-review-link="true" data-sv-autoopen="true"
+       href="@Url.Action("Details", "AdminProviders", new { providerId = reviewId, status = StatusParam(), page = Model.Page })">Review</a>
 }
 
 <partial name="_ApplicationReviewDialog" />

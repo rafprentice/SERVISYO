@@ -628,21 +628,22 @@ public class DayOffRequestTests
     }
 
     [Fact]
-    public void TheDesignFile_IsOnV27_WithTheSameSql()
+    public void TheDesignFile_HasTheV27Objects_WithTheSameSql()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "docs", "sql", "DatabaseDesign-v2.sql"))) dir = dir.Parent;
         Assert.NotNull(dir);
         var design = File.ReadAllText(Path.Combine(dir!.FullName, "docs", "sql", "DatabaseDesign-v2.sql")).Replace("\r\n", "\n");
 
-        Assert.Contains("DATABASE DESIGN v2.7", design);
+        Assert.Contains("DATABASE DESIGN v2.8", design);                         // v2.8 came after (name change requests)
         Assert.Contains("WHAT CHANGED IN v2.7 (EF migration \"DayOffRequests\")", design);
         Assert.Contains("CREATE TABLE PROVIDER_DAY_OFF_REQUESTS (", design);
         Assert.Contains("CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_STATUS CHECK (" + ServisyoDbContext.DayOffStatusCheck + ")", design);
         Assert.Contains("CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_DECISION CHECK (" + ServisyoDbContext.DayOffDecisionCheck + ")", design);
         Assert.Contains("CONSTRAINT CK_PROVIDER_UNAVAILABLE_DATES_SOURCE CHECK (" + ServisyoDbContext.DayOffSourceCheck + ")", design);
-        // the same objects as the migration (the migration only wraps them in EXEC)
-        foreach (var sql in DayOffRequestsSql.CreateAll)
+        // the same objects as the migration (the migration only wraps them in EXEC); v2.8 changed usp_GetNotifications
+        // again, so the design file has ITS version (NameChangeRequestTests checks that one)
+        foreach (var sql in DayOffRequestsSql.CreateAll.Where(s => !s.Contains("PROCEDURE dbo.usp_GetNotifications")))
         {
             var body = sql["EXEC(N'".Length..sql.LastIndexOf("')", StringComparison.Ordinal)].Replace("''", "'");
             Assert.Contains(body.Replace("\r\n", "\n").Trim(), design);

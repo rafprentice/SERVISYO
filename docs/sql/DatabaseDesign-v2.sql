@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.7  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.8  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -17,7 +17,8 @@
        "ExtraDayOff" (v2.4) only adds one column and its FOREIGN KEY, "OneDayOffPerDate" (v2.5) one UNIQUE index (PART 1),
        "MaxJobsPerDay20" (v2.6) the 20-job limit (CK_PROVIDERS_LIMITS and usp_RegisterProvider), "DayOffRequests"
        (v2.7) the table PROVIDER_DAY_OFF_REQUESTS, the column PROVIDER_UNAVAILABLE_DATES.REQUEST_ID (PART 1) and the
-       new versions of fn_IsProviderAvailable, usp_CreateBooking and usp_GetNotifications:
+       new versions of fn_IsProviderAvailable, usp_CreateBooking and usp_GetNotifications, "NameChangeRequests" (v2.8)
+       the table PROVIDER_NAME_CHANGE_REQUESTS (PART 1) and a new version of usp_GetNotifications:
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -124,6 +125,21 @@
        record of the decision.
      - usp_GetNotifications: providers see the answer to their request (and an extra day an administrator gave);
        administrators see every request that is still Pending.
+
+   WHAT CHANGED IN v2.8 (EF migration "NameChangeRequests") - approved providers REQUEST a name change
+     - An approved provider cannot edit their own name any more (it is locked once an administrator approves the
+       application), so they send a request and an administrator approves or rejects it.
+     - New table PROVIDER_NAME_CHANGE_REQUESTS: one row per request (PROVIDER_ID, the NEW FIRST_NAME / MIDDLE_NAME /
+       LAST_NAME, REASON, STATUS, REQUESTED_AT, DECIDED_BY_ACTION_ID). Only the new name is stored: the current name
+       stays in USERS (one fact, one place). Approving copies the new name to USERS; trg_Users_Audit keeps the old
+       one in SYSTEM_LOGS, and the ADMIN_ACTIONS row says "old name to new name".
+     - CHECK CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS: Pending, Approved or Rejected. CHECK
+       CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION: a Pending request has no decision yet; an Approved or Rejected one
+       REFERENCES the ADMIN_ACTIONS row that decided it (FOREIGN KEY, no cascade, UNIQUE: one action decides one request).
+     - Filtered UNIQUE index UX_PROVIDER_NAME_CHANGE_REQUESTS_ONE_PENDING (PROVIDER_ID) WHERE STATUS = 'Pending':
+       only ONE request per provider can wait, even when two are sent at the same moment.
+     - usp_GetNotifications: providers see the answer ('name-change'); administrators see every request that is
+       still Pending ('name-change-new').
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -141,10 +157,10 @@ BEGIN
     SET NOEXEC ON;
 END
 GO
--- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), and v2.7 reads the table and
--- column of the "DayOffRequests" migration, so the EF migrations come first
+-- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), and v2.8 reads the tables of
+-- the "DayOffRequests" (v2.7) and "NameChangeRequests" (v2.8) migrations, so the EF migrations come first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]DayOffRequests')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]NameChangeRequests')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -272,6 +288,27 @@ CREATE TABLE PROVIDER_DAY_OFF_REQUESTS (
 );
 CREATE UNIQUE INDEX IX_PROVIDER_DAY_OFF_REQUESTS_DECIDED_BY_ACTION_ID ON PROVIDER_DAY_OFF_REQUESTS (DECIDED_BY_ACTION_ID) WHERE [DECIDED_BY_ACTION_ID] IS NOT NULL;
 CREATE INDEX IX_PROVIDER_DAY_OFF_REQUESTS_PROVIDER_ID_STATUS ON PROVIDER_DAY_OFF_REQUESTS (PROVIDER_ID, STATUS);
+-- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
+
+-- v2.8: an approved provider's request to change the name on their account (only the NEW name; the current one is in USERS)
+CREATE TABLE PROVIDER_NAME_CHANGE_REQUESTS (
+    REQUEST_ID                   INT             IDENTITY(1,1) NOT NULL,
+    DECIDED_BY_ACTION_ID         INT             NULL,              -- the administrator's answer (NULL while Pending)
+    FIRST_NAME                   NVARCHAR(100)   NOT NULL,          -- the requested name
+    LAST_NAME                    NVARCHAR(100)   NOT NULL,
+    MIDDLE_NAME                  NVARCHAR(100)   NULL,
+    PROVIDER_ID                  INT             NOT NULL,
+    REASON                       NVARCHAR(255)   NOT NULL,
+    REQUESTED_AT                 DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
+    STATUS                       NVARCHAR(20)    NOT NULL DEFAULT N'Pending',
+    CONSTRAINT PK_PROVIDER_NAME_CHANGE_REQUESTS PRIMARY KEY (REQUEST_ID),
+    CONSTRAINT FK_PROVIDER_NAME_CHANGE_REQUESTS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID) ON DELETE CASCADE,
+    CONSTRAINT CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS CHECK ([STATUS] IN ('Pending','Approved','Rejected')),
+    CONSTRAINT CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION CHECK (([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL))
+);
+CREATE UNIQUE INDEX IX_PROVIDER_NAME_CHANGE_REQUESTS_DECIDED_BY_ACTION_ID ON PROVIDER_NAME_CHANGE_REQUESTS (DECIDED_BY_ACTION_ID) WHERE [DECIDED_BY_ACTION_ID] IS NOT NULL;
+CREATE INDEX IX_PROVIDER_NAME_CHANGE_REQUESTS_PROVIDER_ID_STATUS ON PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID, STATUS);
+CREATE UNIQUE INDEX UX_PROVIDER_NAME_CHANGE_REQUESTS_ONE_PENDING ON PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID) WHERE [STATUS] = 'Pending';   -- one waiting request per provider
 -- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
 CREATE TABLE PROVIDER_UNAVAILABLE_DATES (
@@ -459,6 +496,9 @@ ALTER TABLE PROVIDER_UNAVAILABLE_DATES ADD CONSTRAINT FK_PROVIDER_UNAVAILABLE_DA
     FOREIGN KEY (APPROVED_BY_ACTION_ID) REFERENCES ADMIN_ACTIONS(ACTION_ID);
 -- v2.7 (EF migration "DayOffRequests")
 ALTER TABLE PROVIDER_DAY_OFF_REQUESTS ADD CONSTRAINT FK_PROVIDER_DAY_OFF_REQUESTS_ADMIN_ACTIONS_DECIDED_BY_ACTION_ID
+    FOREIGN KEY (DECIDED_BY_ACTION_ID) REFERENCES ADMIN_ACTIONS(ACTION_ID);
+-- v2.8 (EF migration "NameChangeRequests")
+ALTER TABLE PROVIDER_NAME_CHANGE_REQUESTS ADD CONSTRAINT FK_PROVIDER_NAME_CHANGE_REQUESTS_ADMIN_ACTIONS_DECIDED_BY_ACTION_ID
     FOREIGN KEY (DECIDED_BY_ACTION_ID) REFERENCES ADMIN_ACTIONS(ACTION_ID);
 
 CREATE TABLE SYSTEM_LOGS (
@@ -2087,6 +2127,17 @@ BEGIN
         WHERE @Role = N'Service Provider' AND a.TARGET_PROVIDER_ID = @ProviderId
           AND a.ACTION_TYPE IN (N'Day Off Approved', N'Day Off Rejected', N'Extra Day Off Approved')
         UNION ALL
+        -- provider: the answer to a name change request (v2.8)
+        SELECT CONCAT(N'N', n.REQUEST_ID), 1, N'name-change',
+               CASE n.STATUS
+                    WHEN N'Approved' THEN CONCAT(N'Your name change request was approved. Your name is now ', CONCAT(n.FIRST_NAME, CASE WHEN n.MIDDLE_NAME IS NULL THEN N'' ELSE N' ' + n.MIDDLE_NAME END, N' ', n.LAST_NAME), N'.')
+                    ELSE CONCAT(N'Your name change request (to ', CONCAT(n.FIRST_NAME, CASE WHEN n.MIDDLE_NAME IS NULL THEN N'' ELSE N' ' + n.MIDDLE_NAME END, N' ', n.LAST_NAME), N') was not approved, so your name stays the same.')
+               END,
+               a.CREATED_AT, NULL
+        FROM dbo.PROVIDER_NAME_CHANGE_REQUESTS n
+        JOIN dbo.ADMIN_ACTIONS a ON a.ACTION_ID = n.DECIDED_BY_ACTION_ID
+        WHERE @Role = N'Service Provider' AND n.PROVIDER_ID = @ProviderId AND n.STATUS <> N'Pending'
+        UNION ALL
         -- provider: the administrator's decision on the application (only the latest one is shown)
         SELECT N'A', 1, N'application',
                CONCAT(N'Your provider application was ', a.ACTION_TYPE, N'.'),
@@ -2116,6 +2167,16 @@ BEGIN
         CROSS APPLY (SELECT MIN(u.UNAVAILABLE_DATE) AS FIRST_DAY, MAX(u.UNAVAILABLE_DATE) AS LAST_DAY, COUNT(*) AS DAYS
                      FROM dbo.PROVIDER_UNAVAILABLE_DATES u WHERE u.REQUEST_ID = r.REQUEST_ID) d
         WHERE @Role = N'Administrator' AND r.STATUS = N'Pending'
+        UNION ALL
+        -- administrator: every name change request that is still Pending (v2.8)
+        SELECT CONCAT(N'M', n.REQUEST_ID), 1, N'name-change-new',
+               CONCAT(pu.FIRST_NAME, N' ', pu.LAST_NAME, N' (', sp.BUSINESS_NAME, N') asks to change their name to ',
+                      CONCAT(n.FIRST_NAME, CASE WHEN n.MIDDLE_NAME IS NULL THEN N'' ELSE N' ' + n.MIDDLE_NAME END, N' ', n.LAST_NAME), N'. Open Name Changes to approve or reject it.'),
+               n.REQUESTED_AT, NULL
+        FROM dbo.PROVIDER_NAME_CHANGE_REQUESTS n
+        JOIN dbo.SERVICE_PROVIDERS sp ON sp.PROVIDER_ID = n.PROVIDER_ID
+        JOIN dbo.USERS pu ON pu.USER_ID = sp.USER_ID
+        WHERE @Role = N'Administrator' AND n.STATUS = N'Pending'
     ),
     Latest AS (
         -- one row per group: the newest news of each booking (ties: the payment / cancellation wins)
@@ -3191,6 +3252,54 @@ BEGIN TRY
         INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
     ELSE
         INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The two bookings are not both on the list.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 34
+SET @t = N'34 Name change requests: one waiting per provider, the decision is required, both bells (v2.8)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    -- the provider asks for a new name (the app saves it like this, as Pending)
+    INSERT INTO dbo.PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID, FIRST_NAME, MIDDLE_NAME, LAST_NAME, REASON, STATUS, REQUESTED_AT)
+    VALUES (@P, N'Mary', N'Cruz', N'Santos', N'Married', N'Pending', SYSUTCDATETIME());
+    SET @n = CAST(SCOPE_IDENTITY() AS INT);
+    SET @B = 0;     -- wrong rows refused
+    BEGIN TRY   -- a second waiting request of the same provider (filtered UNIQUE index)
+        INSERT INTO dbo.PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID, FIRST_NAME, LAST_NAME, REASON, STATUS, REQUESTED_AT)
+        VALUES (@P, N'Maria', N'Selftest', N'Spelling', N'Pending', SYSUTCDATETIME());
+    END TRY BEGIN CATCH IF ERROR_NUMBER() IN (2601, 2627) SET @B += 1; END CATCH;
+    BEGIN TRY   -- approved without the administrator's decision (CHECK)
+        UPDATE dbo.PROVIDER_NAME_CHANGE_REQUESTS SET STATUS = N'Approved' WHERE REQUEST_ID = @n;
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @B += 1; END CATCH;
+    BEGIN TRY   -- a status that does not exist (CHECK)
+        UPDATE dbo.PROVIDER_NAME_CHANGE_REQUESTS SET STATUS = N'Maybe' WHERE REQUEST_ID = @n;
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @B += 1; END CATCH;
+    IF @B <> 3
+        THROW 59034, N'Not every wrong name change request was refused.', 1;
+
+    -- the administrator's bell shows the waiting request
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @A;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE Kind = N'name-change-new' AND Message LIKE N'%Mary Cruz Santos%')
+        THROW 59034, N'The administrator does not see the waiting name change request.', 1;
+
+    -- the administrator approves: the decision row, the request and the new name in USERS (as the app does it)
+    INSERT INTO dbo.ADMIN_ACTIONS (ADMIN_USER_ID, ACTION_TYPE, TARGET_TYPE, TARGET_PROVIDER_ID, REASON, CREATED_AT)
+    VALUES (@A, N'Name Change Approved', N'SERVICE_PROVIDER', @P, N'Mary Cruz Selftest to Mary Cruz Santos', SYSUTCDATETIME());
+    UPDATE dbo.PROVIDER_NAME_CHANGE_REQUESTS SET STATUS = N'Approved', DECIDED_BY_ACTION_ID = CAST(SCOPE_IDENTITY() AS INT) WHERE REQUEST_ID = @n;
+    UPDATE dbo.USERS SET LAST_NAME = N'Santos' WHERE USER_ID = @PU;
+
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE Kind = N'name-change' AND Message = N'Your name change request was approved. Your name is now Mary Cruz Santos.')
+        THROW 59034, N'The provider does not see the approval.', 1;
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @A;
+    IF EXISTS (SELECT 1 FROM @Note WHERE Kind = N'name-change-new')
+        THROW 59034, N'An answered request is still on the administrator''s bell.', 1;
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
     ROLLBACK TRANSACTION;
 END TRY
 BEGIN CATCH

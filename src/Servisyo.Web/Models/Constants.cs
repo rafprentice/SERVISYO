@@ -48,6 +48,18 @@ public static class DayOffStatuses
     public const string Rejected = "Rejected";
 }
 
+/// An approved provider's request to change the name on their account (database v2.8,
+/// PROVIDER_NAME_CHANGE_REQUESTS.STATUS). Pending changes nothing yet; Approved copies the new name to USERS;
+/// Rejected keeps the old name. Only one request per provider can be Pending at a time.
+public static class NameChangeStatuses
+{
+    public const string Pending = "Pending";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+
+    public static readonly IReadOnlyList<string> All = new[] { Pending, Approved, Rejected };
+}
+
 public static class ReviewStatuses
 {
     public const string Visible = "Visible";

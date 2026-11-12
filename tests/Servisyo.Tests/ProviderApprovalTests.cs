@@ -59,7 +59,7 @@ public class AdminAttentionLinkTests
     [Fact]
     public void WaitingApplications_OpenTheOldestOne()
     {
-        var row = Assert.Single(AdminAttention.Build(2, 0, 0, 0, firstPendingProviderId: 42));
+        var row = Assert.Single(AdminAttention.Build(new AdminAttentionCounts { PendingApplications = 2, FirstPendingProviderId = 42 }));
 
         Assert.Equal(AdminAttentionAction.ReviewApplication, row.Action);
         Assert.Equal(42, row.TargetId);
@@ -68,20 +68,20 @@ public class AdminAttentionLinkTests
     [Fact]
     public void WithoutAnId_TheButtonOpensThePendingList()
     {
-        var row = Assert.Single(AdminAttention.Build(2, 0, 0, 0));
+        var row = Assert.Single(AdminAttention.Build(new AdminAttentionCounts { PendingApplications = 2 }));
 
         Assert.Equal(AdminAttentionAction.ApplicationList, row.Action);
         Assert.Null(row.TargetId);
     }
 
     [Fact]
-    public void FlaggedReviews_GoToModeration_BookingsGoToAdminBookings_AndUnbuiltScreensStayDisabled()
+    public void SuspendedAccounts_GoToUsers_FlaggedReviews_GoToModeration_BookingsGoToAdminBookings()
     {
-        var rows = AdminAttention.Build(0, 1, 1, 1);
+        var rows = AdminAttention.Build(new AdminAttentionCounts { FlaggedReviews = 1, SuspendedCustomers = 1, BookingsNeedingAttention = 1 });
 
-        Assert.Equal(AdminAttentionAction.ModerateReviews, rows[0].Action);
-        Assert.Equal(AdminAttentionAction.None, rows[1].Action);         // suspended accounts: no screen yet, the button stays disabled
-        Assert.Equal(AdminAttentionAction.BookingList, rows[2].Action);  // database v2.3: bookings that need attention open Admin Bookings
+        Assert.Equal(AdminAttentionAction.SuspendedCustomers, rows[0].Action);   // Admin > Users, Suspended tab
+        Assert.Equal(AdminAttentionAction.ModerateReviews, rows[1].Action);
+        Assert.Equal(AdminAttentionAction.BookingList, rows[2].Action);          // database v2.3: bookings that need attention open Admin Bookings
     }
 }
 

@@ -39,7 +39,8 @@
             <partial name="_ProfilePhoto" model="@(new ProfilePhotoViewModel(Model.Initials, Model.PhotoUrl, "sv-avatar--ink sv-pf__avatar"))" />
         </div>
         <div class="sv-pf__who">
-            <div class="sv-pf__name">@Model.FullName</div>
+            @* updated live when an administrator approves a name change (provider-profile.js) *@
+            <div class="sv-pf__name" id="pf-head-name" data-sv-namechange-live="true">@Model.FullName</div>
             <div class="sv-pf__biz">@Model.HeaderLine</div>
             <div class="sv-pf__strength">
                 <div class="sv-pf__strengthrow">
@@ -66,10 +67,19 @@
 
             @if (locked)
             {
-                <p class="sv-lockhint sv-lockhint--approved" id="pf-locknote" role="note">@Icons.Svg("lock", 12) @ProviderLockRules.ApprovedNotice</p>
+                <p class="sv-lockhint sv-lockhint--approved" id="pf-locknote" role="note">@Icons.Svg("lock", 12)
+                    <span>@ProviderLockRules.ApprovedNotice
+                        @if (Model.NameChange is not null)
+                        {
+                            <a href="#pf-namechange" class="sv-lockhint__link">Need a different name? Request a name change.</a>
+                        }
+                    </span>
+                </p>
             }
 
-            @* Locked boxes are disabled + read-only: the browser never sends them, and the server refuses any change (403). *@
+            @* Locked boxes are disabled + read-only: the browser never sends them, and the server refuses any change (403).
+               The three names are redrawn live when an administrator approves a name change (database v2.8). *@
+            <div class="sv-pf__names" id="pf-names" data-sv-namechange-live="true">
             <div class="sv-fld">
                 <label for="pf-first">First Name</label>
                 <input id="pf-first" name="FirstName" type="text" value="@form.FirstName" maxlength="100" autocomplete="given-name"
@@ -86,6 +96,7 @@
                 <label for="pf-last">Last Name</label>
                 <input id="pf-last" name="LastName" type="text" value="@form.LastName" maxlength="100" autocomplete="family-name"
                        class="@lockClass" disabled="@locked" readonly="@locked" title="@lockTitle" aria-describedby="@lockId" />
+            </div>
             </div>
 
             <div class="sv-fld">
@@ -130,6 +141,102 @@
             <button type="submit" class="sv-btn sv-btn--primary sv-btn--block sv-btn--sm">Save Changes</button>
         </form>
     </section>
+
+    @if (Model.NameChange is { } nc)
+    {
+        var ncForm = nc.Form;
+        var firstErr = nc.ErrorFor("FirstName");
+        var middleErr = nc.ErrorFor("MiddleName");
+        var lastErr = nc.ErrorFor("LastName");
+        var reasonErr = nc.ErrorFor("Reason");
+
+        @* Name on your account (database v2.8): approved providers ask an administrator to change it.
+           Redrawn live when the request is answered (provider-profile.js, SignalR "nameChangeChanged"). *@
+        <section class="sv-panel sv-pf__card sv-ncard" id="pf-namechange" aria-labelledby="pf-nc-title"
+                 data-sv-namechange-live="true" data-refresh-url="@Url.Action("Index", "ProviderProfile")">
+            <h2 id="pf-nc-title" class="sv-pf__title">Name on Your Account</h2>
+            <p class="sv-ncard__now">@nc.CurrentName</p>
+            <p class="sv-ncard__hint">Your name is locked because your account is approved. To change it (for example after
+                marriage, or to fix a spelling mistake), send a request. An administrator reviews it, and your name stays the
+                same until it is approved.</p>
+
+            @if (nc.Pending is { } waiting)
+            {
+                <div class="sv-ncard__req is-pending">
+                    <div class="sv-ncard__line">
+                        <span>Requested: <strong>@waiting.NewName</strong></span>
+                        <span class="sv-tag sv-tag--@waiting.Tone">@waiting.Label</span>
+                    </div>
+                    <p class="sv-ncard__meta">@waiting.WhenText · Reason: @waiting.Reason</p>
+                    <form method="post" asp-controller="ProviderProfile" asp-action="CancelNameChange" asp-route-requestId="@waiting.RequestId" data-sv-once>
+                        <button type="submit" class="sv-btn sv-btn--outline sv-btn--xs"
+                                data-confirm="Cancel your request to change your name to @(waiting.NewName)?">Cancel Request</button>
+                    </form>
+                </div>
+            }
+            else if (nc.LastAnswer is { } answer)
+            {
+                <div class="sv-ncard__req">
+                    <div class="sv-ncard__line">
+                        <span>Last request: <strong>@answer.NewName</strong></span>
+                        <span class="sv-tag sv-tag--@answer.Tone">@answer.Label</span>
+                    </div>
+                    <p class="sv-ncard__meta">@answer.WhenText</p>
+                </div>
+            }
+
+            <button type="button" id="pf-nc-open" class="sv-btn sv-btn--primary sv-btn--sm" aria-haspopup="dialog" aria-controls="pf-nc-dialog"
+                    aria-disabled="@(nc.CanRequest ? "false" : "true")" title="@(nc.CanRequest ? null : NameChangeRules.OnePending)">
+                @Icons.Svg("user-pen", 14) Request Name Change
+            </button>
+            @if (!nc.CanRequest)
+            {
+                <p class="sv-ncard__wait">One request at a time: wait for the answer, or cancel the request above.</p>
+            }
+
+            @* The pop-up opens ONLY for data-open="true" (a refused request comes back with it open). Razor would write
+               data-open="" for a null value, so the value is always "true" or "false". *@
+            <dialog id="pf-nc-dialog" class="sv-dialog sv-ncdlg" aria-labelledby="pf-nc-dtitle" data-open="@(nc.OpenDialog ? "true" : "false")">
+                <form method="post" asp-controller="ProviderProfile" asp-action="RequestNameChange" class="sv-dialog__form" data-sv-once data-sv-nc-form
+                      data-current-first="@nc.CurrentFirst" data-current-middle="@nc.CurrentMiddle" data-current-last="@nc.CurrentLast">
+                    <h2 id="pf-nc-dtitle" class="sv-dialog__title">Request Name Change</h2>
+                    <p class="sv-dialog__text">Type your name exactly as it should appear to customers. Now: <strong>@nc.CurrentName</strong></p>
+                    <p class="sv-formerr" role="alert" data-sv-nc-error hidden="@(nc.FormError is null ? "hidden" : null)">@nc.FormError</p>
+
+                    <div class="sv-fld">
+                        <label for="pf-nc-first">First Name</label>
+                        <input id="pf-nc-first" name="FirstName" type="text" value="@ncForm.FirstName" required maxlength="100" autocomplete="given-name"
+                               aria-invalid="@(firstErr is null ? null : "true")" />
+                        @if (firstErr is not null) { <p class="sv-fld__err" role="alert">@firstErr</p> }
+                    </div>
+                    <div class="sv-fld">
+                        <label for="pf-nc-middle">Middle Name</label>
+                        <input id="pf-nc-middle" name="MiddleName" type="text" value="@ncForm.MiddleName" required minlength="2" maxlength="100" autocomplete="additional-name"
+                               aria-invalid="@(middleErr is null ? null : "true")" />
+                        @if (middleErr is not null) { <p class="sv-fld__err" role="alert">@middleErr</p> }
+                    </div>
+                    <div class="sv-fld">
+                        <label for="pf-nc-last">Last Name</label>
+                        <input id="pf-nc-last" name="LastName" type="text" value="@ncForm.LastName" required maxlength="100" autocomplete="family-name"
+                               aria-invalid="@(lastErr is null ? null : "true")" />
+                        @if (lastErr is not null) { <p class="sv-fld__err" role="alert">@lastErr</p> }
+                    </div>
+                    <div class="sv-fld">
+                        <label for="pf-nc-reason">Reason <span class="sv-fld__opt">(up to 255 characters)</span></label>
+                        <textarea id="pf-nc-reason" name="Reason" rows="3" required maxlength="255"
+                                  placeholder="For example: I got married and use my husband's last name."
+                                  aria-invalid="@(reasonErr is null ? null : "true")">@ncForm.Reason</textarea>
+                        @if (reasonErr is not null) { <p class="sv-fld__err" role="alert">@reasonErr</p> }
+                    </div>
+
+                    <div class="sv-dialog__buttons">
+                        <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-sv-close>Cancel</button>
+                        <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Send Request</button>
+                    </div>
+                </form>
+            </dialog>
+        </section>
+    }
 
     <!-- Services offered -->
     <section class="sv-panel sv-pf__card" aria-labelledby="pf-svc-title">

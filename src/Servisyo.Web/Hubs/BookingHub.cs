@@ -23,6 +23,10 @@ public class BookingHub : Hub
     /// extra day was given): { providerId, what }. Sent to every administrator and to that provider.
     public const string DayOffChangedEvent = "dayOffChanged";
 
+    /// Database v2.8: a provider's name change request was sent, cancelled, approved or rejected: { providerId, what }.
+    /// Sent to every administrator and to that provider.
+    public const string NameChangeChangedEvent = "nameChangeChanged";
+
     /// Every signed-in ACTIVE administrator's open pages. The group comes from the sign-in cookie's role,
     /// never from the browser (a browser cannot join a group itself: the hub has no methods for that).
     public const string AdminsGroup = "admins";

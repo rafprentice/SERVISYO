@@ -5,6 +5,9 @@
    3. Lets the green/red message at the top-right be closed.
    4. Day-off requests (database v2.7), live: when a provider sends or cancels a request (SignalR, see
       live-bookings.js), the provider's open "Days Off" list and the providers page's "waiting" list are fetched again.
+   5. Other live areas (database v2.8): an element with data-sv-admin-live="dayoff namechange" and an id (the
+      dashboard's "Needs Admin Attention", Admin > Name Changes) is fetched again when one of those changes.
+   6. ?review=12 on Admin > Service Providers (the dashboard's "Review Day Offs"): that provider's pop-up opens by itself.
    The real work (and every permission check) always happens on the server. */
 (function () {
     "use strict";
@@ -73,19 +76,31 @@
         });
     }
 
+    /// kind: "dayoff" or "namechange" (null = all). Each area is found again in the fresh page by its id.
+    function refreshAreas(kind) {
+        document.querySelectorAll("[data-sv-admin-live][id]").forEach(function (area) {
+            var kinds = (area.getAttribute("data-sv-admin-live") || "").split(" ");
+            if (kind && kinds.indexOf(kind) < 0) return;
+            swap(area, area.getAttribute("data-refresh-url"), "#" + area.id);
+        });
+    }
+
     document.addEventListener("sv:dayoff-changed", function (event) {
         var providerId = event.detail && event.detail.providerId;
         refreshDaysOff(providerId);
         refreshBoard();
+        refreshAreas("dayoff");
     });
+    document.addEventListener("sv:namechange-changed", function () { refreshAreas("namechange"); });
     if (reviewDialog) reviewDialog.addEventListener("close", function () { if (boardWaiting) refreshBoard(); });
 
     // If the live connection is not working (e.g. the SignalR script could not load), ask every 30 seconds instead.
     setInterval(function () {
         if (document.hidden || document.documentElement.getAttribute("data-sv-live-connected") === "true") return;
-        if (!document.querySelector('[data-sv-dayoff-board="true"], [data-sv-dayoff-live="true"][data-provider-id]')) return;
+        if (!document.querySelector('[data-sv-dayoff-board="true"], [data-sv-dayoff-live="true"][data-provider-id], [data-sv-admin-live][id]')) return;
         refreshDaysOff(null);
         refreshBoard();
+        refreshAreas(null);
     }, 30000);
 
     // ---- the pop-up
@@ -133,4 +148,16 @@
         event.preventDefault();
         openReview(link);
     });
+
+    // ---- ?review=12 (the dashboard's "Review Day Offs"): open that provider once, then take ?review off the address
+    // so a reload or the Back button does not open it again
+    var auto = document.querySelector('[data-sv-autoopen="true"][data-review-link="true"]');
+    if (auto) {
+        openReview(auto);
+        if (window.history && typeof window.history.replaceState === "function") {
+            var here = new URL(window.location.href);
+            here.searchParams.delete("review");
+            window.history.replaceState(window.history.state, "", here.pathname + here.search + here.hash);
+        }
+    }
 })();
