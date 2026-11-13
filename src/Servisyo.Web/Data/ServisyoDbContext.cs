@@ -82,7 +82,10 @@ public class ServisyoDbContext : DbContext
             e.Property(x => x.Role).HasMaxLength(50);
             e.Property(x => x.AccountStatus).HasMaxLength(50);
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
+            // database v2.9: a row added by SQL (e.g. usp_RegisterProvider) starts "active now" too
+            e.Property(x => x.LastActivityAt).HasDefaultValueSql("SYSUTCDATETIME()");
             e.HasIndex(x => x.Email).IsUnique();
+            e.HasIndex(x => x.LastActivityAt);          // database v2.9: the daily search for inactive accounts
         });
 
         mb.Entity<Customer>(e =>
@@ -90,6 +93,7 @@ public class ServisyoDbContext : DbContext
             e.ToTable("CUSTOMERS", t =>
             {
                 t.HasTrigger("trg_Customers_StatusCopy");  // database v2.1
+                t.HasTrigger("trg_Customers_Audit");       // database v2.10
                 t.HasCheckConstraint("CK_CUSTOMERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
             });
             e.Property(x => x.AccountStatus).HasMaxLength(50).HasDefaultValue(AccountStatuses.Active);
@@ -107,6 +111,7 @@ public class ServisyoDbContext : DbContext
                 t.HasCheckConstraint("CK_PROVIDERS_COUNTS", "[REVIEW_COUNT] >= 0 AND ([BASE_FEE] IS NULL OR [BASE_FEE] >= 0)");   // database v2
                 t.HasCheckConstraint("CK_PROVIDERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");          // database v2.1
                 t.HasTrigger("trg_Providers_StatusCopy");  // database v2.1
+                t.HasTrigger("trg_Providers_Audit");       // database v2.10
             });
             e.Property(x => x.BusinessName).HasMaxLength(155);
             e.Property(x => x.AccountStatus).HasMaxLength(50).HasDefaultValue(AccountStatuses.Active);
@@ -137,7 +142,11 @@ public class ServisyoDbContext : DbContext
 
         mb.Entity<ProviderUnavailableDate>(e =>
         {
-            e.ToTable("PROVIDER_UNAVAILABLE_DATES", t => t.HasCheckConstraint("CK_PROVIDER_UNAVAILABLE_DATES_SOURCE", DayOffSourceCheck));   // v2.7
+            e.ToTable("PROVIDER_UNAVAILABLE_DATES", t =>
+            {
+                t.HasCheckConstraint("CK_PROVIDER_UNAVAILABLE_DATES_SOURCE", DayOffSourceCheck);   // v2.7
+                t.HasTrigger("trg_UnavailableDates_Audit");                                        // database v2.10
+            });
             e.HasOne(x => x.Provider).WithMany(p => p.UnavailableDates).HasForeignKey(x => x.ProviderId);
             e.HasIndex(x => new { x.ProviderId, x.UnavailableDate }).IsUnique();
             // database v2.5: only ONE provider can be off on any date (first come, first served) - the database refuses a second
@@ -155,6 +164,7 @@ public class ServisyoDbContext : DbContext
             {
                 t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_STATUS", DayOffStatusCheck);
                 t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_DECISION", DayOffDecisionCheck);
+                t.HasTrigger("trg_DayOffRequests_Audit");      // database v2.10
             });
             e.HasKey(x => x.RequestId);
             e.Property(x => x.Status).HasMaxLength(20).HasDefaultValue(DayOffStatuses.Pending);
@@ -173,6 +183,7 @@ public class ServisyoDbContext : DbContext
             {
                 t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS", NameChangeStatusCheck);
                 t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION", NameChangeDecisionCheck);
+                t.HasTrigger("trg_NameChangeRequests_Audit");  // database v2.10
             });
             e.HasKey(x => x.RequestId);
             e.Property(x => x.FirstName).HasMaxLength(100);      // the same sizes as USERS
@@ -264,6 +275,7 @@ public class ServisyoDbContext : DbContext
             e.ToTable("REVIEWS", t =>
             {
                 t.HasTrigger("trg_Reviews_RatingSync");       // database v2: keeps AVG_RATING / REVIEW_COUNT right
+                t.HasTrigger("trg_Reviews_Audit");            // database v2.10
                 t.HasCheckConstraint("CK_REVIEWS_RATING", "[RATING] BETWEEN 1 AND 5");
                 t.HasCheckConstraint("CK_REVIEWS_STATUS", "[STATUS] IN ('Visible','Flagged','Removed')");
             });
@@ -285,14 +297,16 @@ public class ServisyoDbContext : DbContext
 
         mb.Entity<SystemLog>(e =>
         {
-            e.ToTable("SYSTEM_LOGS");
+            // database v2.10: only INSERT / UPDATE / DELETE / LOGIN
+            e.ToTable("SYSTEM_LOGS", t => t.HasCheckConstraint("CK_SYSTEM_LOGS_ACTION_TYPE", AuditActionType.Check));
             e.Property(x => x.UserRole).HasMaxLength(50);
             e.Property(x => x.ActionType).HasMaxLength(20);
             e.Property(x => x.EntityName).HasMaxLength(50);
             e.Property(x => x.Description).HasMaxLength(500);
             e.Property(x => x.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
-            e.HasIndex(x => x.CreatedAt);
-            e.HasIndex(x => new { x.ActionType, x.UserRole });
+            e.HasIndex(x => x.CreatedAt);                                  // the "All" tab, newest first
+            e.HasIndex(x => new { x.ActionType, x.CreatedAt });            // database v2.10: one action tab, newest first
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });                // database v2.10: one person's history
         });
         // database v2.3: PAYMENTS is the list of payment methods; PAYMENTS_DTL is each booking's payment
         mb.Entity<Payment>(e =>

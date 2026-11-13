@@ -13,7 +13,10 @@
      v2.3 DerivedData     every payment must be convertible
      v2.5 OneDayOffPerDate only one provider may be off on any date
      v2.6 MaxJobsPerDay20 (INFO) providers above 20 jobs a day become 20
-   v2.7 DayOffRequests and v2.8 NameChangeRequests only add new (empty) tables: there is nothing to check for them. */
+     v2.10 AuditStandard  SYSTEM_LOGS may only have INSERT / UPDATE / DELETE / LOGIN lines (v2.9 REPORT lines are removed),
+                          and no object made by someone else may have one of the new audit names
+   v2.7 DayOffRequests and v2.8 NameChangeRequests only add new (empty) tables, and v2.9 InactiveAccounts only adds
+   two USERS columns (filled from the sign-in log): there is nothing to check for them. */
 SET NOCOUNT ON;
 DECLARE @out TABLE (SEQ INT IDENTITY(1, 1) PRIMARY KEY, KIND NVARCHAR(4) NOT NULL, LINE NVARCHAR(1000) NOT NULL);
 
@@ -113,6 +116,35 @@ IF NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'
     JOIN dbo.USERS u ON u.USER_ID = p.USER_ID
     WHERE p.MAX_JOBS_PER_DAY > 20
     ORDER BY p.PROVIDER_ID;
+
+-- ------------------------------------------------------------------ v2.10 AuditStandard
+IF NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]AuditStandard')
+BEGIN
+    INSERT @out (KIND, LINE)
+    SELECT N'FIX', CONCAT(N'v2.10 system logs: ', COUNT(*), N' line(s) have ACTION_TYPE "', ACTION_TYPE,
+                          N'", but only INSERT, UPDATE, DELETE and LOGIN are allowed. Send this line to Claude.')
+    FROM dbo.SYSTEM_LOGS
+    WHERE ACTION_TYPE NOT IN (N'INSERT', N'UPDATE', N'DELETE', N'LOGIN', N'REPORT')
+    GROUP BY ACTION_TYPE;
+
+    INSERT @out (KIND, LINE)
+    SELECT N'INFO', CONCAT(N'v2.10 removes ', COUNT(*), N' REPORT line(s) of the v2.9 inactive-account report; the admin dashboard shows that number live now.')
+    FROM dbo.SYSTEM_LOGS
+    WHERE ACTION_TYPE = N'REPORT'
+    HAVING COUNT(*) > 0;
+
+    INSERT @out (KIND, LINE)
+    SELECT N'FIX', CONCAT(N'v2.10 name taken: ', o.name, N' (', o.type_desc, N') already exists and was not made by SERVISYO. Rename or drop it first.')
+    FROM sys.objects o
+    WHERE o.schema_id = SCHEMA_ID(N'dbo')
+      AND o.name IN (N'fn_AuditValue', N'fn_AuditActor', N'trg_Users_Audit', N'trg_Customers_Audit', N'trg_Providers_Audit', N'trg_Services_Audit',
+                     N'trg_Bookings_Audit', N'trg_PaymentsDtl_Audit', N'trg_Reviews_Audit', N'trg_UnavailableDates_Audit', N'trg_DayOffRequests_Audit',
+                     N'trg_NameChangeRequests_Audit')
+      AND ISNULL(OBJECT_DEFINITION(o.object_id), N'') NOT LIKE N'%SERVISYO-DB-V2%'
+      AND NOT (o.name IN (N'trg_Users_Audit', N'trg_Bookings_Audit', N'trg_Services_Audit')
+               AND ISNULL(OBJECT_DEFINITION(o.object_id), N'') LIKE N'%servisyo[_]user[_]id%')
+    ORDER BY o.name;
+END
 
 -- ------------------------------------------------------------------ the report
 DECLARE @fix INT = (SELECT COUNT(*) FROM @out WHERE KIND = N'FIX');

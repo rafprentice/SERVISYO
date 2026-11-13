@@ -171,20 +171,30 @@
                         }
                         <div class="sv-fld">
                             <label for="cp-pw-current">Current Password</label>
-                            <input id="cp-pw-current" name="CurrentPassword" type="password" maxlength="100" autocomplete="current-password"
-                                   aria-invalid="@(currentError is null ? null : "true")" />
+                            @* each box has its own eye (show / hide), see _PasswordToggle and password-toggle.js *@
+                            <div class="sv-pwfield">
+                                <input id="cp-pw-current" name="CurrentPassword" type="password" maxlength="100" autocomplete="current-password"
+                                       aria-invalid="@(currentError is null ? null : "true")" />
+                                <partial name="_PasswordToggle" model="@("cp-pw-current")" />
+                            </div>
                             @if (currentError is not null) { <p class="sv-fld__err" role="alert">@currentError</p> }
                         </div>
                         <div class="sv-fld">
                             <label for="cp-pw-new">New Password</label>
-                            <input id="cp-pw-new" name="NewPassword" type="password" maxlength="100" autocomplete="new-password"
-                                   aria-invalid="@(newError is null ? null : "true")" />
+                            <div class="sv-pwfield">
+                                <input id="cp-pw-new" name="NewPassword" type="password" maxlength="100" autocomplete="new-password"
+                                       aria-invalid="@(newError is null ? null : "true")" />
+                                <partial name="_PasswordToggle" model="@("cp-pw-new")" />
+                            </div>
                             @if (newError is not null) { <p class="sv-fld__err" role="alert">@newError</p> }
                         </div>
                         <div class="sv-fld">
                             <label for="cp-pw-confirm">Confirm New Password</label>
-                            <input id="cp-pw-confirm" name="ConfirmPassword" type="password" maxlength="100" autocomplete="new-password"
-                                   aria-invalid="@(confirmError is null ? null : "true")" />
+                            <div class="sv-pwfield">
+                                <input id="cp-pw-confirm" name="ConfirmPassword" type="password" maxlength="100" autocomplete="new-password"
+                                       aria-invalid="@(confirmError is null ? null : "true")" />
+                                <partial name="_PasswordToggle" model="@("cp-pw-confirm")" />
+                            </div>
                             @if (confirmError is not null) { <p class="sv-fld__err" role="alert">@confirmError</p> }
                         </div>
                         <div class="sv-cp__actions">

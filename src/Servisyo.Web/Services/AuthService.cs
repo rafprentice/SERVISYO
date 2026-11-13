@@ -153,10 +153,12 @@ public class AuthService : IAuthService
             return AuthResult.Fail($"This account is {user.AccountStatus.ToLowerInvariant()}. Please contact support.");
 
         if (check == PasswordVerificationResult.SuccessRehashNeeded)
-        {
             user.PasswordHash = _hasher.HashPassword(user, password!);
-            await _db.SaveChangesAsync();
-        }
+
+        // database v2.9: a sign-in is activity. It restarts the 1-year count and cancels a "will be deleted" warning.
+        user.LastActivityAt = DateTime.UtcNow;
+        user.InactivityWarnedAt = null;
+        await _db.SaveChangesAsync();
 
         return AuthResult.Ok(user);
     }

@@ -282,6 +282,8 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("CUSTOMERS", null, t =>
                         {
+                            t.HasTrigger("trg_Customers_Audit");
+
                             t.HasTrigger("trg_Customers_StatusCopy");
 
                             t.HasCheckConstraint("CK_CUSTOMERS_STATUS", "[ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated')");
@@ -523,6 +525,8 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("SERVICE_PROVIDERS", null, t =>
                         {
+                            t.HasTrigger("trg_Providers_Audit");
+
                             t.HasTrigger("trg_Providers_StatusCopy");
 
                             t.HasCheckConstraint("CK_PROVIDERS_APPROVAL", "[APPROVAL_STATUS] IN ('Pending','Approved','Rejected')");
@@ -685,10 +689,14 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("PROVIDER_DAY_OFF_REQUESTS", null, t =>
                         {
+                            t.HasTrigger("trg_DayOffRequests_Audit");
+
                             t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_DECISION", "([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_PROVIDER_DAY_OFF_REQUESTS_STATUS", "[STATUS] IN ('Pending','Approved','Rejected')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.ProviderNameChangeRequest", b =>
@@ -760,10 +768,14 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("PROVIDER_NAME_CHANGE_REQUESTS", null, t =>
                         {
+                            t.HasTrigger("trg_NameChangeRequests_Audit");
+
                             t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION", "([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS", "[STATUS] IN ('Pending','Approved','Rejected')");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.ProviderUnavailableDate", b =>
@@ -810,8 +822,12 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("PROVIDER_UNAVAILABLE_DATES", null, t =>
                         {
+                            t.HasTrigger("trg_UnavailableDates_Audit");
+
                             t.HasCheckConstraint("CK_PROVIDER_UNAVAILABLE_DATES_SOURCE", "[REQUEST_ID] IS NULL OR [APPROVED_BY_ACTION_ID] IS NULL");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.Review", b =>
@@ -855,6 +871,8 @@ namespace Servisyo.Web.Migrations
 
                     b.ToTable("REVIEWS", null, t =>
                         {
+                            t.HasTrigger("trg_Reviews_Audit");
+
                             t.HasTrigger("trg_Reviews_RatingSync");
 
                             t.HasCheckConstraint("CK_REVIEWS_RATING", "[RATING] BETWEEN 1 AND 5");
@@ -1007,9 +1025,14 @@ namespace Servisyo.Web.Migrations
 
                     b.HasIndex("CreatedAt");
 
-                    b.HasIndex("ActionType", "UserRole");
+                    b.HasIndex("ActionType", "CreatedAt");
 
-                    b.ToTable("SYSTEM_LOGS", (string)null);
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("SYSTEM_LOGS", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SYSTEM_LOGS_ACTION_TYPE", "[ACTION_TYPE] IN ('INSERT','UPDATE','DELETE','LOGIN')");
+                        });
                 });
 
             modelBuilder.Entity("Servisyo.Web.Models.User", b =>
@@ -1049,6 +1072,16 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("FIRST_NAME");
 
+                    b.Property<DateTime?>("InactivityWarnedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("INACTIVITY_WARNED_AT");
+
+                    b.Property<DateTime>("LastActivityAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime2")
+                        .HasColumnName("LAST_ACTIVITY_AT")
+                        .HasDefaultValueSql("SYSUTCDATETIME()");
+
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1085,6 +1118,8 @@ namespace Servisyo.Web.Migrations
 
                     b.HasIndex("Email")
                         .IsUnique();
+
+                    b.HasIndex("LastActivityAt");
 
                     b.ToTable("USERS", null, t =>
                         {

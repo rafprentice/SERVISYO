@@ -119,7 +119,7 @@ public class ProfilePhotoService : IProfilePhotoService
     }
 
     /// Only a plain file name inside /uploads/avatars/ counts as ours (never a path that climbs out of the folder).
-    private static bool IsOurs(string? url) =>
+    internal static bool IsOurs(string? url) =>
         !string.IsNullOrWhiteSpace(url)
         && url.StartsWith(UrlFolder, StringComparison.Ordinal)
         && url.Length > UrlFolder.Length

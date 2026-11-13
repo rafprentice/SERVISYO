@@ -1,6 +1,9 @@
 # System Logs (database triggers) + Admin monthly PDF report
 
-## What is logged, and where
+> **Database v2.10 changed System Logs:** one standard format, old -> new for every changed field, 10 audit triggers,
+> filter pills and 20 lines a page. See `docs/audit-standard-notes.md`. The table below is the ORIGINAL version (v1).
+
+## What was logged in v1, and where
 | Trigger | Table | Logs |
 |---|---|---|
 | `trg_Bookings_Audit` | BOOKINGS (after INSERT, UPDATE) | new booking requests; every STATUS change; every PAYMENT_STATUS change (EntityName "Payment") |
@@ -14,10 +17,12 @@
   The triggers read it. Not signed in (e.g. registering) = "Guest"; app start-up / SSMS = "System".
 - Passwords are never written to the log, only "Password changed for …".
 - EF Core is told the tables have triggers (`t.HasTrigger(...)`); without that SQL Server refuses EF's INSERT/UPDATE statements.
-- Readable copy of the trigger SQL: docs/sql/audit-triggers-readable.sql (the migration uses Data/AuditTriggersSql.cs).
+- Readable copy of the trigger SQL: docs/sql/audit-triggers-readable.sql (now the v2.10 triggers; the v1 text is in
+  Data/AuditTriggersSql.cs, used by the AddSystemLogs migration and to undo v2.10).
 
 ## Admin pages
-- **System Logs** (sidebar): `/admin/logs` — search, From/To (Cebu dates), Action (INSERT/UPDATE/DELETE/LOGIN), Role, 25 per page.
+- **System Logs** (sidebar): `/admin/logs` — pills All / INSERT / UPDATE / DELETE / LOGIN with counts, search, From/To
+  (Cebu dates), Role, 20 per page (v2.10).
 - **Export PDF Report** (dashboard, top right): opens `/admin/reports/summary?print=true` in a new tab and shows the print window.
   Choose **Save as PDF**. The month can be changed at the top of the report.
   Contents: revenue, platform fees, provider earnings, paid bookings; bookings by status, completed vs cancelled, completion rate;
@@ -33,6 +38,6 @@
 
 ## Checking the triggers by hand (SSMS on SERVISYO)
 ```sql
-SELECT name FROM sys.triggers;                                   -- the three trg_..._Audit
+SELECT name FROM sys.triggers;                                   -- v2.10: ten trg_..._Audit
 SELECT TOP 20 * FROM SYSTEM_LOGS ORDER BY SYSTEM_LOG_ID DESC;     -- newest lines
 ```

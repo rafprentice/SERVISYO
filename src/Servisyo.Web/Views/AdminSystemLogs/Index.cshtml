@@ -1,5 +1,4 @@
 @using System.Globalization
-@using Servisyo.Web.Helpers
 @using Servisyo.Web.Models
 @using Servisyo.Web.ViewModels
 @model SystemLogsPageViewModel
@@ -10,22 +9,46 @@
     ViewData["ActiveNav"] = "logs";
 
     var q = Model.Query;
+    var logs = Model.Logs;
     var inv = CultureInfo.InvariantCulture;
     var fromText = q.From?.ToString("yyyy-MM-dd", inv);
     var toText = q.To?.ToString("yyyy-MM-dd", inv);
-    var anyFilter = q.From is not null || q.To is not null || q.Action is not null || q.Role is not null || q.Q is not null;
-
-    object PageLink(int page) => new { from = fromText, to = toText, action = q.Action, role = q.Role, q = q.Q, page = page > 1 ? page : (int?)null };
+    var shownLabel = q.ActionType is null ? "" : " " + q.ActionType;     // "", " UPDATE", ...
+    var emptyText = Model.AnyFilter || q.ActionType is not null
+        ? $"No{shownLabel} log entries match these filters."
+        : "No log entries yet. Changes to accounts, bookings, payments, services and reviews will appear here.";
+    var firstRow = (logs.Page - 1) * logs.PageSize + 1;
+    var lastRow = firstRow + logs.Items.Count - 1;
+    var footText = logs.TotalCount == 0
+        ? "No entries"
+        : $"Showing {firstRow}–{lastRow} of {logs.TotalCount.ToString("N0", inv)}{shownLabel} {(logs.TotalCount == 1 ? "entry" : "entries")}";
 }
 
 <p class="sv-eyebrow">Audit</p>
 <h1 class="sv-dash__title">System Logs</h1>
-<p class="sv-dash__sub">Every booking, payment, account and service change recorded by the database, plus sign-ins.</p>
+<p class="sv-dash__sub">Every change the database records (created, updated with the old and new value, deleted) and every sign-in.</p>
+
+@* One pill per action type; the number is how many lines it has with the filters below. Every link keeps the filters. *@
+<nav class="sv-tabs sv-tabs--inline sv-logs__tabs" aria-label="Filter by action">
+    @foreach (var t in Model.Tabs)
+    {
+        var active = t.ActionType == q.ActionType;
+        <a class="sv-tab @(active ? "is-active" : "")"
+           href="@Url.Action("Index", "AdminSystemLogs", Model.Link(t.ActionType, 1))"
+           aria-current="@(active ? "page" : null)">
+            @t.Label <span class="sv-tab__n">(@(t.Count.ToString("N0", inv)))</span>
+        </a>
+    }
+</nav>
 
 <form method="get" asp-controller="AdminSystemLogs" asp-action="Index" class="sv-panel sv-logs__filters" role="search" aria-label="Filter the logs">
+    @if (q.ActionType is not null)
+    {
+        <input type="hidden" name="actionType" value="@q.ActionType" />
+    }
     <div class="sv-fld">
-        <label for="lg-q">Search</label>
-        <input id="lg-q" type="search" name="q" value="@q.Q" maxlength="100" placeholder="Booking #6, email, service…" />
+        <label for="lg-search">Search</label>
+        <input id="lg-search" type="search" name="search" value="@q.Search" maxlength="100" placeholder="Booking #6, phone, email, service…" />
     </div>
     <div class="sv-fld">
         <label for="lg-from">From</label>
@@ -34,16 +57,6 @@
     <div class="sv-fld">
         <label for="lg-to">To</label>
         <input id="lg-to" type="date" name="to" value="@toText" />
-    </div>
-    <div class="sv-fld">
-        <label for="lg-action">Action</label>
-        <select id="lg-action" name="action">
-            <option value="">All actions</option>
-            @foreach (var a in SystemLogActions.All)
-            {
-                <option value="@a" selected="@(a == q.Action)">@a</option>
-            }
-        </select>
     </div>
     <div class="sv-fld">
         <label for="lg-role">Role</label>
@@ -57,9 +70,10 @@
     </div>
     <div class="sv-logs__btns">
         <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm">Apply</button>
-        @if (anyFilter)
+        @if (Model.AnyFilter)
         {
-            <a class="sv-btn sv-btn--outline sv-btn--sm" asp-controller="AdminSystemLogs" asp-action="Index">Reset</a>
+            @* clears the filters, stays on the same pill *@
+            <a class="sv-btn sv-btn--outline sv-btn--sm" href="@Url.Action("Index", "AdminSystemLogs", new { actionType = q.ActionType })">Reset</a>
         }
     </div>
 </form>
@@ -77,11 +91,11 @@
             </tr>
         </thead>
         <tbody>
-            @if (Model.Rows.Count == 0)
+            @if (logs.Items.Count == 0)
             {
-                <tr><td colspan="6" class="sv-table__empty">@(anyFilter ? "No log entries match these filters." : "No log entries yet. Changes to bookings, payments, accounts and services will appear here.")</td></tr>
+                <tr><td colspan="6" class="sv-table__empty">@emptyText</td></tr>
             }
-            @foreach (var r in Model.Rows)
+            @foreach (var r in logs.Items)
             {
                 <tr>
                     <td class="sv-table__muted">#@r.Id</td>
@@ -100,18 +114,18 @@
 </div>
 
 <div class="sv-table__foot">
-    <span>Showing @Model.Rows.Count of @Model.TotalMatching @(Model.TotalMatching == 1 ? "entry" : "entries") · times in Cebu time</span>
-    @if (Model.PageCount > 1)
+    <span>@footText · times in Cebu time</span>
+    @if (logs.PageCount > 1)
     {
         <nav class="sv-pager" aria-label="Pages">
-            @if (Model.Page > 1)
+            @if (logs.HasPrevious)
             {
-                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminSystemLogs", PageLink(Model.Page - 1))">Previous</a>
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminSystemLogs", Model.Link(q.ActionType, logs.Page - 1))">Previous</a>
             }
-            <span>Page @Model.Page of @Model.PageCount</span>
-            @if (Model.Page < Model.PageCount)
+            <span>Page @logs.Page of @logs.PageCount</span>
+            @if (logs.HasNext)
             {
-                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminSystemLogs", PageLink(Model.Page + 1))">Next</a>
+                <a class="sv-btn sv-btn--outline sv-btn--xs" href="@Url.Action("Index", "AdminSystemLogs", Model.Link(q.ActionType, logs.Page + 1))">Next</a>
             }
         </nav>
     }

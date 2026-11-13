@@ -23,7 +23,7 @@ $Server = "(localdb)\MSSQLLocalDB"
 $Main = "SERVISYO"
 $Web = "src\Servisyo.Web"
 $MigDir = "$Web\Migrations"
-$Latest = "NameChangeRequests"   # database v2.8 (tools\add-name-change-requests.ps1)
+$Latest = "AuditStandard"   # database v2.10 (tools\add-audit-standard.ps1)
 
 function Conn([string]$db) { "Server=$Server;Database=$db;Trusted_Connection=True;TrustServerCertificate=True" }
 function Say([string]$text) { Write-Host ""; Write-Host "== $text" -ForegroundColor Cyan }
@@ -103,10 +103,10 @@ function Add-DeployGuards([string]$sql) {
 # ---------------------------------------------------------------- 0. the laptop must be on the latest database first
 if (-not (Test-Path "$Web\Servisyo.Web.csproj")) { Stop-Here "run this from the SERVISYO folder (the one with src and tools)." }
 $mig = Get-ChildItem $MigDir -Filter "*_$Latest.cs" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike "*.Designer.cs" } | Select-Object -Last 1
-if (-not $mig) { Stop-Here "the $Latest migration is missing. Run tools\add-name-change-requests.ps1 first." }
+if (-not $mig) { Stop-Here "the $Latest migration is missing. Run tools\add-audit-standard.ps1 first." }
 $migId = [System.IO.Path]::GetFileNameWithoutExtension($mig.Name)
 if ((Scalar $Main "SELECT COUNT(*) FROM dbo.__EFMigrationsHistory WHERE MigrationId = N'$migId'") -ne 1) {
-    Stop-Here "your local SERVISYO database is not on $migId yet. Run tools\add-name-change-requests.ps1 first and test the site."
+    Stop-Here "your local SERVISYO database is not on $migId yet. Run tools\add-audit-standard.ps1 first and test the site."
 }
 Say "Code: branch $(git rev-parse --abbrev-ref HEAD), last commit $(git log -1 --format='%h %s')"
 $dirty = git status --porcelain

@@ -191,3 +191,12 @@ h1, h2, h3 { font-family: var(--font-display); }
     .sv-footer__grid { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* Show / hide password (Views/Shared/_PasswordToggle.cshtml + js/password-toggle.js): sign-in pages and portal.
+   Eye = the password is hidden; eye with a line through it = the password is visible. */
+.sv-eye .eye-off { display: none; }
+.sv-eye[aria-pressed="true"] .eye-on { display: none; }
+.sv-eye[aria-pressed="true"] .eye-off { display: block; }
+/* Edge and old Internet Explorer draw their own eye in password boxes: hide it where ours is */
+.sv-input input::-ms-reveal, .sv-pwfield input::-ms-reveal,
+.sv-input input::-ms-clear, .sv-pwfield input::-ms-clear { display: none; }

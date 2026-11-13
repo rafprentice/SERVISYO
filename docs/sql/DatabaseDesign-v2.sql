@@ -1,14 +1,14 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.8  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.10  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
      PART 1  Tables, keys, relationships, CHECK rules and indexes  (REFERENCE - created by the EF migrations)
-     PART 2  Functions (8)
+     PART 2  Functions (10)
      PART 3  Views (2)
      PART 4  Stored procedures (21)
-     PART 5  Triggers (6 new; the 3 audit triggers trg_Users_Audit / trg_Bookings_Audit / trg_Services_Audit are unchanged)
+     PART 5  Triggers (15: 5 that keep the data right + 10 audit triggers that write SYSTEM_LOGS, v2.10)
      PART 6  Self-test: runs every procedure, function and trigger with sample data and ROLLS IT ALL BACK
      PART 7  Examples and subqueries for the defense
 
@@ -18,7 +18,9 @@
        "MaxJobsPerDay20" (v2.6) the 20-job limit (CK_PROVIDERS_LIMITS and usp_RegisterProvider), "DayOffRequests"
        (v2.7) the table PROVIDER_DAY_OFF_REQUESTS, the column PROVIDER_UNAVAILABLE_DATES.REQUEST_ID (PART 1) and the
        new versions of fn_IsProviderAvailable, usp_CreateBooking and usp_GetNotifications, "NameChangeRequests" (v2.8)
-       the table PROVIDER_NAME_CHANGE_REQUESTS (PART 1) and a new version of usp_GetNotifications:
+       the table PROVIDER_NAME_CHANGE_REQUESTS (PART 1) and a new version of usp_GetNotifications, "InactiveAccounts"
+       (v2.9) two USERS columns and their index (PART 1), "AuditStandard" (v2.10) the SYSTEM_LOGS CHECK and indexes
+       (PART 1), fn_AuditValue / fn_AuditActor (PART 2) and the 10 audit triggers (PART 5):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -140,6 +142,46 @@
        only ONE request per provider can wait, even when two are sent at the same moment.
      - usp_GetNotifications: providers see the answer ('name-change'); administrators see every request that is
        still Pending ('name-change-new').
+
+   WHAT CHANGED IN v2.9 (EF migration "InactiveAccounts") - accounts nobody uses for a year are removed
+     - USERS.LAST_ACTIVITY_AT (DATETIME2, NOT NULL, DEFAULT SYSUTCDATETIME()): the last sign-in; registration counts
+       as the first. Existing accounts start from their last LOGIN line in SYSTEM_LOGS, or from CREATED_AT. It is
+       stored (not calculated from SYSTEM_LOGS) because the log is an audit trail that may be cleaned, not the
+       source of truth.
+     - USERS.INACTIVITY_WARNED_AT (DATETIME2, NULL): when the "your account will be deleted" email was sent for the
+       current inactive period. A sign-in sets it back to NULL.
+     - Index IX_USERS_LAST_ACTIVITY_AT for the daily search.
+     - The app's daily job (InactiveAccountCleanupService): 335 days without a sign-in -> warning email; 365 days AND
+       30 days after the warning -> the account is removed in one transaction. Never: administrators, accounts with
+       an unfinished booking (Pending, Accepted, In Progress, or Completed with cash not collected yet).
+       No finished bookings -> the account and everything it owns is deleted. With finished bookings -> they stay
+       (with their payments, reviews and messages) for the other person, and the person is erased: "Deleted User",
+       no email, phone, address or photo, no password, Deactivated. Each removal writes SYSTEM_LOGS (USER_ID NULL,
+       USER_ROLE System, ACTION_TYPE DELETE, ENTITY User). Report-only (changes nothing) until it is switched on.
+     - No foreign key became ON DELETE CASCADE: the app deletes in the right order inside the transaction (SQL Server
+       also refuses cascades with two paths, e.g. BOOKINGS -> CUSTOMERS / SERVICE_PROVIDERS -> USERS).
+       SYSTEM_LOGS.USER_ID has no foreign key on purpose, so log lines outlive the account.
+
+   WHAT CHANGED IN v2.10 (EF migration "AuditStandard") - one format for every System Logs line
+     - Every SYSTEM_LOGS line now reads the same way. INSERT / UPDATE / DELETE come from the audit triggers (PART 5),
+       so whatever changes a row (the website, a stored procedure, SSMS) is logged, and the app cannot forget a line:
+         INSERT  "{Role} {Full Name} created {Entity} #{Id}: {summary}."
+         UPDATE  "{Role} {Full Name} updated {Entity} #{Id}: {field} '{old}' -> '{new}'."   ONE line per changed field
+         DELETE  "{Role} {Full Name} deleted {Entity} #{Id}: {summary}."
+         LOGIN   written by the app: "{Full Name} ({Email}) signed in."  /  "Failed login attempt for {Email}." (role Guest)
+       WHO is SESSION_CONTEXT (set by the app); nobody signed in = "Guest", no web request = "System".
+     - fn_AuditActor (role + full name) and fn_AuditValue ('(none)' when empty, long text cut to 150 characters).
+     - The 4 existing audit triggers were rewritten (USERS, SERVICES, BOOKINGS, PAYMENTS_DTL) and 6 were added
+       (CUSTOMERS address / photo, SERVICE_PROVIDERS business details, REVIEWS, the days off of an administrator,
+       day-off requests, name change requests). A change of address or phone number is now in System Logs with
+       the old and the new value. Text is compared exactly (binary collation), so "juan" -> "Juan" is a change too.
+       Never logged: passwords (only "password changed"), the sign-in columns, calculated or copied columns.
+     - CHECK CK_SYSTEM_LOGS_ACTION_TYPE: ACTION_TYPE is INSERT, UPDATE, DELETE or LOGIN, nothing else. The v2.9 REPORT
+       lines were removed: the admin dashboard works that number out when it opens (nothing stored, rule 2).
+     - Index IX_SYSTEM_LOGS_ACTION_TYPE_CREATED_AT (one action type, newest first) and IX_SYSTEM_LOGS_USER_ID_CREATED_AT
+       (one person's history) replace IX_SYSTEM_LOGS_ACTION_TYPE_USER_ROLE. Admin > System Logs reads 20 lines a page.
+     - SESSION_CONTEXT servisyo_audit_off = 1 silences the audit triggers on one connection. Only the inactive-account
+       clean-up uses it: it writes its own single DELETE line instead of copying the erased person's details.
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -157,10 +199,11 @@ BEGIN
     SET NOEXEC ON;
 END
 GO
--- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), and v2.8 reads the tables of
--- the "DayOffRequests" (v2.7) and "NameChangeRequests" (v2.8) migrations, so the EF migrations come first
+-- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), and this file reads the tables
+-- and columns of the "DayOffRequests" (v2.7), "NameChangeRequests" (v2.8) and "InactiveAccounts" (v2.9) migrations and
+-- needs the SYSTEM_LOGS CHECK of "AuditStandard" (v2.10), so the EF migrations come first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]NameChangeRequests')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]AuditStandard')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -171,7 +214,9 @@ DECLARE @clash NVARCHAR(MAX) = STUFF((
     SELECT N', ' + o.name
     FROM sys.objects o
     WHERE o.schema_id = SCHEMA_ID(N'dbo')
-      AND o.name IN (N'fn_DayOfWeek', N'fn_ManilaNow', N'fn_GetFullName', N'fn_GetProviderAvgRating', N'fn_CountProviderJobsOnDate', N'fn_IsProviderAvailable', N'fn_HasBookingConflict', N'fn_GetAvailableSlots', N'vw_BookingOverview', N'vw_ProviderDirectory', N'usp_RegisterCustomer', N'usp_RegisterProvider', N'usp_GetUserForLogin', N'usp_ApproveProvider', N'usp_UpdateAccountStatus', N'usp_ModerateReview', N'usp_AddService', N'usp_SearchServices', N'usp_GetProviderAvailability', N'usp_AddAvailability', N'usp_UpdateAvailability', N'usp_DeleteAvailability', N'usp_CreateBooking', N'usp_CancelBooking', N'usp_UpdateBookingStatus', N'usp_ApproveAndPay', N'usp_ConfirmCashReceived', N'usp_AddReview', N'usp_GetMonthlyReport', N'usp_GetNotifications', N'usp_GetBookingsNeedingAttention', N'trg_Reviews_RatingSync', N'trg_Bookings_StatusFlow', N'trg_PaymentsDtl_Audit', N'trg_Users_StatusSync', N'trg_Customers_StatusCopy', N'trg_Providers_StatusCopy')
+      AND o.name IN (N'fn_DayOfWeek', N'fn_ManilaNow', N'fn_GetFullName', N'fn_GetProviderAvgRating', N'fn_CountProviderJobsOnDate', N'fn_IsProviderAvailable', N'fn_HasBookingConflict', N'fn_GetAvailableSlots', N'vw_BookingOverview', N'vw_ProviderDirectory', N'usp_RegisterCustomer', N'usp_RegisterProvider', N'usp_GetUserForLogin', N'usp_ApproveProvider', N'usp_UpdateAccountStatus', N'usp_ModerateReview', N'usp_AddService', N'usp_SearchServices', N'usp_GetProviderAvailability', N'usp_AddAvailability', N'usp_UpdateAvailability', N'usp_DeleteAvailability', N'usp_CreateBooking', N'usp_CancelBooking', N'usp_UpdateBookingStatus', N'usp_ApproveAndPay', N'usp_ConfirmCashReceived', N'usp_AddReview', N'usp_GetMonthlyReport', N'usp_GetNotifications', N'usp_GetBookingsNeedingAttention', N'trg_Reviews_RatingSync', N'trg_Bookings_StatusFlow', N'trg_PaymentsDtl_Audit', N'trg_Users_StatusSync', N'trg_Customers_StatusCopy', N'trg_Providers_StatusCopy',
+                     N'fn_AuditValue', N'fn_AuditActor', N'trg_Users_Audit', N'trg_Customers_Audit', N'trg_Providers_Audit', N'trg_Services_Audit',
+                     N'trg_Bookings_Audit', N'trg_Reviews_Audit', N'trg_UnavailableDates_Audit', N'trg_DayOffRequests_Audit', N'trg_NameChangeRequests_Audit')
       AND ISNULL(OBJECT_DEFINITION(o.object_id), N'') NOT LIKE N'%SERVISYO-DB-V2%'
     ORDER BY o.name
     FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'');
@@ -196,6 +241,8 @@ CREATE TABLE USERS (
     EMAIL                        NVARCHAR(256)   NOT NULL,
     EMAIL_VERIFICATION_PENDING   BIT             NOT NULL,
     FIRST_NAME                   NVARCHAR(100)   NOT NULL,
+    INACTIVITY_WARNED_AT         DATETIME2       NULL,      -- v2.9: the "will be deleted" email of this inactive period
+    LAST_ACTIVITY_AT             DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),   -- v2.9: the last sign-in
     LAST_NAME                    NVARCHAR(100)   NOT NULL,
     MIDDLE_NAME                  NVARCHAR(100)   NULL,
     NOTIFICATIONS_SEEN_AT        DATETIME2       NULL,      -- v2.3: the bell; newer notifications are unread
@@ -207,6 +254,7 @@ CREATE TABLE USERS (
     CONSTRAINT CK_USERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
 CREATE UNIQUE INDEX IX_USERS_EMAIL ON USERS (EMAIL);
+CREATE INDEX IX_USERS_LAST_ACTIVITY_AT ON USERS (LAST_ACTIVITY_AT);   -- v2.9: the daily search for inactive accounts
 -- triggers on USERS: trg_Users_Audit, trg_Users_StatusSync
 
 CREATE TABLE CUSTOMERS (
@@ -220,7 +268,7 @@ CREATE TABLE CUSTOMERS (
     CONSTRAINT CK_CUSTOMERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
 CREATE UNIQUE INDEX IX_CUSTOMERS_USER_ID ON CUSTOMERS (USER_ID);
--- triggers on CUSTOMERS: trg_Customers_StatusCopy
+-- triggers on CUSTOMERS: trg_Customers_StatusCopy, trg_Customers_Audit (v2.10)
 
 CREATE TABLE SERVICE_PROVIDERS (
     PROVIDER_ID                  INT             IDENTITY(1,1) NOT NULL,
@@ -246,7 +294,7 @@ CREATE TABLE SERVICE_PROVIDERS (
     CONSTRAINT CK_PROVIDERS_STATUS CHECK ([ACCOUNT_STATUS] IN ('Active','Suspended','Deactivated'))
 );
 CREATE UNIQUE INDEX IX_SERVICE_PROVIDERS_USER_ID ON SERVICE_PROVIDERS (USER_ID);
--- triggers on SERVICE_PROVIDERS: trg_Reviews_RatingSync (writes AVG_RATING / REVIEW_COUNT), trg_Providers_StatusCopy
+-- triggers on SERVICE_PROVIDERS: trg_Providers_StatusCopy, trg_Providers_Audit (v2.10); trg_Reviews_RatingSync writes AVG_RATING / REVIEW_COUNT
 
 CREATE TABLE PROVIDER_AVAILABILITY (
     AVAILABILITY_ID              INT             IDENTITY(1,1) NOT NULL,
@@ -282,12 +330,13 @@ CREATE TABLE PROVIDER_DAY_OFF_REQUESTS (
     REQUESTED_AT                 DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     STATUS                       NVARCHAR(20)    NOT NULL DEFAULT N'Pending',
     CONSTRAINT PK_PROVIDER_DAY_OFF_REQUESTS PRIMARY KEY (REQUEST_ID),
-    CONSTRAINT FK_PROVIDER_DAY_OFF_REQUESTS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID) ON DELETE CASCADE,
+    CONSTRAINT FK_PROVIDER_DAY_OFF_REQUESTS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID),
     CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_STATUS CHECK ([STATUS] IN ('Pending','Approved','Rejected')),
     CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_DECISION CHECK (([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL))
 );
 CREATE UNIQUE INDEX IX_PROVIDER_DAY_OFF_REQUESTS_DECIDED_BY_ACTION_ID ON PROVIDER_DAY_OFF_REQUESTS (DECIDED_BY_ACTION_ID) WHERE [DECIDED_BY_ACTION_ID] IS NOT NULL;
 CREATE INDEX IX_PROVIDER_DAY_OFF_REQUESTS_PROVIDER_ID_STATUS ON PROVIDER_DAY_OFF_REQUESTS (PROVIDER_ID, STATUS);
+-- triggers on PROVIDER_DAY_OFF_REQUESTS: trg_DayOffRequests_Audit (v2.10)
 -- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
 -- v2.8: an approved provider's request to change the name on their account (only the NEW name; the current one is in USERS)
@@ -302,13 +351,14 @@ CREATE TABLE PROVIDER_NAME_CHANGE_REQUESTS (
     REQUESTED_AT                 DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     STATUS                       NVARCHAR(20)    NOT NULL DEFAULT N'Pending',
     CONSTRAINT PK_PROVIDER_NAME_CHANGE_REQUESTS PRIMARY KEY (REQUEST_ID),
-    CONSTRAINT FK_PROVIDER_NAME_CHANGE_REQUESTS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID) ON DELETE CASCADE,
+    CONSTRAINT FK_PROVIDER_NAME_CHANGE_REQUESTS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID),
     CONSTRAINT CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS CHECK ([STATUS] IN ('Pending','Approved','Rejected')),
     CONSTRAINT CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION CHECK (([STATUS] = 'Pending' AND [DECIDED_BY_ACTION_ID] IS NULL) OR ([STATUS] <> 'Pending' AND [DECIDED_BY_ACTION_ID] IS NOT NULL))
 );
 CREATE UNIQUE INDEX IX_PROVIDER_NAME_CHANGE_REQUESTS_DECIDED_BY_ACTION_ID ON PROVIDER_NAME_CHANGE_REQUESTS (DECIDED_BY_ACTION_ID) WHERE [DECIDED_BY_ACTION_ID] IS NOT NULL;
 CREATE INDEX IX_PROVIDER_NAME_CHANGE_REQUESTS_PROVIDER_ID_STATUS ON PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID, STATUS);
 CREATE UNIQUE INDEX UX_PROVIDER_NAME_CHANGE_REQUESTS_ONE_PENDING ON PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID) WHERE [STATUS] = 'Pending';   -- one waiting request per provider
+-- triggers on PROVIDER_NAME_CHANGE_REQUESTS: trg_NameChangeRequests_Audit (v2.10)
 -- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
 CREATE TABLE PROVIDER_UNAVAILABLE_DATES (
@@ -328,6 +378,7 @@ CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_PROVIDER_ID_UNAVAILABLE_DATE O
 CREATE INDEX IX_PROVIDER_UNAVAILABLE_DATES_APPROVED_BY_ACTION_ID ON PROVIDER_UNAVAILABLE_DATES (APPROVED_BY_ACTION_ID);
 CREATE INDEX IX_PROVIDER_UNAVAILABLE_DATES_REQUEST_ID ON PROVIDER_UNAVAILABLE_DATES (REQUEST_ID);
 CREATE UNIQUE INDEX IX_PROVIDER_UNAVAILABLE_DATES_UNAVAILABLE_DATE ON PROVIDER_UNAVAILABLE_DATES (UNAVAILABLE_DATE);   -- v2.5: one provider off per day
+-- triggers on PROVIDER_UNAVAILABLE_DATES: trg_UnavailableDates_Audit (v2.10)
 -- (its FOREIGN KEY to ADMIN_ACTIONS is added after ADMIN_ACTIONS, below)
 
 CREATE TABLE SERVICE_CATEGORIES (
@@ -394,7 +445,7 @@ CREATE TABLE BOOKINGS (
 );
 CREATE INDEX IX_BOOKINGS_CUSTOMER_ID ON BOOKINGS (CUSTOMER_ID);
 CREATE UNIQUE INDEX UX_BOOKINGS_ACTIVE_SLOT ON BOOKINGS (PROVIDER_ID, BOOKING_DATE, BOOKING_TIME) WHERE [STATUS] IN ('Pending','Accepted','In Progress');
--- triggers on BOOKINGS: trg_Bookings_Audit
+-- triggers on BOOKINGS: trg_Bookings_Audit, trg_Bookings_StatusFlow
 
 CREATE TABLE BOOKING_SERVICES (
     BOOKING_SERVICE_ID           INT             IDENTITY(1,1) NOT NULL,
@@ -450,6 +501,7 @@ CREATE TABLE REVIEWS (
     CONSTRAINT CK_REVIEWS_STATUS CHECK ([STATUS] IN ('Visible','Flagged','Removed'))
 );
 CREATE UNIQUE INDEX IX_REVIEWS_BOOKING_ID ON REVIEWS (BOOKING_ID);
+-- triggers on REVIEWS: trg_Reviews_RatingSync, trg_Reviews_Audit (v2.10)
 
 CREATE TABLE MESSAGES (
     MESSAGE_ID                   INT             IDENTITY(1,1) NOT NULL,
@@ -510,10 +562,14 @@ CREATE TABLE SYSTEM_LOGS (
     ENTITY_NAME                  NVARCHAR(50)    NOT NULL,
     USER_ID                      INT             NULL,
     USER_ROLE                    NVARCHAR(50)    NOT NULL,
-    CONSTRAINT PK_SYSTEM_LOGS PRIMARY KEY (SYSTEM_LOG_ID)
+    CONSTRAINT PK_SYSTEM_LOGS PRIMARY KEY (SYSTEM_LOG_ID),
+    -- v2.10: only the four action types (written by the audit triggers, and LOGIN by the app)
+    CONSTRAINT CK_SYSTEM_LOGS_ACTION_TYPE CHECK ([ACTION_TYPE] IN ('INSERT','UPDATE','DELETE','LOGIN'))
 );
-CREATE INDEX IX_SYSTEM_LOGS_CREATED_AT ON SYSTEM_LOGS (CREATED_AT);
-CREATE INDEX IX_SYSTEM_LOGS_ACTION_TYPE_USER_ROLE ON SYSTEM_LOGS (ACTION_TYPE, USER_ROLE);
+-- no FOREIGN KEY on USER_ID on purpose: a log line outlives the account
+CREATE INDEX IX_SYSTEM_LOGS_CREATED_AT ON SYSTEM_LOGS (CREATED_AT);                               -- the "All" pill, newest first
+CREATE INDEX IX_SYSTEM_LOGS_ACTION_TYPE_CREATED_AT ON SYSTEM_LOGS (ACTION_TYPE, CREATED_AT);       -- v2.10: one action pill, newest first
+CREATE INDEX IX_SYSTEM_LOGS_USER_ID_CREATED_AT ON SYSTEM_LOGS (USER_ID, CREATED_AT);               -- v2.10: one person's history
 
    Added by the DatabaseV2 migration (EF model, see ServisyoDbContext.cs):
 CREATE INDEX IX_BOOKINGS_PROVIDER_STATUS ON BOOKINGS (PROVIDER_ID, STATUS);              -- provider "Booking Requests" lists
@@ -691,6 +747,34 @@ RETURN
     WHERE dbo.fn_IsProviderAvailable(@ProviderId, @BookingDate, DATEADD(MINUTE, s.M, CAST('00:00' AS TIME)), @DurationMinutes) = 1
       AND dbo.fn_HasBookingConflict(@ProviderId, @BookingDate, DATEADD(MINUTE, s.M, CAST('00:00' AS TIME)), @DurationMinutes, NULL, 1) = 0
 );
+GO
+
+-- fn_AuditValue
+CREATE OR ALTER FUNCTION dbo.fn_AuditValue (@Value NVARCHAR(MAX))
+RETURNS NVARCHAR(160)
+WITH SCHEMABINDING
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       One value as a SYSTEM_LOGS line shows it: '(none)' when it is empty, long text cut to 150 characters. */
+    RETURN CASE WHEN NULLIF(LTRIM(RTRIM(@Value)), N'') IS NULL THEN N'(none)'
+                WHEN LEN(@Value) > 150 THEN LEFT(@Value, 147) + N'...'
+                ELSE @Value
+           END;
+END
+GO
+
+-- fn_AuditActor
+CREATE OR ALTER FUNCTION dbo.fn_AuditActor (@UserId INT, @Role NVARCHAR(50))
+RETURNS NVARCHAR(560)
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       Who made a change, as every SYSTEM_LOGS line starts: the role and the full name ("Customer Ana Reyes",
+       "Administrator Ada Lim"), or only the role when nobody is signed in ("Guest" = someone registering,
+       "System" = the app itself, a scheduled job or SSMS). */
+    RETURN CONCAT(ISNULL(NULLIF(LTRIM(RTRIM(@Role)), N''), N'System'), N' ' + dbo.fn_GetFullName(@UserId));
+END
 GO
 
 /* =====================================================================================================
@@ -2313,42 +2397,6 @@ BEGIN
 END
 GO
 
--- trg_PaymentsDtl_Audit
-CREATE OR ALTER TRIGGER dbo.trg_PaymentsDtl_Audit ON dbo.PAYMENTS_DTL
-AFTER INSERT, UPDATE
-AS
-BEGIN
-    /* SERVISYO-DB-V2  (v2.3: was trg_Payments_Audit on the old PAYMENTS table)
-       System Logs for each booking's payment (same format as the existing audit triggers): who chose cash on
-       completion or paid by test e-wallet, and when cash was confirmed. The method name comes from PAYMENTS and
-       the amount from BOOKINGS. WHO comes from SESSION_CONTEXT (set by the app). */
-    SET NOCOUNT ON;
-    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
-    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
-    DECLARE @now DATETIME2 = SYSUTCDATETIME();
-
-    INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
-    SELECT @uid, @role, N'INSERT', N'Payment', i.BOOKING_ID,
-           LEFT(CONCAT(N'Booking #', i.BOOKING_ID, N' payment chosen: ',
-                       CASE m.METHOD_NAME WHEN N'Cash on Completion' THEN N'cash on completion'
-                                          ELSE CONCAT(N'test e-wallet (', m.METHOD_NAME, N')') END,
-                       N', ', i.PAYMENT_STATUS, N', PHP ', CONVERT(VARCHAR(30), CAST(b.TOTAL_FEE AS MONEY), 1),
-                       N', ref ', i.TRANSACTION_REFERENCE, N'.'), 500), @now
-    FROM inserted i
-    JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = i.PAYMENT_ID
-    JOIN dbo.BOOKINGS b ON b.BOOKING_ID = i.BOOKING_ID
-    WHERE NOT EXISTS (SELECT 1 FROM deleted);
-
-    INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
-    SELECT @uid, @role, N'UPDATE', N'Payment', i.BOOKING_ID,
-           LEFT(CONCAT(N'Booking #', i.BOOKING_ID, N' payment record: ', d.PAYMENT_STATUS, N' -> ', i.PAYMENT_STATUS,
-                       N' (ref ', i.TRANSACTION_REFERENCE, N').'), 500), @now
-    FROM inserted i
-    JOIN deleted d ON d.PAYMENT_DTL_ID = i.PAYMENT_DTL_ID
-    WHERE i.PAYMENT_STATUS <> d.PAYMENT_STATUS;
-END
-GO
-
 -- trg_Users_StatusSync
 CREATE OR ALTER TRIGGER dbo.trg_Users_StatusSync ON dbo.USERS
 AFTER UPDATE
@@ -2405,6 +2453,533 @@ BEGIN
     JOIN inserted i ON i.PROVIDER_ID = p.PROVIDER_ID
     JOIN dbo.USERS u ON u.USER_ID = p.USER_ID
     WHERE p.ACCOUNT_STATUS <> u.ACCOUNT_STATUS;
+END
+GO
+
+/* -----------------------------------------------------------------------------------------------------
+   The audit triggers (v2.10): every SYSTEM_LOGS line in one format, one line per changed field.
+   ----------------------------------------------------------------------------------------------------- */
+-- trg_Users_Audit
+CREATE OR ALTER TRIGGER dbo.trg_Users_Audit ON dbo.USERS
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10: the standard SYSTEM_LOGS format, one line per changed field)
+       New accounts; every change of name, email, phone, account status or role (old -> new); password changes
+       (never the password itself); removed accounts. Sign-ins are logged by the app (LOGIN). LAST_ACTIVITY_AT,
+       INACTIVITY_WARNED_AT and NOTIFICATIONS_SEEN_AT change at every sign-in or visit and are not logged. */
+    SET NOCOUNT ON;
+    -- the inactive-account clean-up turns the audit off for its own changes (it writes one DELETE line itself)
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'User', i.USER_ID,
+               LEFT(CONCAT(@actor, N' created User #', i.USER_ID, N': ', i.ROLE, N' account ', i.EMAIL, N'.'), 500), @now
+        FROM inserted i
+        ORDER BY i.USER_ID;
+
+    IF @ins = 1 AND @del = 1
+    BEGIN
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'User', i.USER_ID,
+               LEFT(CONCAT(@actor, N' updated User #', i.USER_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.USER_ID = i.USER_ID
+        CROSS APPLY (VALUES
+            (1, N'first name', d.FIRST_NAME, i.FIRST_NAME),
+            (2, N'middle name', d.MIDDLE_NAME, i.MIDDLE_NAME),
+            (3, N'last name', d.LAST_NAME, i.LAST_NAME),
+            (4, N'email', d.EMAIL, i.EMAIL),
+            (5, N'phone', d.PHONE_NUMBER, i.PHONE_NUMBER),
+            (6, N'account status', d.ACCOUNT_STATUS, i.ACCOUNT_STATUS),
+            (7, N'role', d.ROLE, i.ROLE)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.USER_ID, f.SEQ;
+
+        -- the password is never written anywhere: only that it changed
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'User', i.USER_ID,
+               LEFT(CONCAT(@actor, N' updated User #', i.USER_ID, N': password changed.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.USER_ID = i.USER_ID
+        WHERE i.PASSWORD_HASH COLLATE Latin1_General_100_BIN2 <> d.PASSWORD_HASH COLLATE Latin1_General_100_BIN2
+        ORDER BY i.USER_ID;
+    END
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'User', d.USER_ID,
+               LEFT(CONCAT(@actor, N' deleted User #', d.USER_ID, N': ', d.ROLE, N' account ', d.EMAIL, N'.'), 500), @now
+        FROM deleted d
+        ORDER BY d.USER_ID;
+END
+GO
+
+-- trg_Customers_Audit
+CREATE OR ALTER TRIGGER dbo.trg_Customers_Audit ON dbo.CUSTOMERS
+AFTER UPDATE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       A customer's address and profile photo (old -> new). The account itself (name, email, phone, status) is logged by
+       trg_Users_Audit; ACCOUNT_STATUS here is only a copy of USERS and is not logged twice. New customers are the
+       "created User" line of their account. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+    SELECT @uid, @role, N'UPDATE', N'Customer', i.CUSTOMER_ID,
+           LEFT(CONCAT(@actor, N' updated Customer #', i.CUSTOMER_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                       N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+    FROM inserted i
+    JOIN deleted d ON d.CUSTOMER_ID = i.CUSTOMER_ID
+    CROSS APPLY (VALUES
+        (1, N'address', d.ADDRESS, i.ADDRESS),
+        (2, N'profile photo', d.PROFILE_PHOTO, i.PROFILE_PHOTO)
+    ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+    WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+    ORDER BY i.CUSTOMER_ID, f.SEQ;
+END
+GO
+
+-- trg_Providers_Audit
+CREATE OR ALTER TRIGGER dbo.trg_Providers_Audit ON dbo.SERVICE_PROVIDERS
+AFTER UPDATE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       A provider's business details (old -> new): business name, description, address, base fee, minimum notice,
+       jobs per day, approval status (Pending -> Approved / Rejected) and profile photo. Not logged: AVG_RATING and
+       REVIEW_COUNT (calculated by trg_Reviews_RatingSync), ACCOUNT_STATUS (a copy of USERS, logged there),
+       DATE_APPLIED / DATE_APPROVED (they come with the approval status). */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+    SELECT @uid, @role, N'UPDATE', N'Provider', i.PROVIDER_ID,
+           LEFT(CONCAT(@actor, N' updated Provider #', i.PROVIDER_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                       N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+    FROM inserted i
+    JOIN deleted d ON d.PROVIDER_ID = i.PROVIDER_ID
+    CROSS APPLY (VALUES
+        (1, N'business name', d.BUSINESS_NAME, i.BUSINESS_NAME),
+        (2, N'description', d.DESCRIPTION, i.DESCRIPTION),
+        (3, N'address', d.ADDRESS, i.ADDRESS),
+        (4, N'base fee', N'PHP ' + CONVERT(NVARCHAR(30), CAST(d.BASE_FEE AS MONEY), 1), N'PHP ' + CONVERT(NVARCHAR(30), CAST(i.BASE_FEE AS MONEY), 1)),
+        (5, N'minimum notice days', CONVERT(NVARCHAR(11), d.MIN_NOTICE_DAYS), CONVERT(NVARCHAR(11), i.MIN_NOTICE_DAYS)),
+        (6, N'max jobs per day', CONVERT(NVARCHAR(11), d.MAX_JOBS_PER_DAY), CONVERT(NVARCHAR(11), i.MAX_JOBS_PER_DAY)),
+        (7, N'approval status', d.APPROVAL_STATUS, i.APPROVAL_STATUS),
+        (8, N'profile photo', d.PROFILE_PHOTO, i.PROFILE_PHOTO)
+    ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+    WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+    ORDER BY i.PROVIDER_ID, f.SEQ;
+END
+GO
+
+-- trg_Services_Audit
+CREATE OR ALTER TRIGGER dbo.trg_Services_Audit ON dbo.SERVICES
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10: the standard SYSTEM_LOGS format, one line per changed field)
+       New services; every change of name, description, category, price, duration or active (old -> new); deleted services. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Service', i.SERVICE_ID,
+               LEFT(CONCAT(@actor, N' created Service #', i.SERVICE_ID, N': ', i.SERVICE_NAME, N' (', c.CATEGORY_NAME, N'), PHP ',
+                           CONVERT(NVARCHAR(30), CAST(i.PRICE AS MONEY), 1), N', ', i.DURATION_MINUTES, N' min.'), 500), @now
+        FROM inserted i
+        LEFT JOIN dbo.SERVICE_CATEGORIES c ON c.CATEGORY_ID = i.CATEGORY_ID
+        ORDER BY i.SERVICE_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Service', i.SERVICE_ID,
+               LEFT(CONCAT(@actor, N' updated Service #', i.SERVICE_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.SERVICE_ID = i.SERVICE_ID
+        LEFT JOIN dbo.SERVICE_CATEGORIES oc ON oc.CATEGORY_ID = d.CATEGORY_ID
+        LEFT JOIN dbo.SERVICE_CATEGORIES nc ON nc.CATEGORY_ID = i.CATEGORY_ID
+        CROSS APPLY (VALUES
+            (1, N'name', d.SERVICE_NAME, i.SERVICE_NAME),
+            (2, N'description', d.DESCRIPTION, i.DESCRIPTION),
+            (3, N'category', oc.CATEGORY_NAME, nc.CATEGORY_NAME),
+            (4, N'price', N'PHP ' + CONVERT(NVARCHAR(30), CAST(d.PRICE AS MONEY), 1), N'PHP ' + CONVERT(NVARCHAR(30), CAST(i.PRICE AS MONEY), 1)),
+            (5, N'duration', CONCAT(d.DURATION_MINUTES, N' min'), CONCAT(i.DURATION_MINUTES, N' min')),
+            (6, N'active', CASE WHEN d.IS_ACTIVE = 1 THEN N'Yes' ELSE N'No' END, CASE WHEN i.IS_ACTIVE = 1 THEN N'Yes' ELSE N'No' END)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.SERVICE_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Service', d.SERVICE_ID,
+               LEFT(CONCAT(@actor, N' deleted Service #', d.SERVICE_ID, N': ', d.SERVICE_NAME, N' (PHP ',
+                           CONVERT(NVARCHAR(30), CAST(d.PRICE AS MONEY), 1), N').'), 500), @now
+        FROM deleted d
+        ORDER BY d.SERVICE_ID;
+END
+GO
+
+-- trg_Bookings_Audit
+CREATE OR ALTER TRIGGER dbo.trg_Bookings_Audit ON dbo.BOOKINGS
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10: the standard SYSTEM_LOGS format, one line per changed field)
+       New booking requests; every change of status, payment status, date, time, duration, fee, location or request
+       description (old -> new); deleted bookings. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Booking', i.BOOKING_ID,
+               LEFT(CONCAT(@actor, N' created Booking #', i.BOOKING_ID, N': ', i.STATUS, N' request with ',
+                           COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', i.PROVIDER_ID)),
+                           N' on ', CONVERT(NCHAR(10), i.BOOKING_DATE, 23), N' at ', CONVERT(NCHAR(5), i.BOOKING_TIME, 108),
+                           N', PHP ', CONVERT(NVARCHAR(30), CAST(i.TOTAL_FEE AS MONEY), 1), N'.'), 500), @now
+        FROM inserted i
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = i.PROVIDER_ID
+        ORDER BY i.BOOKING_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Booking', i.BOOKING_ID,
+               LEFT(CONCAT(@actor, N' updated Booking #', i.BOOKING_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
+        CROSS APPLY (VALUES
+            (1, N'status', d.STATUS, i.STATUS),
+            (2, N'payment status', d.PAYMENT_STATUS, i.PAYMENT_STATUS),
+            (3, N'date', CONVERT(NVARCHAR(10), d.BOOKING_DATE, 23), CONVERT(NVARCHAR(10), i.BOOKING_DATE, 23)),
+            (4, N'time', CONVERT(NVARCHAR(5), d.BOOKING_TIME, 108), CONVERT(NVARCHAR(5), i.BOOKING_TIME, 108)),
+            (5, N'duration', CONCAT(d.TOTAL_DURATION_MINUTES, N' min'), CONCAT(i.TOTAL_DURATION_MINUTES, N' min')),
+            (6, N'total fee', N'PHP ' + CONVERT(NVARCHAR(30), CAST(d.TOTAL_FEE AS MONEY), 1), N'PHP ' + CONVERT(NVARCHAR(30), CAST(i.TOTAL_FEE AS MONEY), 1)),
+            (7, N'location', d.SERVICE_LOCATION, i.SERVICE_LOCATION),
+            (8, N'request description', d.SERVICE_DESCRIPTION, i.SERVICE_DESCRIPTION)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.BOOKING_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Booking', d.BOOKING_ID,
+               LEFT(CONCAT(@actor, N' deleted Booking #', d.BOOKING_ID, N': ', d.STATUS, N' booking on ',
+                           CONVERT(NCHAR(10), d.BOOKING_DATE, 23), N' at ', CONVERT(NCHAR(5), d.BOOKING_TIME, 108),
+                           N', PHP ', CONVERT(NVARCHAR(30), CAST(d.TOTAL_FEE AS MONEY), 1), N'.'), 500), @now
+        FROM deleted d
+        ORDER BY d.BOOKING_ID;
+END
+GO
+
+-- trg_PaymentsDtl_Audit
+CREATE OR ALTER TRIGGER dbo.trg_PaymentsDtl_Audit ON dbo.PAYMENTS_DTL
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10: the standard SYSTEM_LOGS format; v2.3 made it from trg_Payments_Audit)
+       Each booking's payment: the method chosen (cash on completion or test e-wallet), every change of status, method
+       or reference (old -> new), deleted payments. The method name comes from PAYMENTS, the amount from BOOKINGS. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Payment', i.PAYMENT_DTL_ID,
+               LEFT(CONCAT(@actor, N' created Payment #', i.PAYMENT_DTL_ID, N': booking #', i.BOOKING_ID, N', ', m.METHOD_NAME,
+                           N', ', i.PAYMENT_STATUS, N', PHP ', CONVERT(NVARCHAR(30), CAST(b.TOTAL_FEE AS MONEY), 1),
+                           N', ref ', i.TRANSACTION_REFERENCE, N'.'), 500), @now
+        FROM inserted i
+        LEFT JOIN dbo.PAYMENTS m ON m.PAYMENT_ID = i.PAYMENT_ID
+        LEFT JOIN dbo.BOOKINGS b ON b.BOOKING_ID = i.BOOKING_ID
+        ORDER BY i.PAYMENT_DTL_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Payment', i.PAYMENT_DTL_ID,
+               LEFT(CONCAT(@actor, N' updated Payment #', i.PAYMENT_DTL_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.PAYMENT_DTL_ID = i.PAYMENT_DTL_ID
+        LEFT JOIN dbo.PAYMENTS om ON om.PAYMENT_ID = d.PAYMENT_ID
+        LEFT JOIN dbo.PAYMENTS nm ON nm.PAYMENT_ID = i.PAYMENT_ID
+        CROSS APPLY (VALUES
+            (1, N'status', d.PAYMENT_STATUS, i.PAYMENT_STATUS),
+            (2, N'method', om.METHOD_NAME, nm.METHOD_NAME),
+            (3, N'reference', d.TRANSACTION_REFERENCE, i.TRANSACTION_REFERENCE)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.PAYMENT_DTL_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Payment', d.PAYMENT_DTL_ID,
+               LEFT(CONCAT(@actor, N' deleted Payment #', d.PAYMENT_DTL_ID, N': booking #', d.BOOKING_ID, N', ',
+                           d.PAYMENT_STATUS, N', ref ', d.TRANSACTION_REFERENCE, N'.'), 500), @now
+        FROM deleted d
+        ORDER BY d.PAYMENT_DTL_ID;
+END
+GO
+
+-- trg_Reviews_Audit
+CREATE OR ALTER TRIGGER dbo.trg_Reviews_Audit ON dbo.REVIEWS
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       New reviews; every change of status (Visible / Flagged / Removed), rating or comment (old -> new); deleted reviews.
+       The provider's AVG_RATING / REVIEW_COUNT are kept right by trg_Reviews_RatingSync, not here. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Review', i.REVIEW_ID,
+               LEFT(CONCAT(@actor, N' created Review #', i.REVIEW_ID, N': ', i.RATING, N'/5 for booking #', i.BOOKING_ID,
+                           N', comment ''', dbo.fn_AuditValue(i.COMMENT), N'''.'), 500), @now
+        FROM inserted i
+        ORDER BY i.REVIEW_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Review', i.REVIEW_ID,
+               LEFT(CONCAT(@actor, N' updated Review #', i.REVIEW_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.REVIEW_ID = i.REVIEW_ID
+        CROSS APPLY (VALUES
+            (1, N'status', d.STATUS, i.STATUS),
+            (2, N'rating', CONCAT(d.RATING, N'/5'), CONCAT(i.RATING, N'/5')),
+            (3, N'comment', d.COMMENT, i.COMMENT)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.REVIEW_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Review', d.REVIEW_ID,
+               LEFT(CONCAT(@actor, N' deleted Review #', d.REVIEW_ID, N': ', d.RATING, N'/5 for booking #', d.BOOKING_ID, N'.'), 500), @now
+        FROM deleted d
+        ORDER BY d.REVIEW_ID;
+END
+GO
+
+-- trg_UnavailableDates_Audit
+CREATE OR ALTER TRIGGER dbo.trg_UnavailableDates_Audit ON dbo.PROVIDER_UNAVAILABLE_DATES
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       Days off that do NOT belong to a day-off request: an administrator's extra day (v2.4) or an older day off.
+       The days of a request (REQUEST_ID filled) are logged once, through their request (trg_DayOffRequests_Audit),
+       not one line per day. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Day Off', i.UNAVAILABLE_ID,
+               LEFT(CONCAT(@actor, N' created Day Off #', i.UNAVAILABLE_ID, N': ', COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', i.PROVIDER_ID)),
+                           N' is off on ', CONVERT(NCHAR(10), i.UNAVAILABLE_DATE, 23),
+                           CASE WHEN i.APPROVED_BY_ACTION_ID IS NOT NULL THEN N' (extra day approved by an administrator)' ELSE N'' END,
+                           N', reason ''', dbo.fn_AuditValue(i.REASON), N'''.'), 500), @now
+        FROM inserted i
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = i.PROVIDER_ID
+        WHERE i.REQUEST_ID IS NULL
+        ORDER BY i.UNAVAILABLE_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Day Off', i.UNAVAILABLE_ID,
+               LEFT(CONCAT(@actor, N' updated Day Off #', i.UNAVAILABLE_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.UNAVAILABLE_ID = i.UNAVAILABLE_ID
+        CROSS APPLY (VALUES
+            (1, N'date', CONVERT(NVARCHAR(10), d.UNAVAILABLE_DATE, 23), CONVERT(NVARCHAR(10), i.UNAVAILABLE_DATE, 23)),
+            (2, N'reason', d.REASON, i.REASON)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE i.REQUEST_ID IS NULL
+          AND ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.UNAVAILABLE_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Day Off', d.UNAVAILABLE_ID,
+               LEFT(CONCAT(@actor, N' deleted Day Off #', d.UNAVAILABLE_ID, N': ', COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', d.PROVIDER_ID)),
+                           N' off on ', CONVERT(NCHAR(10), d.UNAVAILABLE_DATE, 23), N'.'), 500), @now
+        FROM deleted d
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = d.PROVIDER_ID
+        WHERE d.REQUEST_ID IS NULL
+        ORDER BY d.UNAVAILABLE_ID;
+END
+GO
+
+-- trg_DayOffRequests_Audit
+CREATE OR ALTER TRIGGER dbo.trg_DayOffRequests_Audit ON dbo.PROVIDER_DAY_OFF_REQUESTS
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       A provider's day-off request (v2.7): sent, answered (status Pending -> Approved / Rejected) or removed.
+       Its dates are on Admin > Service Providers; who decided is in ADMIN_ACTIONS. */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Day Off Request', i.REQUEST_ID,
+               LEFT(CONCAT(@actor, N' created Day Off Request #', i.REQUEST_ID, N': ', COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', i.PROVIDER_ID)),
+                           N', ', i.STATUS, N', reason ''', dbo.fn_AuditValue(i.REASON), N'''.'), 500), @now
+        FROM inserted i
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = i.PROVIDER_ID
+        ORDER BY i.REQUEST_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Day Off Request', i.REQUEST_ID,
+               LEFT(CONCAT(@actor, N' updated Day Off Request #', i.REQUEST_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.REQUEST_ID = i.REQUEST_ID
+        CROSS APPLY (VALUES
+            (1, N'status', d.STATUS, i.STATUS),
+            (2, N'reason', d.REASON, i.REASON)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.REQUEST_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Day Off Request', d.REQUEST_ID,
+               LEFT(CONCAT(@actor, N' deleted Day Off Request #', d.REQUEST_ID, N': ', d.STATUS, N' request of ',
+                           COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', d.PROVIDER_ID)), N'.'), 500), @now
+        FROM deleted d
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = d.PROVIDER_ID
+        ORDER BY d.REQUEST_ID;
+END
+GO
+
+-- trg_NameChangeRequests_Audit
+CREATE OR ALTER TRIGGER dbo.trg_NameChangeRequests_Audit ON dbo.PROVIDER_NAME_CHANGE_REQUESTS
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    /* SERVISYO-DB-V2 (v2.10)
+       An approved provider's name change request (v2.8): sent, answered or removed. When it is approved, the new name
+       in USERS is logged by trg_Users_Audit (first / middle / last name, old -> new). */
+    SET NOCOUNT ON;
+    IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
+    DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
+    DECLARE @del BIT = CASE WHEN EXISTS (SELECT 1 FROM deleted) THEN 1 ELSE 0 END;
+    IF @ins = 0 AND @del = 0 RETURN;
+    DECLARE @uid INT = TRY_CAST(SESSION_CONTEXT(N'servisyo_user_id') AS INT);
+    DECLARE @role NVARCHAR(50) = COALESCE(TRY_CAST(SESSION_CONTEXT(N'servisyo_user_role') AS NVARCHAR(50)), N'System');
+    DECLARE @actor NVARCHAR(560) = dbo.fn_AuditActor(@uid, @role);
+    DECLARE @now DATETIME2 = SYSUTCDATETIME();
+
+    IF @ins = 1 AND @del = 0
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'INSERT', N'Name Change Request', i.REQUEST_ID,
+               LEFT(CONCAT(@actor, N' created Name Change Request #', i.REQUEST_ID, N': ', COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', i.PROVIDER_ID)),
+                           N' asks for ''', CONCAT(i.FIRST_NAME, N' ' + NULLIF(i.MIDDLE_NAME, N''), N' ', i.LAST_NAME),
+                           N''', reason ''', dbo.fn_AuditValue(i.REASON), N'''.'), 500), @now
+        FROM inserted i
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = i.PROVIDER_ID
+        ORDER BY i.REQUEST_ID;
+
+    IF @ins = 1 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'UPDATE', N'Name Change Request', i.REQUEST_ID,
+               LEFT(CONCAT(@actor, N' updated Name Change Request #', i.REQUEST_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+        FROM inserted i
+        JOIN deleted d ON d.REQUEST_ID = i.REQUEST_ID
+        CROSS APPLY (VALUES
+            (1, N'status', d.STATUS, i.STATUS),
+            (2, N'requested name', CONCAT(d.FIRST_NAME, N' ' + NULLIF(d.MIDDLE_NAME, N''), N' ', d.LAST_NAME),
+                                   CONCAT(i.FIRST_NAME, N' ' + NULLIF(i.MIDDLE_NAME, N''), N' ', i.LAST_NAME)),
+            (3, N'reason', d.REASON, i.REASON)
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+        WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+        ORDER BY i.REQUEST_ID, f.SEQ;
+
+    IF @ins = 0 AND @del = 1
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
+        SELECT @uid, @role, N'DELETE', N'Name Change Request', d.REQUEST_ID,
+               LEFT(CONCAT(@actor, N' deleted Name Change Request #', d.REQUEST_ID, N': ', d.STATUS, N' request of ',
+                           COALESCE(p.BUSINESS_NAME, CONCAT(N'provider #', d.PROVIDER_ID)), N'.'), 500), @now
+        FROM deleted d
+        LEFT JOIN dbo.SERVICE_PROVIDERS p ON p.PROVIDER_ID = d.PROVIDER_ID
+        ORDER BY d.REQUEST_ID;
 END
 GO
 
@@ -2674,7 +3249,9 @@ BEGIN TRY
        AND EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Kind = N'booking-update'
                    AND Message LIKE CONCAT(N'% confirmed receiving your ', NCHAR(8369), N'650 cash payment for booking #', @B, N' (ref ', @ref, N').'))
        AND (SELECT COUNT(*) FROM @Note WHERE BookingId = @B) = 1
-       AND EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE ENTITY_NAME = N'Payment' AND ENTITY_ID = @B AND DESCRIPTION LIKE N'%PendingCollection -> Paid%')
+       AND EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS l JOIN dbo.PAYMENTS_DTL pd ON pd.PAYMENT_DTL_ID = l.ENTITY_ID
+                   WHERE l.ENTITY_NAME = N'Payment' AND pd.BOOKING_ID = @B AND l.ACTION_TYPE = N'UPDATE'
+                     AND l.DESCRIPTION LIKE N'%: status ''PendingCollection'' -> ''Paid''.')
         INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'PASS', @ref);
     ELSE
         INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'After Confirm Cash Received: the rows are not as expected.');
@@ -3307,6 +3884,106 @@ BEGIN CATCH
     INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
 END CATCH;
 
+------------------------------------------------------------------ 35
+SET @t = N'35 New accounts start active: LAST_ACTIVITY_AT is filled, no warning yet (v2.9)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;   -- adds users without the column
+    IF EXISTS (SELECT 1 FROM dbo.USERS
+               WHERE USER_ID = @PU AND (LAST_ACTIVITY_AT < DATEADD(MINUTE, -5, SYSUTCDATETIME()) OR INACTIVITY_WARNED_AT IS NOT NULL))
+        THROW 59035, N'A new account did not start active.', 1;
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 36
+SET @t = N'36 Audit standard: one line per changed field, old -> new, who did it, audit off, only 4 action types (v2.10)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    -- registration (no one signed in in SSMS): "System created User #..: Customer account ..."
+    IF NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS l JOIN dbo.USERS u ON u.USER_ID = l.ENTITY_ID
+                   WHERE l.ENTITY_NAME = N'User' AND l.ENTITY_ID = @C AND l.ACTION_TYPE = N'INSERT' AND l.USER_ROLE = N'System'
+                     AND l.DESCRIPTION = CONCAT(N'System created User #', @C, N': Customer account ', u.EMAIL, N'.'))
+        THROW 59036, N'The new account was not logged in the standard format.', 1;
+    SET @n = (SELECT MAX(SYSTEM_LOG_ID) FROM dbo.SYSTEM_LOGS);
+
+    -- the customer changes their phone number and address (the app tells SQL Server who is signed in like this)
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = @C;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = N'Customer';
+    UPDATE dbo.USERS SET PHONE_NUMBER = N'09171112222' WHERE USER_ID = @C;
+    UPDATE dbo.CUSTOMERS SET ADDRESS = N'Mabolo' WHERE USER_ID = @C;
+    UPDATE dbo.USERS SET LAST_NAME = N'SELFTEST' WHERE USER_ID = @C;          -- only the case changes: still a change
+    IF NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND USER_ID = @C AND USER_ROLE = N'Customer'
+                   AND ACTION_TYPE = N'UPDATE' AND ENTITY_NAME = N'User' AND ENTITY_ID = @C
+                   AND DESCRIPTION = CONCAT(N'Customer Ana Selftest updated User #', @C, N': phone ''09170000000'' -> ''09171112222''.'))
+        THROW 59036, N'The phone number change is not logged as old -> new.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS l JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = l.ENTITY_ID
+                   WHERE l.SYSTEM_LOG_ID > @n AND l.ENTITY_NAME = N'Customer' AND c.USER_ID = @C AND l.ACTION_TYPE = N'UPDATE'
+                     AND l.DESCRIPTION = CONCAT(N'Customer Ana Selftest updated Customer #', c.CUSTOMER_ID, N': address ''Lahug'' -> ''Mabolo''.'))
+        THROW 59036, N'The address change is not logged as old -> new.', 1;
+    IF (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'User' AND ENTITY_ID = @C
+        AND DESCRIPTION LIKE N'%: last name ''Selftest'' -> ''SELFTEST''.') <> 1
+        THROW 59036, N'A change of upper / lower case only is not logged exactly once.', 1;
+
+    -- the provider changes a price and the base fee: money as PHP 1,234.00
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = @PU;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = N'Service Provider';
+    UPDATE dbo.SERVICES SET PRICE = 1700 WHERE SERVICE_ID = @S;
+    UPDATE dbo.SERVICE_PROVIDERS SET BASE_FEE = 350 WHERE PROVIDER_ID = @P;
+    IF NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Service' AND ENTITY_ID = @S
+                   AND DESCRIPTION = CONCAT(N'Service Provider Mary Cruz Selftest updated Service #', @S, N': price ''PHP 650.00'' -> ''PHP 1,700.00''.'))
+       OR NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Provider' AND ENTITY_ID = @P
+                      AND DESCRIPTION LIKE N'%: base fee ''PHP 300.00'' -> ''PHP 350.00''.')
+        THROW 59036, N'The price or base fee change is not logged as old -> new.', 1;
+
+    -- an administrator deactivates the provider: one line on USERS (the copy in SERVICE_PROVIDERS is not logged twice)
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = @A;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = N'Administrator';
+    UPDATE dbo.USERS SET ACCOUNT_STATUS = N'Deactivated' WHERE USER_ID = @PU;
+    IF NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND USER_ID = @A AND ENTITY_NAME = N'User' AND ENTITY_ID = @PU
+                   AND DESCRIPTION = CONCAT(N'Administrator Selftest Admin updated User #', @PU, N': account status ''Active'' -> ''Deactivated''.'))
+       OR EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Provider' AND DESCRIPTION LIKE N'%status%')
+        THROW 59036, N'The deactivation is not logged once, as old -> new.', 1;
+
+    -- audit off (the inactive-account clean-up): nothing is written
+    SET @k = (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS);
+    EXEC sp_set_session_context @key = N'servisyo_audit_off', @value = 1;
+    UPDATE dbo.USERS SET PHONE_NUMBER = N'09173334444' WHERE USER_ID = @C;
+    EXEC sp_set_session_context @key = N'servisyo_audit_off', @value = NULL;
+    IF (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS) <> @k
+        THROW 59036, N'A line was written while the audit was off.', 1;
+
+    -- only INSERT / UPDATE / DELETE / LOGIN (CHECK), and every new line is in the standard format
+    SET @B = 0;
+    BEGIN TRY
+        INSERT INTO dbo.SYSTEM_LOGS (USER_ROLE, ACTION_TYPE, ENTITY_NAME, DESCRIPTION) VALUES (N'System', N'REPORT', N'User', N'x');
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @B = 1; END CATCH;
+    IF @B <> 1
+        THROW 59036, N'SYSTEM_LOGS accepted an action type other than INSERT / UPDATE / DELETE / LOGIN.', 1;
+    IF EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n
+               AND NOT (DESCRIPTION LIKE N'% created % #%: %.' OR DESCRIPTION LIKE N'% updated % #%: % ''%'' -> ''%''.'
+                        OR DESCRIPTION LIKE N'% deleted % #%: %.'))
+        THROW 59036, N'A new line is not in the standard format.', 1;
+
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = NULL;
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    -- this SSMS window is not "signed in" any more
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_audit_off', @value = NULL;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
 ------------------------------------------------------------------ results
 SELECT N AS [#], TEST, RESULT, DETAIL FROM @R ORDER BY N;
 
@@ -3332,6 +4009,8 @@ GO
 -- Bookings that need an administrator:    EXEC dbo.usp_GetBookingsNeedingAttention;
 -- The payment methods:                    SELECT * FROM dbo.PAYMENTS;
 -- Providers customers can see:            SELECT * FROM dbo.vw_ProviderDirectory ORDER BY AVG_RATING DESC;
+-- One action type, newest 20:           SELECT TOP (20) * FROM dbo.SYSTEM_LOGS WHERE ACTION_TYPE = N'UPDATE' ORDER BY CREATED_AT DESC;
+-- What one person did, newest first:    SELECT TOP (50) * FROM dbo.SYSTEM_LOGS WHERE USER_ID = 2 ORDER BY CREATED_AT DESC;
 -- Rating check (stored vs calculated):    SELECT PROVIDER_ID, AVG_RATING, dbo.fn_GetProviderAvgRating(PROVIDER_ID) AS CALCULATED FROM dbo.SERVICE_PROVIDERS;
 
 -- A. Providers rated above the average of rated providers (subquery in WHERE)

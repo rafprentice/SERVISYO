@@ -67,3 +67,13 @@ to `POST /customer/profile/address`. Both call `CustomerProfileService.SaveAddre
 `streetAddress`, `barangay` and `city` are worked out from the chosen option; the database keeps ONE column
 (`CUSTOMERS.ADDRESS`) with the full text (one fact, one place). Older accounts that typed an address before the
 dropdown existed keep it until they pick one of the 5 options.
+
+## Show / hide password (Security)
+- Current Password, New Password and Confirm New Password each have an eye button inside the right edge of the box
+  (`Views/Shared/_PasswordToggle.cshtml`, the same one as the sign-in, registration and reset pages).
+- Eye = hidden; eye with a line = visible. Each box toggles on its own. The buttons are `type="button"` (they never
+  send the form), `aria-label="Toggle password visibility"`, and `aria-pressed` says whether it is shown.
+- Update Password and Cancel put every box back to hidden (`wwwroot/js/password-toggle.js`, loaded by the portal and
+  sign-in layouts; it replaces `auth.js`). Edge's own built-in eye is hidden where ours is, so there are never two.
+- Providers and administrators have no Change Password form yet; any future one gets the eye by wrapping the box in
+  `<div class="sv-pwfield">` and adding `<partial name="_PasswordToggle" model="@("the-box-id")" />`.

@@ -18,7 +18,7 @@ builder.Services.AddDbContext<ServisyoDbContext>(options =>
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ISystemLogService, SystemLogService>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();     // database v2.10: System Logs page + LOGIN lines
 builder.Services.AddScoped<IAdminReportService, AdminReportService>();
 builder.Services.AddScoped<IProfilePhotoService, ProfilePhotoService>();
 builder.Services.AddScoped<IBookingPaymentService, BookingPaymentService>();
@@ -47,6 +47,11 @@ builder.Services.AddScoped<IProviderApprovalService, ProviderApprovalService>();
 builder.Services.AddScoped<IProviderAvailabilityService, ProviderAvailabilityService>();
 // January 1 (Philippine time): last year's unavailable dates are deleted (runs at start-up and then every hour)
 builder.Services.AddHostedService<UnavailableDatesResetService>();
+// database v2.9: accounts without a sign-in for a year are warned by email, then removed 30 days later. Report only
+// until "InactiveAccounts": { "DeleteEnabled": true } is set (appsettings.json or appsettings.Production.json).
+builder.Services.Configure<InactiveAccountOptions>(builder.Configuration.GetSection(InactiveAccountOptions.SectionName));
+builder.Services.AddScoped<IInactiveAccountService, InactiveAccountService>();
+builder.Services.AddHostedService<InactiveAccountCleanupService>();
 builder.Services.AddScoped<IProviderBookingsService, ProviderBookingsService>();
 builder.Services.AddScoped<IProviderOfferingsService, ProviderOfferingsService>();
 builder.Services.AddScoped<IProviderProfileService, ProviderProfileService>();

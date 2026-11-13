@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Servisyo.Web.Data;
 using Servisyo.Web.Helpers;
 using Servisyo.Web.Models;
@@ -21,11 +22,13 @@ public class AdminDashboardService : IAdminDashboardService
 
     private readonly ServisyoDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IOptionsMonitor<InactiveAccountOptions>? _inactive;
 
-    public AdminDashboardService(ServisyoDbContext db, TimeProvider? clock = null)
+    public AdminDashboardService(ServisyoDbContext db, TimeProvider? clock = null, IOptionsMonitor<InactiveAccountOptions>? inactive = null)
     {
         _db = db;
         _clock = clock ?? TimeProvider.System;
+        _inactive = inactive;
     }
 
     private DateOnly TodayInCebu() => DateOnly.FromDateTime(_clock.GetUtcNow().ToOffset(TimeSpan.FromHours(ManilaOffsetHours)).DateTime);
@@ -66,6 +69,17 @@ public class AdminDashboardService : IAdminDashboardService
         var nameChanges = await _db.NameChangeRequests.CountAsync(r => r.Status == NameChangeStatuses.Pending, ct);
         // database v2.3: worked out by dbo.usp_GetBookingsNeedingAttention (TotalCount = all of them, not only the 25 rows)
         var needAttention = (await _db.GetBookingsNeedingAttentionAsync(ct)).Select(r => r.TotalCount).FirstOrDefault();
+
+        // database v2.10: while automatic deletion is off, the accounts the daily clean-up WOULD warn (counted now,
+        // nothing stored; this replaces the v2.9 REPORT lines in System Logs)
+        int inactive = 0, inactiveOverOneYear = 0;
+        if (_inactive?.CurrentValue.DeleteEnabled != true)
+        {
+            var now = _clock.GetUtcNow().UtcDateTime;
+            var wouldWarn = InactiveAccountQueries.DueForWarning(InactiveAccountQueries.Candidates(_db), now);
+            inactive = await wouldWarn.CountAsync(ct);
+            if (inactive > 0) inactiveOverOneYear = await InactiveAccountQueries.OverOneYear(wouldWarn, now).CountAsync(ct);
+        }
 
         // ---- Recent bookings (newest first) ----
         var bookingRows = await _db.Bookings.AsNoTracking()
@@ -129,7 +143,9 @@ public class AdminDashboardService : IAdminDashboardService
                 SuspendedCustomers = suspendedCustomers,
                 SuspendedProviders = suspendedProviders,
                 FlaggedReviews = flagged,
-                BookingsNeedingAttention = needAttention
+                BookingsNeedingAttention = needAttention,
+                InactiveAccounts = inactive,
+                InactiveOverOneYear = inactiveOverOneYear
             }),
             RecentBookings = bookingRows.Select(r => new AdminBookingRowViewModel
             {

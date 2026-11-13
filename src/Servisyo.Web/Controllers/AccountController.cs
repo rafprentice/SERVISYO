@@ -12,14 +12,14 @@ public class AccountController : Controller
 {
     private readonly IAuthService _auth;
     private readonly IPasswordResetService _passwordReset;
-    private readonly ISystemLogService _systemLog;
+    private readonly IAuditLogService _auditLog;
     private readonly ILogger<AccountController> _logger;
 
-    public AccountController(IAuthService auth, IPasswordResetService passwordReset, ISystemLogService systemLog, ILogger<AccountController> logger)
+    public AccountController(IAuthService auth, IPasswordResetService passwordReset, IAuditLogService auditLog, ILogger<AccountController> logger)
     {
         _auth = auth;
         _passwordReset = passwordReset;
-        _systemLog = systemLog;
+        _auditLog = auditLog;
         _logger = logger;
     }
 
@@ -101,6 +101,7 @@ public class AccountController : Controller
         if (!result.Succeeded)
         {
             _logger.LogWarning("Failed sign-in attempt.");
+            await _auditLog.LogFailedLoginAsync(vm.Email);       // System Logs: LOGIN, "Failed login attempt for ..." (role Guest)
             ModelState.AddModelError(string.Empty, result.Error!);
             vm.Password = string.Empty;
             return View(vm);
@@ -108,7 +109,7 @@ public class AccountController : Controller
 
         await SignInUserAsync(result.User!, vm.RememberMe);
         _logger.LogInformation("User signed in. UserId={UserId}", result.User!.UserId);
-        await _systemLog.LogLoginAsync(result.User!);         // System Logs: LOGIN (the database triggers can't see sign-ins)
+        await _auditLog.LogLoginAsync(result.User!);          // System Logs: LOGIN (the database triggers can't see sign-ins)
 
         if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
             return LocalRedirect(returnUrl);

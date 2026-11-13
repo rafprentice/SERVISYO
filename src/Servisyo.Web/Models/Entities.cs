@@ -20,6 +20,14 @@ public class User
     /// the ones newer than this moment are unread. Null = the bell was never opened.
     public DateTime? NotificationsSeenAt { get; set; }
 
+    /// Database v2.9: the last time this person signed in (registration counts as the first). An account with no
+    /// sign-in for a year is warned by email, then removed 30 days later (InactiveAccountService).
+    public DateTime LastActivityAt { get; set; } = DateTime.UtcNow;
+
+    /// Database v2.9: when the "your account will be deleted" email was sent for the CURRENT inactive period.
+    /// Null = not warned (signing in sets it back to null).
+    public DateTime? InactivityWarnedAt { get; set; }
+
     public Customer? Customer { get; set; }
     public bool EmailVerificationPending { get; set; }
     public Provider? Provider { get; set; }

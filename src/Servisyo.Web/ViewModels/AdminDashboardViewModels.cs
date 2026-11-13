@@ -29,7 +29,8 @@ public enum AdminAttentionAction
     ReviewDayOffs,           // Admin > Service Providers, opening the provider of the oldest waiting day-off request (v2.7)
     NameChangeList,          // Admin > Name Changes, Pending tab (v2.8)
     SuspendedCustomers,      // Admin > Users, Suspended tab
-    SuspendedProviders       // Admin > Service Providers, Suspended tab
+    SuspendedProviders,      // Admin > Service Providers, Suspended tab
+    UserList                 // Admin > Users (database v2.10: inactive accounts, report-only mode)
 }
 
 /// One row of "Needs Admin Attention": the shared row (text, colour, button label) plus where its button goes.
@@ -62,6 +63,10 @@ public sealed record AdminAttentionCounts
     public int FlaggedReviews { get; init; }
     /// Database v2.3: dbo.usp_GetBookingsNeedingAttention (a flagged or 1-2 star review, or a passed date still open).
     public int BookingsNeedingAttention { get; init; }
+    /// Database v2.10 (replaces the v2.9 REPORT lines): while automatic deletion is OFF, the accounts the daily clean-up
+    /// would warn (335+ days without a sign-in) and how many of them are past a year. 0 when deletion is on.
+    public int InactiveAccounts { get; init; }
+    public int InactiveOverOneYear { get; init; }
 }
 
 public static class AdminAttention
@@ -150,6 +155,18 @@ public static class AdminAttention
                     : $"{c.BookingsNeedingAttention} bookings need attention (low ratings or dates passed)",
                 ActionLabel = c.BookingsNeedingAttention == 1 ? "View Booking" : "View Bookings",
                 Action = AdminAttentionAction.BookingList
+            });
+
+        if (c.InactiveAccounts > 0)
+            rows.Add(new()
+            {
+                Key = "inactive",
+                Tone = "info",
+                Text = $"{Plural.Of(c.InactiveAccounts, "inactive account")} with no sign-in for 335+ days"
+                     + (c.InactiveOverOneYear > 0 ? $" ({c.InactiveOverOneYear} over a year)" : "")
+                     + "; automatic deletion is off",
+                ActionLabel = "View Users",
+                Action = AdminAttentionAction.UserList
             });
 
         return rows;

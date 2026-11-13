@@ -9,14 +9,15 @@ using Servisyo.Web.ViewModels;
 
 namespace Servisyo.Web.Controllers;
 
-/// Admin > System Logs: read-only view of SYSTEM_LOGS (written by the database triggers and by sign-ins).
+/// Admin > System Logs: read-only view of SYSTEM_LOGS (written by the database audit triggers and by sign-ins).
+/// ?actionType=INSERT|UPDATE|DELETE|LOGIN&search=...&role=...&from=yyyy-MM-dd&to=yyyy-MM-dd&page=2 (20 lines a page).
 [Authorize(Roles = Roles.Administrator)]
 [Route("admin/logs")]
 public class AdminSystemLogsController : Controller
 {
-    private readonly ISystemLogService _logs;
+    private readonly IAuditLogService _logs;
 
-    public AdminSystemLogsController(ISystemLogService logs) => _logs = logs;
+    public AdminSystemLogsController(IAuditLogService logs) => _logs = logs;
 
     [HttpGet("")]
     public async Task<IActionResult> Index([FromQuery] SystemLogQuery query, CancellationToken ct)

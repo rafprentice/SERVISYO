@@ -635,7 +635,7 @@ public class DayOffRequestTests
         Assert.NotNull(dir);
         var design = File.ReadAllText(Path.Combine(dir!.FullName, "docs", "sql", "DatabaseDesign-v2.sql")).Replace("\r\n", "\n");
 
-        Assert.Contains("DATABASE DESIGN v2.8", design);                         // v2.8 came after (name change requests)
+        Assert.Contains("DATABASE DESIGN v2.10", design);                        // v2.8 to v2.10 came after
         Assert.Contains("WHAT CHANGED IN v2.7 (EF migration \"DayOffRequests\")", design);
         Assert.Contains("CREATE TABLE PROVIDER_DAY_OFF_REQUESTS (", design);
         Assert.Contains("CONSTRAINT CK_PROVIDER_DAY_OFF_REQUESTS_STATUS CHECK (" + ServisyoDbContext.DayOffStatusCheck + ")", design);

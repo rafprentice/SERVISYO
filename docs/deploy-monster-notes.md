@@ -1,13 +1,14 @@
-# Deploy to MonsterASP (database v2.8)
+# Deploy to MonsterASP (database v2.10)
 
 The online database must be updated **before** the new website files go up: the new code reads the column
 `PROVIDER_UNAVAILABLE_DATES.APPROVED_BY_ACTION_ID` (v2.4), which the old database does not have.
 
-Before you start: on the laptop, the newest database script (now `tools\add-name-change-requests.ps1`, v2.8) ended with
+Before you start: on the laptop, the newest database script (now `tools\add-audit-standard.ps1`, v2.10) ended with
 DONE, the site works with `dotnet run`, and the code is committed and pushed.
 
 Monster may be several steps behind the laptop (each step is one EF migration). For example, in November 2026 it
-still needed v2.1 to v2.6; after that deploy it still needs v2.7 (day-off requests) and v2.8 (name change requests).
+still needed v2.1 to v2.6; after that deploy it still needs v2.7 (day-off requests), v2.8 (name change requests),
+v2.9 (inactive accounts) and v2.10 (the System Logs standard format).
 The file imports every missing step in date order.
 
 ## 1. Make the files (laptop)
@@ -77,7 +78,20 @@ Do not delete anything else: the `uploads` folder (profile photos) and `appsetti
 - **Admin → Dashboard:** "Needs Admin Attention" shows the day-off and name change requests; each button opens its page
   (Review Day Offs opens that provider, View Accounts the Suspended tab). **Admin → Name Changes:** Approve changes the
   provider's name.
+- **Admin → System Logs** (v2.10): the pills All / INSERT / UPDATE / DELETE / LOGIN show numbers; change a phone
+  number on a customer's profile, then the UPDATE pill shows *"... updated User #.. : phone '...' -> '...'."*
 - **Monster → Logs:** no new errors.
+
+## The inactive-account clean-up (v2.9)
+It starts in **report only** mode: it changes nothing, and the admin dashboard (Needs Admin Attention) shows how many
+accounts it would warn (v2.10; nothing is stored). To switch it on online, add this to `appsettings.Production.json` on Monster (File Manager →
+`wwwroot`), next to the settings already there, then Stop / Start the site:
+```json
+"InactiveAccounts": { "DeleteEnabled": true }
+```
+The email settings must work first: the 30-day warning emails go out through them, and nobody is removed without one.
+On the free plan the site sleeps when nobody visits; the job runs each time the site starts, then every 24 hours
+while it is awake.
 
 ## If something goes wrong
 - **Database:** **Backups** → **Restore** the BAK from step 3. Monster also saves a safety backup

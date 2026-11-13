@@ -69,9 +69,7 @@
     border: 0; background: transparent; color: #8A95AD; border-radius: 6px; cursor: pointer;
 }
 .sv-eye:hover { color: var(--color-primary); }
-.sv-eye .eye-off { display: none; }
-.sv-eye[aria-pressed="true"] .eye-on { display: none; }
-.sv-eye[aria-pressed="true"] .eye-off { display: block; }
+/* which eye shows (hidden / visible) is in site.css, shared with the portal */
 
 .sv-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 

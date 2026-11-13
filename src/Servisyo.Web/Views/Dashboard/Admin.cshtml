@@ -55,6 +55,7 @@
                     AdminAttentionAction.NameChangeList => Url.Action("Index", "AdminNameChanges"),
                     AdminAttentionAction.SuspendedCustomers => Url.Action("Index", "AdminUsers", new { status = "Suspended" }),
                     AdminAttentionAction.SuspendedProviders => Url.Action("Index", "AdminProviders", new { status = "Suspended" }),
+                    AdminAttentionAction.UserList => Url.Action("Index", "AdminUsers"),
                     _ => null
                 };
                 var href = HrefOf(a.Action);
