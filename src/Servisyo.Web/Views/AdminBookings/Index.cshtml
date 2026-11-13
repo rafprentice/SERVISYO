@@ -74,7 +74,7 @@
                     <td class="sv-table__muted sv-table__small">@b.ProviderName</td>
                     <td class="sv-table__muted sv-table__small sv-table__nowrap">@b.Date.ToString("MMM d, yyyy", inv) @b.Time.ToString("h:mm tt", inv)</td>
                     <td><span class="sv-tag sv-tag--@b.Payment.Tone">@b.Payment.Text</span></td>
-                    <td><span class="sv-tag sv-tag--@b.Status.Tone">@b.Status.Badge</span></td>
+                    <td><span class="sv-tag sv-tag--@b.Status.Tone">@b.Status.Badge</span>@if (b.IsNoShow) { <span class="sv-tag sv-tag--danger sv-tag--gap" title="@Servisyo.Web.Models.StartRules.NoShowReason">No-show</span> }</td>
                     <td class="sv-table__right">
                         @* opens the booking card in a pop-up (admin-approval.js); without JavaScript it opens as a page *@
                         <a class="sv-viewlink sv-viewlink--open" data-review-link="true"

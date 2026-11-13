@@ -36,6 +36,7 @@ public class ProviderDashboardService : IProviderDashboardService
         public DateTime CreatedAt { get; set; }
         public string CustomerName { get; set; } = string.Empty;
         public string? ServiceLocation { get; set; }
+        public bool HasPayment { get; set; }        // database v2.12: a cancelled booking with a payment = a provider no-show
     }
 
     private static readonly Expression<Func<Booking, JobRow>> ToRow = b => new JobRow
@@ -46,7 +47,8 @@ public class ProviderDashboardService : IProviderDashboardService
         BookingTime = b.BookingTime,
         CreatedAt = b.CreatedAt,
         CustomerName = b.Customer.User.FirstName + " " + b.Customer.User.LastName,
-        ServiceLocation = b.ServiceLocation
+        ServiceLocation = b.ServiceLocation,
+        HasPayment = b.PaymentDetail != null
     };
 
     public async Task<ProviderDashboardResult> GetAsync(int userId, CancellationToken ct = default)
@@ -218,7 +220,7 @@ public class ProviderDashboardService : IProviderDashboardService
                 Time = r.BookingTime,
                 Location = LocationFor(r),
                 Status = r.Status,
-                Display = ProviderBookingDisplay.For(r.Status)
+                Display = ProviderBookingDisplay.For(r.Status, StartRules.IsNoShow(r.Status, r.HasPayment))
             }).ToList(),
             Today = todayRows.Select(r => new ScheduleItemViewModel
             {

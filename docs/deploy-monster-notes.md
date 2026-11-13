@@ -1,14 +1,15 @@
-# Deploy to MonsterASP (database v2.10)
+# Deploy to MonsterASP (database v2.12)
 
 The online database must be updated **before** the new website files go up: the new code reads the column
 `PROVIDER_UNAVAILABLE_DATES.APPROVED_BY_ACTION_ID` (v2.4), which the old database does not have.
 
-Before you start: on the laptop, the newest database script (now `tools\add-audit-standard.ps1`, v2.10) ended with
+Before you start: on the laptop, the newest database script (now `tools\add-start-window.ps1`, v2.12) ended with
 DONE, the site works with `dotnet run`, and the code is committed and pushed.
 
 Monster may be several steps behind the laptop (each step is one EF migration). For example, in November 2026 it
 still needed v2.1 to v2.6; after that deploy it still needs v2.7 (day-off requests), v2.8 (name change requests),
-v2.9 (inactive accounts) and v2.10 (the System Logs standard format).
+v2.9 (inactive accounts), v2.10 (the System Logs standard format), v2.11 (completion proof) and v2.12 (the start
+window of "Mark In Progress" and the provider no-show).
 The file imports every missing step in date order.
 
 ## 1. Make the files (laptop)
@@ -26,7 +27,7 @@ It builds, runs the tests, and opens a folder `Documents\SERVISYO-deploy\<date-t
 - `servisyo-publish.zip`: the website files. It leaves out:
   - `appsettings.Development.json`;
   - `appsettings.Production.json`: Monster keeps its own copy, with your connection string and email settings;
-  - `wwwroot\uploads`: the profile photos on Monster are not touched.
+  - `wwwroot\uploads`: the profile photos and the proof photos of completed jobs (v2.11) on Monster are not touched.
 
 It changes nothing online. The folder also has `check-monster-before-deploy.sql`.
 
@@ -59,7 +60,7 @@ while it changes and the files are not locked.
 **File Manager** → `wwwroot` → upload `servisyo-publish.zip` → **Extract**, and say yes to overwrite. Then delete
 `servisyo-publish.zip` from `wwwroot`.
 
-Do not delete anything else: the `uploads` folder (profile photos) and `appsettings.Production.json` stay as they are.
+Do not delete anything else: the `uploads` folder (profile photos and proof photos) and `appsettings.Production.json` stay as they are.
 
 ## 7. Start the website
 **Overview** → **Start**. If the "being updated" page still shows, delete `app_offline.htm` in `wwwroot`.
@@ -80,6 +81,16 @@ Do not delete anything else: the `uploads` folder (profile photos) and `appsetti
   provider's name.
 - **Admin → System Logs** (v2.10): the pills All / INSERT / UPDATE / DELETE / LOGIN show numbers; change a phone
   number on a customer's profile, then the UPDATE pill shows *"... updated User #.. : phone '...' -> '...'."*
+- **Provider → Booking Requests → an In Progress booking → Mark Completed** (v2.11): the "Confirm Service Completion"
+  window opens; without a photo or a message it shows the red messages; with both, the job is completed and the
+  customer's My Bookings card shows the photo and the message.
+- **Provider → Booking Requests → a scheduled (Accepted, paid) booking** (v2.12): before its time the card only says
+  *"Scheduled for ... Start button unlocks at scheduled time."*; up to 15 minutes after it, the blue **Mark In Progress**;
+  16 minutes to 2 hours after, the amber **Mark In Progress (Late)**, which asks for a reason.
+- **About a minute after the new site starts** (v2.12): Accepted, paid (or cash) bookings that are more than 2 hours past
+  their time without a start are cancelled as **provider no-shows** (a test e-wallet payment becomes Refunded). The
+  read-only check above lists how many there are (INFO line) before you import. Admin → System Logs shows one
+  *"System updated Booking #N: status 'Accepted' -> 'Cancelled' (Provider No-Show ...)"* line for each.
 - **Monster → Logs:** no new errors.
 
 ## The inactive-account clean-up (v2.9)

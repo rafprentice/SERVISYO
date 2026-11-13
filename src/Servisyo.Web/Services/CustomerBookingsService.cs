@@ -63,6 +63,11 @@ public class CustomerBookingsService : ICustomerBookingsService
         public string? PayMethod { get; set; }
         public string? PayStatus { get; set; }
         public string? PayReference { get; set; }
+        public string? CompletionMessage { get; set; }
+        public string? CompletionPhotoUrl { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public DateTime? StartedAt { get; set; }
+        public string? LateReason { get; set; }
     }
 
     public async Task<CustomerBookingsResult> GetAsync(int userId, string? tab, int page, CancellationToken ct = default)
@@ -118,7 +123,12 @@ public class CustomerBookingsService : ICustomerBookingsService
                 HasReview = _db.Reviews.Any(r => r.BookingId == b.BookingId),
                 PayMethod = b.PaymentDetail != null ? (b.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
                 PayStatus = b.PaymentDetail != null ? b.PaymentDetail.PaymentStatus : null,
-                PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null
+                PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null,
+                CompletionMessage = b.CompletionMessage,
+                CompletionPhotoUrl = b.CompletionPhotoUrl,
+                CompletedAt = b.CompletedAt,
+                StartedAt = b.StartedAt,
+                LateReason = b.LateReason
             })
             .ToListAsync(ct);
 
@@ -174,7 +184,10 @@ public class CustomerBookingsService : ICustomerBookingsService
                     CanPay = r.Status == BookingStatuses.Accepted && r.PaymentStatus == PaymentStatuses.Unpaid && r.PayMethod is null,
                     IsPaid = r.PaymentStatus == PaymentStatuses.Paid,
                     Fee = r.TotalFee,
-                    Payment = PaymentNotes.ForCustomer(pay, providerName)
+                    Payment = PaymentNotes.ForCustomer(pay, providerName),
+                    Proof = CompletionProofViewModel.From(r.Status, r.CompletionMessage, r.CompletionPhotoUrl, r.CompletedAt),
+                    StartInfo = StartInfoViewModel.From(r.Status, r.BookingDate, r.BookingTime, r.StartedAt, r.LateReason),
+                    IsNoShow = StartRules.IsNoShow(r.Status, r.PayStatus is not null)
                 };
             }).ToList()
         };

@@ -306,7 +306,9 @@ public class ProviderBookingsServiceTests
         Assert.Equal("Lahug, Cebu City", card.Location);
         Assert.Equal("Sep 16, 2026", card.SubmittedText);
         Assert.Equal("Kitchen sink is leaking.", card.Notes);
-        Assert.Equal(new[] { "Mark In Progress" }, card.Actions.Select(a => a.Label));
+        // database v2.12: Sep 20 9:00 AM is long past (the clock says Oct 14): the start window has expired, no button
+        Assert.Empty(card.Actions);
+        Assert.Equal(StartWindowState.Expired, card.StartWindow!.State);
     }
 
     [Fact]
@@ -430,7 +432,13 @@ public class ProviderBookingsServiceTests
         var provider = await AddProviderAsync(db);
         foreach (var status in new[] { BookingStatuses.Pending, BookingStatuses.Accepted, BookingStatuses.InProgress,
                                        BookingStatuses.Completed, BookingStatuses.Rejected, BookingStatuses.Cancelled })
-            await AddBookingAsync(db, customer, provider, status);
+        {
+            // database v2.12: the Accepted one is due now (9:55 AM, the clock says 10:00 AM Philippine time), so it can start
+            if (status == BookingStatuses.Accepted)
+                await AddBookingAsync(db, customer, provider, status, date: new DateOnly(2026, 10, 14), time: new TimeOnly(9, 55));
+            else
+                await AddBookingAsync(db, customer, provider, status);
+        }
 
         var cards = (await svc.GetAsync(provider.UserId, null, 1)).Page!.Cards.ToDictionary(c => c.Status);
 
@@ -447,8 +455,8 @@ public class ProviderBookingsServiceTests
     [Theory]
     [InlineData(BookingStatuses.Pending, BookingAction.Accept, BookingStatuses.Accepted)]
     [InlineData(BookingStatuses.Pending, BookingAction.Reject, BookingStatuses.Rejected)]
-    [InlineData(BookingStatuses.Accepted, BookingAction.Start, BookingStatuses.InProgress)]
-    [InlineData(BookingStatuses.InProgress, BookingAction.Complete, BookingStatuses.Completed)]
+    // Accepted -> In Progress only inside the start window (database v2.12): StartWindowTests
+    // In Progress -> Completed needs proof (database v2.11): CompletionProofTests
     public async Task AllowedChanges_UpdateTheBooking_AndTellTheCustomer(string from, BookingAction action, string to)
     {
         var (svc, db) = Create();
@@ -481,7 +489,7 @@ public class ProviderBookingsServiceTests
             (BookingStatuses.Pending, BookingAction.Accept),
             (BookingStatuses.Pending, BookingAction.Reject),
             (BookingStatuses.Accepted, BookingAction.Start),
-            (BookingStatuses.InProgress, BookingAction.Complete)
+            (BookingStatuses.InProgress, BookingAction.Complete)      // allowed, but only WITH proof (CompletionProofTests)
         };
         var statuses = new[]
         {

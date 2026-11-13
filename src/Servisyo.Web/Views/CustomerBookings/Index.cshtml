@@ -88,6 +88,20 @@
                         <p class="sv-bk__notes">@c.Notes</p>
                     }
 
+                    @if (c.StartInfo is not null)
+                    {
+                        <partial name="_StartInfo" model="c.StartInfo" />
+                    }
+                    @if (c.IsNoShow)
+                    {
+                        <partial name="_NoShowNote" model="@("Your provider did not start this job within 2 hours of the scheduled time, so it was cancelled automatically. A test e-wallet payment is refunded; with cash on completion there is nothing to pay. Please book another provider.")" />
+                    }
+
+                    @if (c.Proof is not null)
+                    {
+                        <partial name="_CompletionProof" model="c.Proof" />
+                    }
+
                     @if (c.Payment is not null)
                     {
                         <partial name="_PaymentNote" model="c.Payment" />

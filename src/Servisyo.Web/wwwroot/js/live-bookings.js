@@ -79,6 +79,15 @@
             .catch(function () { note(change); });
     }
 
+    // database v2.12: booking-start.js asks for a quiet redraw when a booking's start window opens, turns late or
+    // closes (nothing was pushed: only the time passed). While the user is busy it waits and asks again later.
+    window.svLiveRefresh = function () {
+        var area = region();
+        if (!area || busy(area)) return false;
+        refresh({ bookingId: "" });
+        return true;
+    };
+
     var connection = new signalR.HubConnectionBuilder()
         .withUrl(hubUrl)
         .withAutomaticReconnect()

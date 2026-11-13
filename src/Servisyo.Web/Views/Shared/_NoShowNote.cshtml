@@ -1,0 +1,12 @@
+@using Servisyo.Web.Helpers
+@using Servisyo.Web.Models
+@* Database v2.12: a booking cancelled because the provider did not start it within 2 hours of its scheduled time.
+   The model is the sentence for this reader (the customer, the provider or an administrator). *@
+@model string
+<div class="sv-noshow" role="note">
+    <span class="sv-noshow__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+    <div>
+        <p class="sv-noshow__title">@StartRules.NoShowReason</p>
+        <p class="sv-noshow__text">@Model</p>
+    </div>
+</div>

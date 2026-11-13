@@ -62,6 +62,13 @@ public class CustomerBookingCardViewModel
     /// "Cash on completion · ..." / "Paid via GCash (test) · ..." (null before Approve & Pay)
     public PaymentNote? Payment { get; set; }
 
+    /// Database v2.11: the provider's proof of the finished job (photo + message), once it is Completed.
+    public CompletionProofViewModel? Proof { get; set; }
+    /// Database v2.12: when the job started, and how late and why (null before it starts, or for older jobs).
+    public StartInfoViewModel? StartInfo { get; set; }
+    /// Database v2.12: cancelled because the provider did not start it within 2 hours of the scheduled time.
+    public bool IsNoShow { get; set; }
+
     /// "Marco Reyes · Plumbing"
     public string FromLine => string.IsNullOrWhiteSpace(CategoryText) ? ProviderName : $"{ProviderName} · {CategoryText}";
 }

@@ -106,7 +106,7 @@ public class MaxJobsPerDayTests
     public void TheDesignFile_SaysTheSame()
     {
         var design = DesignFile();
-        Assert.Contains("DATABASE DESIGN v2.10", design);                        // v2.7 to v2.10 came after
+        Assert.Contains("DATABASE DESIGN v2.12", design);                        // later versions came after (v2.12 is the newest)
         Assert.Contains("CONSTRAINT CK_PROVIDERS_LIMITS CHECK (" + ServisyoDbContext.ProviderLimitsCheck + ")", design);
         Assert.Contains("@MaxJobsPerDay > 20 THROW 50110, N'Enter a whole number of jobs per day from 1 to 20.', 1;", design);
         Assert.DoesNotContain("jobs per day from 1 to 50", design);

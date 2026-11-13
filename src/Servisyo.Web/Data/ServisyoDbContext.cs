@@ -45,6 +45,29 @@ public class ServisyoDbContext : DbContext
     public const string NameChangeOnePendingIndex = "UX_PROVIDER_NAME_CHANGE_REQUESTS_ONE_PENDING";
     public const string NameChangeOnePendingFilter = "[STATUS] = 'Pending'";
 
+    /// CK_BOOKINGS_COMPLETION (database v2.11): the proof of a finished job is all or nothing, and only on a Completed
+    /// booking (with a message that is not blank). A job completed before v2.11 has no proof (all three NULL).
+    public const string BookingCompletionCheck =
+        "([COMPLETION_MESSAGE] IS NULL AND [COMPLETION_PHOTO_URL] IS NULL AND [COMPLETED_AT] IS NULL) OR ([STATUS] = 'Completed' AND [COMPLETION_MESSAGE] IS NOT NULL AND LEN([COMPLETION_MESSAGE]) > 0 AND [COMPLETION_PHOTO_URL] IS NOT NULL AND [COMPLETED_AT] IS NOT NULL)";
+
+    /// Database v2.12: the scheduled start (Cebu time) and the whole minutes from it to STARTED_AT (UTC + 8 hours),
+    /// counted like DATEDIFF(MINUTE, ...) counts. The app counts the same way (StartRules.MinutesBetween).
+    public const string BookingScheduledSql = "CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME)";
+    public const string BookingStartMinutesSql = "DATEDIFF(MINUTE, " + BookingScheduledSql + ", DATEADD(HOUR, 8, [STARTED_AT]))";
+
+    /// MINUTES_LATE / IS_LATE (database v2.12): calculated, not stored. Only a start more than 15 minutes after the
+    /// scheduled time is late; MINUTES_LATE is NULL for a start on time and for a booking that has not started.
+    public const string BookingMinutesLateSql = "CASE WHEN " + BookingStartMinutesSql + " > 15 THEN " + BookingStartMinutesSql + " END";
+    public const string BookingIsLateSql = "ISNULL(CAST(CASE WHEN " + BookingStartMinutesSql + " > 15 THEN 1 ELSE 0 END AS BIT), CAST(0 AS BIT))";
+
+    /// CK_BOOKINGS_START (database v2.12): no start yet (both NULL), or a start on an In Progress / Completed booking
+    /// from the scheduled time up to 2 hours after it, with a reason exactly when it was more than 15 minutes late.
+    /// (A CHECK cannot read the calculated columns, so the minutes are written out here.)
+    public const string BookingStartCheck =
+        "([STARTED_AT] IS NULL AND [LATE_REASON] IS NULL) OR ([STARTED_AT] IS NOT NULL AND [STATUS] IN ('In Progress','Completed') AND "
+        + BookingStartMinutesSql + " BETWEEN 0 AND 120 AND ((" + BookingStartMinutesSql + " > 15 AND [LATE_REASON] IS NOT NULL AND LEN([LATE_REASON]) > 0) OR ("
+        + BookingStartMinutesSql + " <= 15 AND [LATE_REASON] IS NULL)))";
+
     /// CK_ADMIN_ACTIONS_TARGET (database v2.2): exactly one target column is filled, and it is the one TARGET_TYPE names.
     public const string AdminActionTargetCheck =
         "([TARGET_TYPE] = 'CUSTOMER' AND [TARGET_CUSTOMER_ID] IS NOT NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'SERVICE_PROVIDER' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NOT NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'REVIEW' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NOT NULL AND [TARGET_CATEGORY_ID] IS NULL) OR ([TARGET_TYPE] = 'CATEGORY' AND [TARGET_CUSTOMER_ID] IS NULL AND [TARGET_PROVIDER_ID] IS NULL AND [TARGET_REVIEW_ID] IS NULL AND [TARGET_CATEGORY_ID] IS NOT NULL)";
@@ -242,8 +265,15 @@ public class ServisyoDbContext : DbContext
                 t.HasCheckConstraint("CK_BOOKINGS_PAYMENT", "[PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')");
                 t.HasCheckConstraint("CK_BOOKINGS_DURATION", "[TOTAL_DURATION_MINUTES] > 0");
                 t.HasCheckConstraint("CK_BOOKINGS_FEE", "[TOTAL_FEE] >= 0");   // database v2
+                t.HasCheckConstraint("CK_BOOKINGS_COMPLETION", BookingCompletionCheck);   // database v2.11
+                t.HasCheckConstraint("CK_BOOKINGS_START", BookingStartCheck);             // database v2.12
             });
             e.Property(x => x.Status).HasMaxLength(50);
+            e.Property(x => x.CompletionMessage).HasMaxLength(1000);       // database v2.11
+            e.Property(x => x.CompletionPhotoUrl).HasMaxLength(500);       // database v2.11
+            e.Property(x => x.LateReason).HasMaxLength(StartRules.MaxLateReasonLength);           // database v2.12
+            e.Property(x => x.MinutesLate).HasComputedColumnSql(BookingMinutesLateSql, stored: false);
+            e.Property(x => x.IsLate).HasComputedColumnSql(BookingIsLateSql, stored: false);
             e.Property(x => x.PaymentStatus).HasMaxLength(50);
             e.Property(x => x.EndTime)
                 .HasComputedColumnSql("DATEADD(MINUTE, [TOTAL_DURATION_MINUTES], [BOOKING_TIME])");

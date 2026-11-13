@@ -25,6 +25,10 @@ public sealed record ProviderBookingDisplay(string Badge, string Tone, string? A
         BookingStatuses.Cancelled => new("Cancelled", "muted", null, "Cancelled by the customer"),
         _ => new(status, "muted", null, null)
     };
+
+    /// Database v2.12: a cancelled booking the provider did not start within 2 hours says so (not "by the customer").
+    public static ProviderBookingDisplay For(string status, bool isNoShow) =>
+        isNoShow ? new("Cancelled", "muted", null, "No-show: not started in time") : For(status);
 }
 
 /// SERVISYO serves Cebu City only, so the city is not stored per customer or provider any more.

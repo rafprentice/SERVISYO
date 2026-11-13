@@ -216,6 +216,23 @@ public class Booking
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public byte[] RowVersion { get; set; } = null!;     // concurrency token
 
+    // database v2.11: the provider's proof of the finished job, all three set together when the booking is Completed
+    // (NULL before that, and for jobs completed before v2.11). CHECK CK_BOOKINGS_COMPLETION keeps them consistent.
+    public string? CompletionMessage { get; set; }      // what was done (required when completing, max 1000)
+    public string? CompletionPhotoUrl { get; set; }     // "/uploads/completions/{bookingId}_{guid}.jpg"
+    public DateTime? CompletedAt { get; set; }          // UTC
+
+    // database v2.12: the start of the job. STARTED_AT is the moment the provider pressed "Mark In Progress" (UTC);
+    // LATE_REASON is required when that was more than 15 minutes after the scheduled time (NULL otherwise).
+    // Both are written once, when the job starts (CHECK CK_BOOKINGS_START + trg_Bookings_StatusFlow).
+    public DateTime? StartedAt { get; set; }
+    public string? LateReason { get; set; }             // max 500
+    // Calculated by SQL Server from STARTED_AT and the booking's date and time (not stored, rule 2), read-only here:
+    // MINUTES_LATE is set only for a late start (more than 15 minutes), IS_LATE is 1 then. The in-memory test database
+    // does not calculate them, so the app works them out with StartRules from StartedAt instead.
+    public int? MinutesLate { get; private set; }
+    public bool IsLate { get; private set; }
+
     public Customer Customer { get; set; } = null!;
     public Provider Provider { get; set; } = null!;
     public ICollection<BookingService> Services { get; set; } = new List<BookingService>();

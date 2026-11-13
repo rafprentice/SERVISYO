@@ -15,8 +15,11 @@
      v2.6 MaxJobsPerDay20 (INFO) providers above 20 jobs a day become 20
      v2.10 AuditStandard  SYSTEM_LOGS may only have INSERT / UPDATE / DELETE / LOGIN lines (v2.9 REPORT lines are removed),
                           and no object made by someone else may have one of the new audit names
-   v2.7 DayOffRequests and v2.8 NameChangeRequests only add new (empty) tables, and v2.9 InactiveAccounts only adds
-   two USERS columns (filled from the sign-in log): there is nothing to check for them. */
+   v2.7 DayOffRequests and v2.8 NameChangeRequests only add new (empty) tables, v2.9 InactiveAccounts only adds
+   two USERS columns (filled from the sign-in log), and v2.11 BookingCompletionProof only adds three empty BOOKINGS
+   columns: there is nothing to check for them.
+     v2.12 StartWindow    (INFO) accepted, paid bookings already more than 2 hours past their time: after the update the
+                          website cancels them as provider no-shows (a test e-wallet payment is marked Refunded) */
 SET NOCOUNT ON;
 DECLARE @out TABLE (SEQ INT IDENTITY(1, 1) PRIMARY KEY, KIND NVARCHAR(4) NOT NULL, LINE NVARCHAR(1000) NOT NULL);
 
@@ -145,6 +148,17 @@ BEGIN
                AND ISNULL(OBJECT_DEFINITION(o.object_id), N'') LIKE N'%servisyo[_]user[_]id%')
     ORDER BY o.name;
 END
+
+-- ------------------------------------------------------------------ v2.12 StartWindow
+IF NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]StartWindow')
+    INSERT @out (KIND, LINE)
+    SELECT N'INFO', CONCAT(N'v2.12: ', COUNT(*), N' accepted booking(s) with a payment are already more than 2 hours past their scheduled time ',
+                           N'without a start. About a minute after the new website starts, it cancels them as provider no-shows ',
+                           N'(test e-wallet payments are marked Refunded; System Logs records each one).')
+    FROM dbo.BOOKINGS b
+    WHERE b.STATUS = N'Accepted' AND EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL p WHERE p.BOOKING_ID = b.BOOKING_ID)
+      AND DATEDIFF(MINUTE, CAST(b.BOOKING_DATE AS DATETIME) + CAST(b.BOOKING_TIME AS DATETIME), DATEADD(HOUR, 8, SYSUTCDATETIME())) > 121
+    HAVING COUNT(*) > 0;
 
 -- ------------------------------------------------------------------ the report
 DECLARE @fix INT = (SELECT COUNT(*) FROM @out WHERE KIND = N'FIX');

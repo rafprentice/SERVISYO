@@ -260,12 +260,12 @@ public class NotificationServiceTests
 /// The stored procedures and the C# classes that read them must use the same column names (EF matches them by name).
 public class DerivedQueryColumnTests
 {
-    /// The procedure as the database has it now: the newest version (v2.8, v2.7, otherwise v2.3).
+    /// The procedure as the database has it now: the newest version (v2.12, v2.8, v2.7, otherwise v2.3).
     private static string ProcedureText(string name)
     {
         bool Is(string s) => s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\n") || s.Contains("CREATE OR ALTER PROCEDURE dbo." + name + "\r\n");
-        var sql = NameChangeRequestsSql.CreateAll.SingleOrDefault(Is) ?? DayOffRequestsSql.CreateAll.SingleOrDefault(Is)
-                  ?? Assert.Single(DerivedDataSql.CreateAll, Is);
+        var sql = StartWindowSql.CreateAll.SingleOrDefault(Is) ?? NameChangeRequestsSql.CreateAll.SingleOrDefault(Is)
+                  ?? DayOffRequestsSql.CreateAll.SingleOrDefault(Is) ?? Assert.Single(DerivedDataSql.CreateAll, Is);
         return sql.Replace("''", "'");
     }
 

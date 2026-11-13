@@ -432,18 +432,18 @@ public class InactiveAccountTests
     {
         var root = RepoRoot();
         var design = File.ReadAllText(Path.Combine(root, "docs", "sql", "DatabaseDesign-v2.sql")).Replace("\r\n", "\n");
-        Assert.Contains("DATABASE DESIGN v2.10", design);                        // v2.10 came after
+        Assert.Contains("DATABASE DESIGN v2.12", design);                        // later versions came after (v2.12 is the newest)
         Assert.Contains("WHAT CHANGED IN v2.9 (EF migration \"InactiveAccounts\")", design);
         Assert.Contains("INACTIVITY_WARNED_AT         DATETIME2       NULL", design);
         Assert.Contains("LAST_ACTIVITY_AT             DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME()", design);
         Assert.Contains("CREATE INDEX IX_USERS_LAST_ACTIVITY_AT ON USERS (LAST_ACTIVITY_AT);", design);
-        Assert.Contains("MigrationId LIKE N'%[_]AuditStandard'", design);          // PART 0: the newest migration (v2.10)
+        Assert.Contains("MigrationId LIKE N'%[_]StartWindow'", design);   // PART 0: the newest migration (v2.12)
 
         var tool = File.ReadAllText(Path.Combine(root, "tools", "add-inactive-accounts.ps1"));
         Assert.Contains("InactiveAccountsSql.InitLastActivity", tool);
         Assert.Contains("IX_USERS_LAST_ACTIVITY_AT", tool);
         var deploy = File.ReadAllText(Path.Combine(root, "tools", "make-monster-deploy.ps1"));
-        Assert.Contains("$Latest = \"AuditStandard\"", deploy);                   // v2.10 is the newest now
+        Assert.Contains("$Latest = \"StartWindow\"", deploy);          // v2.12 is the newest now
     }
 
     private static string RepoRoot()

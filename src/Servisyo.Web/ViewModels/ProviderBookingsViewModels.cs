@@ -15,6 +15,8 @@ public sealed record BookingActionInfo(BookingAction Action, string Label, strin
     public static readonly BookingActionInfo Reject = new(BookingAction.Reject, "Reject", BookingStatuses.Pending, BookingStatuses.Rejected, "sv-btn--danger-outline", null, true);
     public static readonly BookingActionInfo Start = new(BookingAction.Start, "Mark In Progress", BookingStatuses.Accepted, BookingStatuses.InProgress, "sv-btn--primary", "clock", false);
     public static readonly BookingActionInfo Complete = new(BookingAction.Complete, "Mark Completed", BookingStatuses.InProgress, BookingStatuses.Completed, "sv-btn--primary", "check", false);
+    /// Database v2.12: 16 minutes to 2 hours after the scheduled time. Opens the "Late Start" window (a reason is required).
+    public static readonly BookingActionInfo StartLate = new(BookingAction.Start, "Mark In Progress (Late)", BookingStatuses.Accepted, BookingStatuses.InProgress, "sv-btn--late", "clock", false);
 
     public static BookingActionInfo For(BookingAction action) => action switch
     {
@@ -31,6 +33,14 @@ public sealed record BookingActionInfo(BookingAction Action, string Label, strin
         status == BookingStatuses.Accepted && !PaymentProgress.IsArranged(paymentStatus)
             ? Array.Empty<BookingActionInfo>()
             : ForStatus(status);
+
+    /// Database v2.12: the start button of a scheduled booking, by its start window (none too early or after 2 hours).
+    public static IReadOnlyList<BookingActionInfo> ForStart(StartWindowState state) => state switch
+    {
+        StartWindowState.OnTime => new[] { Start },
+        StartWindowState.Late => new[] { StartLate },
+        _ => Array.Empty<BookingActionInfo>()
+    };
 
     /// The buttons that make sense for a booking in this status (empty once it is finished or cancelled).
     public static IReadOnlyList<BookingActionInfo> ForStatus(string status) => status switch
@@ -124,6 +134,16 @@ public class ProviderBookingCardViewModel
     /// Completed + Cash on Completion + not confirmed yet: "Confirm Cash Received" is offered.
     public bool CanConfirmCash { get; set; }
 
+    /// Database v2.11: the proof the provider gave when completing (null before that, or for older jobs).
+    public CompletionProofViewModel? Proof { get; set; }
+
+    /// Database v2.12: a scheduled booking (Accepted + paid or cash promised) against its start time; null otherwise.
+    public StartWindowViewModel? StartWindow { get; set; }
+    /// Database v2.12: when an In Progress / Completed job started, and how late (null for older jobs).
+    public StartInfoViewModel? StartInfo { get; set; }
+    /// Database v2.12: cancelled because it was not started within 2 hours of its scheduled time.
+    public bool IsNoShow { get; set; }
+
     public string FromLine => string.IsNullOrWhiteSpace(CategoryText)
         ? $"from {CustomerName}"
         : $"from {CustomerName} · {CategoryText}";
@@ -154,10 +174,16 @@ public enum BookingActionOutcome
     NotFound,            // no such booking, or it belongs to another provider (the same answer on purpose)
     InvalidTransition,   // the booking is not in a status that allows this action
     Overlap,             // accepting would clash with another accepted / in-progress job
-    Changed              // someone else (usually the customer cancelling) changed it a moment ago
+    Changed,             // someone else (usually the customer cancelling) changed it a moment ago
+    ProofMissing,        // database v2.11: completing needs a completion message and a proof photo (Errors says which)
+    TooEarly,            // database v2.12: before the scheduled date and time (Philippine time)
+    LateReasonRequired,  // database v2.12: more than 15 minutes late without a reason (or a reason over 500 characters)
+    StartWindowExpired   // database v2.12: more than 2 hours after the scheduled time (a provider no-show)
 }
 
-public record BookingActionResult(ProviderDashboardAccess Access, BookingActionOutcome Outcome, string Message)
+/// Errors is only set for ProofMissing: what is wrong with the message and / or the photo.
+public record BookingActionResult(ProviderDashboardAccess Access, BookingActionOutcome Outcome, string Message,
+    Servisyo.Web.Services.CompletionErrors? Errors = null)
 {
     public bool Succeeded => Outcome == BookingActionOutcome.Success;
 }

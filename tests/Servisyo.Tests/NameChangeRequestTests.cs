@@ -368,17 +368,19 @@ public class NameChangeRequestTests
         Assert.NotNull(dir);
         var design = File.ReadAllText(Path.Combine(dir!.FullName, "docs", "sql", "DatabaseDesign-v2.sql")).Replace("\r\n", "\n");
 
-        Assert.Contains("DATABASE DESIGN v2.10", design);                        // v2.9 and v2.10 came after
+        Assert.Contains("DATABASE DESIGN v2.12", design);                        // later versions came after (v2.12 is the newest)
         Assert.Contains("WHAT CHANGED IN v2.8 (EF migration \"NameChangeRequests\")", design);
         Assert.Contains("CREATE TABLE PROVIDER_NAME_CHANGE_REQUESTS (", design);
         Assert.Contains("CONSTRAINT CK_PROVIDER_NAME_CHANGE_REQUESTS_STATUS CHECK (" + ServisyoDbContext.NameChangeStatusCheck + ")", design);
         Assert.Contains("CONSTRAINT CK_PROVIDER_NAME_CHANGE_REQUESTS_DECISION CHECK (" + ServisyoDbContext.NameChangeDecisionCheck + ")", design);
         Assert.Contains("CREATE UNIQUE INDEX " + ServisyoDbContext.NameChangeOnePendingIndex + " ON PROVIDER_NAME_CHANGE_REQUESTS (PROVIDER_ID) WHERE "
             + ServisyoDbContext.NameChangeOnePendingFilter, design);
-        Assert.Contains("MigrationId LIKE N'%[_]AuditStandard'", design);          // PART 0: the newest migration (v2.10)
-        var sql = NameChangeRequestsSql.GetNotifications28;
+        Assert.Contains("MigrationId LIKE N'%[_]StartWindow'", design);   // PART 0: the newest migration (v2.12)
+        // v2.12 added the provider no-show to usp_GetNotifications: the design file has that version (every v2.8 part is in it)
+        var sql = StartWindowSql.GetNotifications212;
         var body = sql["EXEC(N'".Length..sql.LastIndexOf("')", StringComparison.Ordinal)].Replace("''", "'");
         Assert.Contains(body.Replace("\r\n", "\n").Trim(), design);
+        Assert.Contains("-- provider: the answer to a name change request (v2.8)", design);
     }
 
     [Fact]
@@ -392,7 +394,7 @@ public class NameChangeRequestTests
         Assert.Contains("NameChangeRequestsSql.CreateAll[0]", add);
         Assert.Contains("NameChangeRequestsSql.RestoreOld[0]", add);
         var deploy = File.ReadAllText(Path.Combine(dir.FullName, "tools", "make-monster-deploy.ps1"));
-        Assert.Contains("$Latest = \"AuditStandard\"", deploy);                   // v2.10 is the newest now
+        Assert.Contains("$Latest = \"StartWindow\"", deploy);          // v2.12 is the newest now
         Assert.Contains("SET QUOTED_IDENTIFIER ON;", deploy);
     }
 }

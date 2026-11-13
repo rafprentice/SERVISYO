@@ -43,6 +43,12 @@ public class PaymentAndLiveTests
 
     private static readonly DateTime NowUtc = new(2026, 10, 26, 2, 0, 0);
 
+    /// Oct 30, 2026 2:05 PM in Cebu (UTC+8): inside the start window of the 2 PM bookings below (database v2.12).
+    private sealed class StartClock : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(2026, 10, 30, 6, 5, 0, TimeSpan.Zero);
+    }
+
     /// "Mock E-Wallet" with a test GCash number: paid at once (the cash choice is tested in DualPaymentTests).
     private static readonly PaymentChoiceForm TestWallet = new()
     {
@@ -57,7 +63,11 @@ public class PaymentAndLiveTests
         public Customer Ben { get; set; } = null!;
         public Provider Mary { get; set; } = null!;
         public BookingPaymentService Payments => new(Db, new FixedClock(), Live);
-        public ProviderBookingsService ProviderBookings => new(Db, new FixedClock(), null, Live);
+        public MemoryPhotoStore Photos { get; } = new();                // database v2.11: proof photos
+        public ProviderBookingsService ProviderBookings => new(Db, new FixedClock(), null, Live, Photos);
+        /// Database v2.12: a provider can only start a job inside its start window: this one presses "Mark In Progress"
+        /// at 2:05 PM on Oct 30 (Philippine time), five minutes after the 2 PM bookings of these tests.
+        public ProviderBookingsService StartingProvider => new(Db, new StartClock(), null, Live, Photos);
         public CustomerBookingsService CustomerBookings => new(Db, new FixedClock(), null, Live);
     }
 
@@ -193,8 +203,9 @@ public class PaymentAndLiveTests
         Assert.True((await w.ProviderBookings.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Accept)).Succeeded);  // quotation
         Assert.True((await w.Payments.ApproveAndPayAsync(w.Ana.UserId, b.BookingId, TestWallet)).Succeeded);                               // paid -> scheduled
         Assert.Single(BookingActionInfo.ForBooking(BookingStatuses.Accepted, PaymentStatuses.Paid));                            // "Mark In Progress"
-        Assert.True((await w.ProviderBookings.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Start)).Succeeded);   // in progress
-        Assert.True((await w.ProviderBookings.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Complete)).Succeeded);// completed
+        Assert.True((await w.StartingProvider.ChangeStatusAsync(w.Mary.UserId, b.BookingId, BookingAction.Start)).Succeeded);   // in progress (v2.12: at 2:05 PM)
+        Assert.True((await w.ProviderBookings.CompleteAsync(w.Mary.UserId, b.BookingId,                                       // completed,
+            CompletionTestKit.Message, CompletionTestKit.Photo())).Succeeded);                                                  // with proof (v2.11)
 
         var saved = await w.Db.Bookings.AsNoTracking().SingleAsync();
         Assert.Equal(BookingStatuses.Completed, saved.Status);

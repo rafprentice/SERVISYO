@@ -1,0 +1,18 @@
+@model Servisyo.Web.ViewModels.CompletionProofViewModel
+@* Database v2.11: the proof the provider gave when completing the job. The photo opens full size in a new tab. *@
+<section class="sv-proof @(Model.PhotoUrl is null ? "sv-proof--nophoto" : null)" aria-label="Proof of the completed work">
+    @if (Model.PhotoUrl is not null)
+    {
+        <a class="sv-proof__img" href="@Model.PhotoUrl" target="_blank" rel="noopener" title="Open the proof photo">
+            <img src="@Model.PhotoUrl" alt="Proof photo of the completed work" loading="lazy" width="96" height="96" />
+        </a>
+    }
+    <div>
+        <p class="sv-proof__label">Completion message</p>
+        <p class="sv-proof__msg">@(Model.Message ?? "No message recorded.")</p>
+        @if (Model.CompletedText is not null)
+        {
+            <p class="sv-proof__when">Completed @Model.CompletedText (Cebu time)</p>
+        }
+    </div>
+</section>

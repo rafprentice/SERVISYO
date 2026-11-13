@@ -1,0 +1,20 @@
+@using Servisyo.Web.Helpers
+@model Servisyo.Web.ViewModels.StartInfoViewModel
+@* Database v2.12: when the job started (Cebu time). A late start (more than 15 minutes) shows the provider's reason. *@
+<div class="sv-start @(Model.IsLate ? "sv-start--late" : "sv-start--ok")">
+    <span class="sv-start__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+    <div>
+        @if (Model.IsLate)
+        {
+            <p class="sv-start__line"><strong>Started late</strong> · @Model.StartedText · @Model.LateText</p>
+            if (Model.LateReason is not null)
+            {
+                <p class="sv-start__reason"><span class="sv-start__label">Reason for the late start:</span> @Model.LateReason</p>
+            }
+        }
+        else
+        {
+            <p class="sv-start__line"><strong>Started on time</strong> · @Model.StartedText</p>
+        }
+    </div>
+</div>

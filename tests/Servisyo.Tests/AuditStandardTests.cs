@@ -214,15 +214,16 @@ public class AuditStandardTests
     {
         var root = RepoRoot();
         var design = File.ReadAllText(Path.Combine(root, "docs", "sql", "DatabaseDesign-v2.sql")).Replace("\r\n", "\n");
-        Assert.Contains("DATABASE DESIGN v2.10", design);
+        Assert.Contains("DATABASE DESIGN v2.12", design);                         // later versions came after (v2.12 is the newest)
         Assert.Contains("WHAT CHANGED IN v2.10 (EF migration \"AuditStandard\")", design);
-        Assert.Contains("MigrationId LIKE N'%[_]AuditStandard'", design);
+        Assert.Contains("MigrationId LIKE N'%[_]StartWindow'", design);    // PART 0: the newest migration (v2.12)
         Assert.Contains("CONSTRAINT CK_SYSTEM_LOGS_ACTION_TYPE CHECK (" + AuditActionType.Check + ")", design);
         Assert.Contains("CREATE INDEX IX_SYSTEM_LOGS_ACTION_TYPE_CREATED_AT ON SYSTEM_LOGS (ACTION_TYPE, CREATED_AT);", design);
         Assert.Contains("CREATE INDEX IX_SYSTEM_LOGS_USER_ID_CREATED_AT ON SYSTEM_LOGS (USER_ID, CREATED_AT);", design);
         Assert.DoesNotContain("IX_SYSTEM_LOGS_ACTION_TYPE_USER_ROLE ON", design);
         Assert.DoesNotContain("payment chosen:", design);                           // the v2.3 payment trigger was replaced
-        foreach (var sql in AuditStandardSql.Objects)
+        // v2.11 replaced trg_Bookings_Audit (BookingCompletionSql.BookingsAudit; CompletionProofTests checks it)
+        foreach (var sql in AuditStandardSql.Objects.Where(o => o != AuditStandardSql.BookingsAudit))
             Assert.Contains(sql.Replace("\r\n", "\n").Trim(), design);
         foreach (var name in AuditStandardSql.ObjectNames)
             Assert.Contains("N'" + name + "'", design);                             // PART 0 knows the names
@@ -242,7 +243,7 @@ public class AuditStandardTests
                                    "CreateIndex SYSTEM_LOGS IX_SYSTEM_LOGS_USER_ID_CREATED_AT", "AddCheckConstraint SYSTEM_LOGS CK_SYSTEM_LOGS_ACTION_TYPE" })
             Assert.Contains(op, add);
         var deploy = File.ReadAllText(Path.Combine(root, "tools", "make-monster-deploy.ps1"));
-        Assert.Contains("$Latest = \"AuditStandard\"", deploy);
+        Assert.Contains("$Latest = \"StartWindow\"", deploy);         // v2.12 is the newest now
     }
 }
 

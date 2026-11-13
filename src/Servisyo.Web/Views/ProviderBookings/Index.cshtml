@@ -1,4 +1,5 @@
 @using Servisyo.Web.Helpers
+@using Servisyo.Web.Models
 @using Servisyo.Web.ViewModels
 @model ProviderBookingsPageViewModel
 @{
@@ -79,6 +80,37 @@ else
                     <p class="sv-bk__notes">@c.Notes</p>
                 }
 
+                @if (c.StartInfo is not null)
+                {
+                    <partial name="_StartInfo" model="c.StartInfo" />
+                }
+                @if (c.IsNoShow)
+                {
+                    <partial name="_NoShowNote" model="@("This booking was cancelled automatically because it was not started within 2 hours of its scheduled time. The customer was told, and any test e-wallet payment was refunded.")" />
+                }
+
+                @if (c.Proof is not null)
+                {
+                    <partial name="_CompletionProof" model="c.Proof" />
+                }
+
+                @* database v2.12: a scheduled booking against its start time (Philippine time). The page redraws itself when
+                   the state changes (booking-start.js reads data-start-refresh-in, in seconds). *@
+                @if (c.StartWindow is { } w)
+                {
+                    if (w.Notice is not null)
+                    {
+                        <p class="sv-startwin sv-startwin--@(w.State == StartWindowState.Expired ? "missed" : "early")" data-start-state="@w.State">
+                            <span class="sv-startwin__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+                            <span>@w.Notice</span>
+                        </p>
+                    }
+                    if (w.RefreshInSeconds is int wait)
+                    {
+                        <span hidden data-start-refresh-in="@wait"></span>
+                    }
+                }
+
                 @if (c.Actions.Count > 0 || c.CanConfirmCash)
                 {
                     <div class="sv-bk__acts">
@@ -96,6 +128,50 @@ else
                         }
                         @foreach (var a in c.Actions)
                         {
+                            if (a.Action == BookingAction.Complete)
+                            {
+                                @* database v2.11: opens "Confirm Service Completion" (a message and a proof photo are required) *@
+                                <button type="button" class="sv-btn @a.Css sv-btn--sm" data-complete-open aria-haspopup="dialog"
+                                        data-complete-url="@Url.Action("Complete", "ProviderBookings", new { id = c.BookingId })"
+                                        data-complete-id="@c.BookingId" data-complete-title="@c.Title" data-complete-customer="@c.CustomerName"
+                                        aria-label="@a.Label booking #@c.BookingId">
+                                    <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("check", 14)</span>
+                                    @a.Label
+                                </button>
+                                continue;
+                            }
+
+                            if (a.Action == BookingAction.Start)
+                            {
+                                if (a == BookingActionInfo.StartLate)
+                                {
+                                    @* database v2.12: 16 minutes to 2 hours late: opens "Late Start" (a reason is required) *@
+                                    <button type="button" class="sv-btn @a.Css sv-btn--sm" data-late-open aria-haspopup="dialog"
+                                            data-late-url="@Url.Action("Start", "ProviderBookings", new { id = c.BookingId })"
+                                            data-late-id="@c.BookingId" data-late-title="@c.Title" data-late-customer="@c.CustomerName"
+                                            data-late-minutes="@c.StartWindow?.LateText"
+                                            aria-label="@a.Label booking #@c.BookingId">
+                                        <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+                                        @a.Label
+                                    </button>
+                                    <span class="sv-late-chip">@c.StartWindow?.LateText</span>
+                                }
+                                else
+                                {
+                                    @* database v2.12: 0 to 15 minutes after the scheduled time *@
+                                    <form method="post" asp-controller="ProviderBookings" asp-action="Start" asp-route-id="@c.BookingId"
+                                          class="sv-inline-form" data-sv-once data-start-form>
+                                        <input type="hidden" name="tab" value="@Model.ActiveTab" />
+                                        <input type="hidden" name="page" value="@Model.Page" />
+                                        <button type="submit" class="sv-btn @a.Css sv-btn--sm" aria-label="@a.Label booking #@c.BookingId">
+                                            <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+                                            @a.Label
+                                        </button>
+                                    </form>
+                                }
+                                continue;
+                            }
+
                             var confirmText = a.Confirm
                                 ? $"Reject booking #{c.BookingId} from {c.CustomerName}? The customer will be told it was rejected."
                                 : null;
@@ -114,6 +190,7 @@ else
                                 </button>
                             </form>
                         }
+                        <p class="sv-start-err" role="alert" data-start-error hidden></p>
                     </div>
                 }
             </li>
@@ -139,6 +216,107 @@ else
     </div>
 }
 
+@* database v2.11: "Confirm Service Completion". One window for the page; booking-completion.js fills in which booking.
+   It sits inside the live area, so a live refresh waits while it is open (live-bookings.js). *@
+<dialog class="sv-dialog sv-cmp" aria-labelledby="sv-cmp-title" aria-describedby="sv-cmp-sub" data-complete-dialog>
+    <form method="post" asp-controller="ProviderBookings" asp-action="Complete" asp-route-id="0" enctype="multipart/form-data"
+          class="sv-cmp__form" novalidate data-complete-form>
+        <input type="hidden" name="tab" value="@Model.ActiveTab" />
+        <input type="hidden" name="page" value="@Model.Page" />
+
+        <div class="sv-cmp__head">
+            <div>
+                <h2 class="sv-dialog__title" id="sv-cmp-title">Confirm Service Completion</h2>
+                <p class="sv-dialog__text" id="sv-cmp-sub" data-complete-sub>Add proof of the finished work. The customer and the administrators will see it.</p>
+            </div>
+            <button type="button" class="sv-cmp__x" data-complete-cancel aria-label="Close">&#x2715;</button>
+        </div>
+
+        <div class="sv-cmp__field">
+            <span class="sv-cmp__label" id="sv-cmp-photo-label">Proof Photo <span class="sv-cmp__req" aria-hidden="true">*</span></span>
+            <input type="file" id="sv-cmp-photo" name="proofPhoto" accept="image/png, image/jpeg, image/webp" class="sv-sr-only" tabindex="-1"
+                   aria-labelledby="sv-cmp-photo-label" data-complete-photo />
+            <div class="sv-cmp__drop" data-complete-drop>
+                <img class="sv-cmp__preview" alt="Preview of the selected proof photo" data-complete-preview hidden />
+                <div class="sv-cmp__empty" data-complete-empty>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
+                    <span>No photo selected yet</span>
+                </div>
+            </div>
+            <div class="sv-cmp__pickrow">
+                <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-complete-pick aria-describedby="sv-cmp-photo-help sv-cmp-photo-err">Choose Photo</button>
+                <span class="sv-cmp__file" data-complete-filename></span>
+            </div>
+            <p class="sv-cmp__help" id="sv-cmp-photo-help">From your device's file manager: JPG, PNG or WebP, up to 5 MB.</p>
+            <p class="sv-cmp__err" id="sv-cmp-photo-err" data-complete-error="photo" hidden></p>
+        </div>
+
+        <div class="sv-cmp__field">
+            <label class="sv-cmp__label" for="sv-cmp-msg">Completion Message <span class="sv-cmp__req" aria-hidden="true">*</span></label>
+            <textarea id="sv-cmp-msg" name="completionMessage" rows="4" maxlength="1000" aria-required="true"
+                      aria-describedby="sv-cmp-msg-count sv-cmp-msg-err" data-complete-message
+                      placeholder="What did you do? For example: Replaced the faulty capacitor and tested the unit for 30 minutes."></textarea>
+            <p class="sv-cmp__count" id="sv-cmp-msg-count"><span data-complete-count>0</span> / 1,000</p>
+            <p class="sv-cmp__err" id="sv-cmp-msg-err" data-complete-error="message" hidden></p>
+        </div>
+
+        <p class="sv-cmp__err sv-cmp__err--box" role="alert" data-complete-error="general" hidden></p>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-complete-cancel>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" data-complete-submit>
+                <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("check", 14)</span>
+                <span data-complete-submit-text>Confirm Completion</span>
+            </button>
+        </div>
+    </form>
+</dialog>
+
+@* database v2.12: "Late Start". One window for the page; booking-start.js fills in which booking. A start more than
+   15 minutes after the scheduled time needs a reason (the server checks it again). *@
+<dialog class="sv-dialog sv-cmp sv-late" aria-labelledby="sv-late-title" aria-describedby="sv-late-sub" data-late-dialog>
+    <form method="post" asp-controller="ProviderBookings" asp-action="Start" asp-route-id="0"
+          class="sv-cmp__form" novalidate data-late-form>
+        <input type="hidden" name="tab" value="@Model.ActiveTab" />
+        <input type="hidden" name="page" value="@Model.Page" />
+
+        <div class="sv-cmp__head">
+            <div>
+                <h2 class="sv-dialog__title" id="sv-late-title">Late Start</h2>
+                <p class="sv-dialog__text" id="sv-late-sub" data-late-sub>You are starting this job more than 15 minutes after its scheduled time.</p>
+            </div>
+            <button type="button" class="sv-cmp__x" data-late-cancel aria-label="Close">&#x2715;</button>
+        </div>
+
+        <p class="sv-late__badge" data-late-badge>
+            <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+            <span data-late-badge-text>Late</span>
+        </p>
+
+        <div class="sv-cmp__field">
+            <label class="sv-cmp__label" for="sv-late-reason">Reason for the late start <span class="sv-cmp__req" aria-hidden="true">*</span></label>
+            <textarea id="sv-late-reason" name="lateReason" rows="3" maxlength="@StartRules.MaxLateReasonLength" aria-required="true"
+                      aria-describedby="sv-late-help sv-late-count sv-late-err" data-late-reason
+                      placeholder="For example: Heavy traffic on the way, I arrived at 10:05."></textarea>
+            <p class="sv-cmp__help" id="sv-late-help">Your customer and the SERVISYO administrators will see this reason.</p>
+            <p class="sv-cmp__count" id="sv-late-count"><span data-late-count>0</span> / 500</p>
+            <p class="sv-cmp__err" id="sv-late-err" data-late-error="reason" hidden></p>
+        </div>
+
+        <p class="sv-cmp__err sv-cmp__err--box" role="alert" data-late-error="general" hidden></p>
+
+        <div class="sv-dialog__buttons">
+            <button type="button" class="sv-btn sv-btn--outline sv-btn--sm" data-late-cancel>Cancel</button>
+            <button type="submit" class="sv-btn sv-btn--late sv-btn--sm" data-late-submit>
+                <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+                <span data-late-submit-text>Start Job (Late)</span>
+            </button>
+        </div>
+    </form>
+</dialog>
+
 @section Scripts {
     <script src="~/js/provider-bookings.js" asp-append-version="true"></script>
+    <script src="~/js/booking-completion.js" asp-append-version="true"></script>
+    <script src="~/js/booking-start.js" asp-append-version="true"></script>
 }

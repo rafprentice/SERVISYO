@@ -22,6 +22,8 @@ public sealed class AttentionRow
     public string CustomerName { get; set; } = string.Empty;
     public string ProviderName { get; set; } = string.Empty;
     public int TotalCount { get; set; }                      // all bookings that need attention (can be more than the rows)
+    public int LateStartCount { get; set; }                  // database v2.12: of them, started more than 15 minutes late
+    public int NoShowCount { get; set; }                     // database v2.12: of them, cancelled as a provider no-show
 }
 
 /// Database v2.3: the two tables that only held derivable rows (NOTIFICATIONS, BOOKING_REPORTS) are gone. These read

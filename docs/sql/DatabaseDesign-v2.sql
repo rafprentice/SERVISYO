@@ -1,6 +1,6 @@
 /* =====================================================================================================
    SERVISYO - Cebu-Based Service Provider Booking Platform            Group 3 | Microsoft SQL Server
-   DATABASE DESIGN v2.10  (improved version of DatabaseDesign.sql)
+   DATABASE DESIGN v2.12  (improved version of DatabaseDesign.sql)
 
    CONTENTS
      PART 0  Safety checks (run on the SERVISYO database, after "dotnet ef database update")
@@ -20,7 +20,10 @@
        new versions of fn_IsProviderAvailable, usp_CreateBooking and usp_GetNotifications, "NameChangeRequests" (v2.8)
        the table PROVIDER_NAME_CHANGE_REQUESTS (PART 1) and a new version of usp_GetNotifications, "InactiveAccounts"
        (v2.9) two USERS columns and their index (PART 1), "AuditStandard" (v2.10) the SYSTEM_LOGS CHECK and indexes
-       (PART 1), fn_AuditValue / fn_AuditActor (PART 2) and the 10 audit triggers (PART 5):
+       (PART 1), fn_AuditValue / fn_AuditActor (PART 2) and the 10 audit triggers (PART 5), "BookingCompletionProof"
+       (v2.11) three BOOKINGS columns and their CHECK (PART 1) and trg_Bookings_Audit v2.11 (PART 5), "StartWindow" (v2.12)
+       four BOOKINGS columns (two calculated) and their CHECK (PART 1), usp_UpdateBookingStatus, usp_GetNotifications and
+       usp_GetBookingsNeedingAttention v2.12 (PART 4), trg_Bookings_StatusFlow and trg_Bookings_Audit v2.12 (PART 5):
        the SAME SQL, so both ways give the same result. Running this whole file again is safe: every object is
        CREATE OR ALTER, and PART 0 stops if a different object with the same name already exists.
      - PART 1 is not executed (the tables already exist and belong to the EF migrations); it is here so the
@@ -182,6 +185,50 @@
        (one person's history) replace IX_SYSTEM_LOGS_ACTION_TYPE_USER_ROLE. Admin > System Logs reads 20 lines a page.
      - SESSION_CONTEXT servisyo_audit_off = 1 silences the audit triggers on one connection. Only the inactive-account
        clean-up uses it: it writes its own single DELETE line instead of copying the erased person's details.
+
+   WHAT CHANGED IN v2.11 (EF migration "BookingCompletionProof") - a job is completed WITH proof
+     - BOOKINGS.COMPLETION_MESSAGE (NVARCHAR(1000), NULL), COMPLETION_PHOTO_URL (NVARCHAR(500), NULL) and COMPLETED_AT
+       (DATETIME2, NULL): the provider's proof of the finished job. All three are NULL until the job is completed, and
+       for jobs completed before v2.11. They are facts of the completion (stored, not calculated): COMPLETED_AT is not
+       UPDATED_AT, which changes again (for example when cash is confirmed), and SYSTEM_LOGS is an audit trail, not the
+       source of truth.
+     - CHECK CK_BOOKINGS_COMPLETION: the proof is all or nothing, only on a Completed booking, and the message is not
+       blank. The website requires it for every new completion (Provider > Booking Requests > Mark Completed opens
+       "Confirm Service Completion": a photo from the device, JPG / PNG / WebP up to 5 MB, and a message up to 1000
+       characters; the server checks both again). The photo file is in wwwroot/uploads/completions (not in the database).
+     - trg_Bookings_Audit v2.11: completing a job together with its proof writes ONE line, in the v2.10 format:
+         "Service Provider Mary Reyes updated Booking #31: status 'In Progress' -> 'Completed' (proof photo and
+          completion message saved)."
+       The message is not copied into SYSTEM_LOGS (one fact, one place). A later change of the proof is logged
+       old -> new like any other field.
+
+   WHAT CHANGED IN v2.12 (EF migration "StartWindow") - "Mark In Progress" only inside the start window
+     - All times are Philippine Standard Time (UTC+8): BOOKING_DATE + BOOKING_TIME are Cebu date and time, STARTED_AT is
+       UTC like every other time column (the app uses the time zone "Asia/Manila" / "Singapore Standard Time").
+     - BOOKINGS.STARTED_AT (DATETIME2, NULL): the moment the provider pressed "Mark In Progress". LATE_REASON
+       (NVARCHAR(500), NULL): the provider's reason, required when that was more than 15 minutes late.
+     - BOOKINGS.MINUTES_LATE (INT, NULL) and IS_LATE (BIT, never NULL) are CALCULATED columns (not stored, rule 2:
+       they come from STARTED_AT and the booking's date and time). MINUTES_LATE is only filled for a late start.
+     - The start window, minutes after the scheduled time (counted like DATEDIFF(MINUTE, ...)):
+         before 0   too early: no button ("Scheduled for ... Start button unlocks at scheduled time."), refused (50156)
+         0 - 15     on time: "Mark In Progress"
+         16 - 120   late: "Mark In Progress (Late)" with a required reason (50158 without one)
+         over 120   missed: refused (50157); a booking that was paid (or cash promised) is CANCELLED automatically as a
+                    provider no-show by the website (every 5 minutes), and a test e-wallet payment is marked Refunded.
+     - CHECK CK_BOOKINGS_START: no start yet (both NULL), or a start on an In Progress / Completed booking from 0 to 120
+       minutes after its time, with a reason exactly when it was more than 15 minutes late.
+     - trg_Bookings_StatusFlow v2.12: Accepted -> Cancelled is allowed ONLY for a no-show (not started, a payment exists,
+       more than 2 hours after the scheduled time, no longer Paid) (50162); STARTED_AT is "now" when the job starts
+       (50163); STARTED_AT and LATE_REASON are written once (50164).
+     - Why a no-show is not stored as a reason column: customers can only cancel Pending requests, which never have a
+       payment, so a CANCELLED booking WITH a PAYMENTS_DTL row is always a provider no-show (worked out, rule 2).
+     - trg_Bookings_Audit v2.12, the status line says how the job started or why it was cancelled:
+         "Service Provider Mary Reyes updated Booking #33: status 'Accepted' -> 'In Progress' (late start: 25 minutes late, reason 'Flat tire')."
+         "System updated Booking #33: status 'Accepted' -> 'Cancelled' (Provider No-Show - missed scheduled start window)."
+     - usp_UpdateBookingStatus v2.12 takes @LateReason and checks the window; usp_GetNotifications v2.12 tells the
+       customer and the provider about a no-show (and no longer calls it "cancelled by the customer");
+       usp_GetBookingsNeedingAttention v2.12 adds the late starts and no-shows of the last 7 days (LateStartCount,
+       NoShowCount: the admin dashboard shows them on their own row).
    ===================================================================================================== */
 
 SET ANSI_NULLS ON;
@@ -200,10 +247,11 @@ BEGIN
 END
 GO
 -- the app must already know about the new triggers (HasTrigger in ServisyoDbContext.cs), and this file reads the tables
--- and columns of the "DayOffRequests" (v2.7), "NameChangeRequests" (v2.8) and "InactiveAccounts" (v2.9) migrations and
--- needs the SYSTEM_LOGS CHECK of "AuditStandard" (v2.10), so the EF migrations come first
+-- and columns of the "DayOffRequests" (v2.7), "NameChangeRequests" (v2.8), "InactiveAccounts" (v2.9),
+-- "BookingCompletionProof" (v2.11) and "StartWindow" (v2.12) migrations and needs the SYSTEM_LOGS CHECK of
+-- "AuditStandard" (v2.10), so the EF migrations come first
 IF OBJECT_ID(N'dbo.__EFMigrationsHistory') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]AuditStandard')
+   AND NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId LIKE N'%[_]StartWindow')
 BEGIN
     RAISERROR(N'Stopped: run "dotnet ef database update --project src\Servisyo.Web" first (it installs these same objects). Then run this file again for the self-test. Nothing was changed.', 16, 1);
     SET NOEXEC ON;
@@ -424,14 +472,21 @@ CREATE TABLE BOOKINGS (
     BOOKING_ID                   INT             IDENTITY(1,1) NOT NULL,
     BOOKING_DATE                 DATE            NOT NULL,
     BOOKING_TIME                 TIME            NOT NULL,
+    COMPLETED_AT                 DATETIME2       NULL,      -- v2.11: when the provider completed it WITH proof (UTC)
+    COMPLETION_MESSAGE           NVARCHAR(1000)  NULL,      -- v2.11: what was done (required when completing)
+    COMPLETION_PHOTO_URL         NVARCHAR(500)   NULL,      -- v2.11: /uploads/completions/{BOOKING_ID}_{guid}.jpg
     CREATED_AT                   DATETIME2       NOT NULL DEFAULT SYSUTCDATETIME(),
     CUSTOMER_ID                  INT             NOT NULL,
     END_TIME                     AS (DATEADD(MINUTE, [TOTAL_DURATION_MINUTES], [BOOKING_TIME])),
+    IS_LATE                      AS (ISNULL(CAST(CASE WHEN DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) > 15 THEN 1 ELSE 0 END AS BIT), CAST(0 AS BIT))),   -- v2.12, calculated
+    LATE_REASON                  NVARCHAR(500)   NULL,      -- v2.12: why the job started more than 15 minutes late
+    MINUTES_LATE                 AS (CASE WHEN DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) > 15 THEN DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) END),   -- v2.12, calculated
     PAYMENT_STATUS               NVARCHAR(50)    NOT NULL,
     PROVIDER_ID                  INT             NOT NULL,
     ROW_VERSION                  ROWVERSION      NOT NULL,
     SERVICE_DESCRIPTION          NVARCHAR(255)   NULL,
     SERVICE_LOCATION             NVARCHAR(255)   NULL,
+    STARTED_AT                   DATETIME2       NULL,      -- v2.12: when the provider pressed "Mark In Progress" (UTC)
     STATUS                       NVARCHAR(50)    NOT NULL,
     TOTAL_DURATION_MINUTES       INT             NOT NULL,
     TOTAL_FEE                    DECIMAL(10,2)   NOT NULL,
@@ -441,7 +496,11 @@ CREATE TABLE BOOKINGS (
     CONSTRAINT FK_BOOKINGS_SERVICE_PROVIDERS_PROVIDER_ID FOREIGN KEY (PROVIDER_ID) REFERENCES SERVICE_PROVIDERS(PROVIDER_ID),
     CONSTRAINT CK_BOOKINGS_DURATION CHECK ([TOTAL_DURATION_MINUTES] > 0),
     CONSTRAINT CK_BOOKINGS_PAYMENT CHECK ([PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')),
-    CONSTRAINT CK_BOOKINGS_STATUS CHECK ([STATUS] IN ('Pending','Accepted','Rejected','In Progress','Completed','Cancelled'))
+    CONSTRAINT CK_BOOKINGS_STATUS CHECK ([STATUS] IN ('Pending','Accepted','Rejected','In Progress','Completed','Cancelled')),
+    -- v2.11: the proof is all or nothing, only on a Completed booking, with a message that is not blank
+    CONSTRAINT CK_BOOKINGS_COMPLETION CHECK (([COMPLETION_MESSAGE] IS NULL AND [COMPLETION_PHOTO_URL] IS NULL AND [COMPLETED_AT] IS NULL) OR ([STATUS] = 'Completed' AND [COMPLETION_MESSAGE] IS NOT NULL AND LEN([COMPLETION_MESSAGE]) > 0 AND [COMPLETION_PHOTO_URL] IS NOT NULL AND [COMPLETED_AT] IS NOT NULL)),
+    -- v2.12: a start only from the scheduled time to 2 hours after it (Cebu time), a reason exactly when more than 15 minutes late
+    CONSTRAINT CK_BOOKINGS_START CHECK (([STARTED_AT] IS NULL AND [LATE_REASON] IS NULL) OR ([STARTED_AT] IS NOT NULL AND [STATUS] IN ('In Progress','Completed') AND DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) BETWEEN 0 AND 120 AND ((DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) > 15 AND [LATE_REASON] IS NOT NULL AND LEN([LATE_REASON]) > 0) OR (DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) <= 15 AND [LATE_REASON] IS NULL))))
 );
 CREATE INDEX IX_BOOKINGS_CUSTOMER_ID ON BOOKINGS (CUSTOMER_ID);
 CREATE UNIQUE INDEX UX_BOOKINGS_ACTIVE_SLOT ON BOOKINGS (PROVIDER_ID, BOOKING_DATE, BOOKING_TIME) WHERE [STATUS] IN ('Pending','Accepted','In Progress');
@@ -1713,18 +1772,22 @@ GO
 CREATE OR ALTER PROCEDURE dbo.usp_UpdateBookingStatus
     @ProviderUserId INT,
     @BookingId      INT,
-    @NewStatus      NVARCHAR(50)
+    @NewStatus      NVARCHAR(50),
+    @LateReason     NVARCHAR(600) = NULL       -- v2.12: required when starting more than 15 minutes late
 AS
 BEGIN
     /* SERVISYO-DB-V2
        The ASSIGNED provider (found from their USER_ID) moves one of their bookings:
        Pending -> Accepted | Rejected, Accepted -> In Progress (only after the customer paid or chose cash on
        completion), In Progress -> Completed. Accepting must not overlap another Accepted / In Progress job.
+       v2.12: starting is allowed from the scheduled date and time (Cebu) up to 2 hours after it; more than 15 minutes
+       late needs @LateReason (saved in LATE_REASON). STARTED_AT = now. Later than 2 hours: the window has expired.
        The customer's bell shows the PDF's "Your booking #N is now <status>." (usp_GetNotifications). Customers cancel with usp_CancelBooking. */
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
     SET @NewStatus = LTRIM(RTRIM(@NewStatus));
+    SET @LateReason = NULLIF(LTRIM(RTRIM(REPLACE(@LateReason, NCHAR(13) + NCHAR(10), NCHAR(10)))), N'');
 
     DECLARE @ProviderId INT = (SELECT p.PROVIDER_ID
                                FROM dbo.SERVICE_PROVIDERS p
@@ -1766,12 +1829,27 @@ BEGIN
            AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL WHERE BOOKING_ID = @BookingId AND PAYMENT_STATUS = N'PendingCollection')
             THROW 50144, N'The booking is waiting for the customer to approve and pay the quotation, so it can''t start yet.', 1;
 
+        -- v2.12: the start window (Philippine time; minutes counted like the CHECK CK_BOOKINGS_START)
+        DECLARE @StartedAt DATETIME2 = SYSUTCDATETIME();
+        DECLARE @MinutesAfter INT = DATEDIFF(MINUTE, CAST(@Date AS DATETIME) + CAST(@Time AS DATETIME), DATEADD(HOUR, 8, @StartedAt));
+        IF @NewStatus = N'In Progress' AND @MinutesAfter < 0
+            THROW 50156, N'Cannot start a booking before its scheduled date and time.', 1;
+        IF @NewStatus = N'In Progress' AND @MinutesAfter > 120
+            THROW 50157, N'Booking start window has expired.', 1;
+        IF @NewStatus = N'In Progress' AND @MinutesAfter > 15 AND @LateReason IS NULL
+            THROW 50158, N'Please enter the reason for the late start before marking the booking In Progress.', 1;
+        IF @NewStatus = N'In Progress' AND @MinutesAfter > 15 AND LEN(@LateReason) > 500
+            THROW 50159, N'Please keep the late reason to 500 characters or fewer.', 1;
+
         IF @NewStatus = N'Accepted'
            AND dbo.fn_HasBookingConflict(@ProviderId, @Date, @Time, @Minutes, @BookingId, 0) = 1
             THROW 50145, N'This booking overlaps another job that is already on your schedule.', 1;
 
         UPDATE dbo.BOOKINGS
-        SET STATUS = @NewStatus, UPDATED_AT = SYSUTCDATETIME()
+        SET STATUS = @NewStatus,
+            STARTED_AT = CASE WHEN @NewStatus = N'In Progress' THEN @StartedAt ELSE STARTED_AT END,
+            LATE_REASON = CASE WHEN @NewStatus = N'In Progress' AND @MinutesAfter > 15 THEN @LateReason ELSE LATE_REASON END,
+            UPDATED_AT = SYSUTCDATETIME()
         WHERE BOOKING_ID = @BookingId;
 
         -- v2.3: the customer's bell shows the new status from BOOKINGS (usp_GetNotifications)
@@ -2124,6 +2202,7 @@ BEGIN
         SELECT b.BOOKING_ID
         FROM dbo.BOOKINGS b
         WHERE b.STATUS = N'Cancelled'
+          AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d WHERE d.BOOKING_ID = b.BOOKING_ID)   -- v2.12: not a provider no-show
           AND EXISTS (SELECT 1 FROM dbo.ADMIN_ACTIONS a
                       WHERE a.TARGET_PROVIDER_ID = b.PROVIDER_ID
                         AND a.ACTION_TYPE IN (N'Account Suspended', N'Account Deactivated')
@@ -2147,6 +2226,19 @@ BEGIN
         FROM dbo.BOOKINGS b
         JOIN SuspensionCancel sc ON sc.BOOKING_ID = b.BOOKING_ID
         WHERE @Role = N'Customer' AND b.CUSTOMER_ID = @CustomerId
+        UNION ALL
+        -- customer: the provider did not start the job within 2 hours of its time, so it was cancelled (v2.12)
+        SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-cancelled',
+               CONCAT(N'Your booking #', b.BOOKING_ID, N' on ', FORMAT(b.BOOKING_DATE, 'MMM d, yyyy', 'en-US'),
+                      N' was cancelled because the provider did not start it within 2 hours of the scheduled time.',
+                      CASE WHEN pay.PAYMENT_STATUS = N'Refunded'
+                           THEN CONCAT(N' Your ', @Peso, FORMAT(b.TOTAL_FEE, '#,##0.##', 'en-US'), N' test payment was refunded.')
+                           ELSE N' Nothing was charged.' END,
+                      N' Please book another provider.'),
+               b.UPDATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        JOIN Pay pay ON pay.BOOKING_ID = b.BOOKING_ID
+        WHERE @Role = N'Customer' AND b.CUSTOMER_ID = @CustomerId AND b.STATUS = N'Cancelled'
         UNION ALL
         -- customer: the provider confirmed receiving the cash
         SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-update',
@@ -2186,6 +2278,16 @@ BEGIN
         FROM dbo.BOOKINGS b
         WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId AND b.STATUS = N'Cancelled'
           AND NOT EXISTS (SELECT 1 FROM SuspensionCancel sc WHERE sc.BOOKING_ID = b.BOOKING_ID)
+          AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d WHERE d.BOOKING_ID = b.BOOKING_ID)   -- v2.12: a no-show is the next part
+        UNION ALL
+        -- provider: not started within 2 hours of its time, so it was cancelled automatically (v2.12)
+        SELECT CONCAT(N'B', b.BOOKING_ID), 1, N'booking-cancelled',
+               CONCAT(N'Booking #', b.BOOKING_ID, N' was cancelled automatically (Provider No-Show): it was not started within 2 hours of its scheduled time.',
+                      CASE WHEN b.PAYMENT_STATUS = N'Refunded' THEN N' The test payment was refunded to the customer.' ELSE N'' END),
+               b.UPDATED_AT, b.BOOKING_ID
+        FROM dbo.BOOKINGS b
+        WHERE @Role = N'Service Provider' AND b.PROVIDER_ID = @ProviderId AND b.STATUS = N'Cancelled'
+          AND EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL d WHERE d.BOOKING_ID = b.BOOKING_ID)
         UNION ALL
         -- provider: reviews (not the ones an administrator removed)
         SELECT CONCAT(N'R', r.REVIEW_ID), 1, N'general',
@@ -2285,16 +2387,21 @@ CREATE OR ALTER PROCEDURE dbo.usp_GetBookingsNeedingAttention
     @Top INT = 25
 AS
 BEGIN
-    /* SERVISYO-DB-V2  (v2.3: replaces the BOOKING_REPORTS table, which no screen ever filled)
+    /* SERVISYO-DB-V2  (v2.3: replaces the BOOKING_REPORTS table, which no screen ever filled; v2.12: late starts, no-shows)
        The administrator's list of bookings that need a look, worked out from the data, newest first, at most 25:
          - its review was flagged, or gave 1 or 2 stars (an unhappy customer);
-         - its date has passed (Cebu time) but it is still Pending or Accepted (nobody moved it on).
-       TotalCount = how many bookings need attention in all (it can be more than the 25 rows shown).
+         - its date has passed (Cebu time) but it is still Pending or Accepted (nobody moved it on);
+         - v2.12, booked for the last 7 days: it was started more than 15 minutes late (MINUTES_LATE), or it was
+           cancelled because the provider did not start it within 2 hours (a provider no-show: a cancelled booking
+           with a payment, see trg_Bookings_StatusFlow).
+       TotalCount = how many bookings need attention in all (it can be more than the 25 rows shown); LateStartCount and
+       NoShowCount = how many of them are late starts / no-shows (the admin dashboard shows those on their own row).
        The column names match the app's C# class. */
     SET NOCOUNT ON;
 
     IF @Top IS NULL OR @Top < 1 OR @Top > 25 SET @Top = 25;
     DECLARE @Today DATE = CAST(dbo.fn_ManilaNow() AS DATE);
+    DECLARE @WeekAgo DATE = DATEADD(DAY, -7, @Today);
 
     SELECT TOP (@Top)
            b.BOOKING_ID AS BookingId,
@@ -2302,17 +2409,29 @@ BEGIN
            b.BOOKING_DATE AS BookingDate,
            CAST(CASE WHEN r.STATUS = N'Flagged' THEN CONCAT(N'Review flagged (', r.RATING, N' of 5 stars)')
                      WHEN r.RATING <= 2 THEN CONCAT(N'Low rating (', r.RATING, N' of 5 stars)')
+                     WHEN k.KIND = 2 THEN N'Provider no-show (not started within 2 hours)'
+                     WHEN k.KIND = 1 THEN CONCAT(N'Late start (', b.MINUTES_LATE, N' min late)')
                      ELSE CONCAT(N'Date passed, still ', b.STATUS) END AS NVARCHAR(100)) AS Reason,
            CAST(cu.FIRST_NAME + N' ' + cu.LAST_NAME AS NVARCHAR(255)) AS CustomerName,
            CAST(sp.BUSINESS_NAME AS NVARCHAR(255)) AS ProviderName,
-           COUNT(*) OVER () AS TotalCount
+           COUNT(*) OVER () AS TotalCount,
+           SUM(CASE WHEN k.KIND = 1 THEN 1 ELSE 0 END) OVER () AS LateStartCount,
+           SUM(CASE WHEN k.KIND = 2 THEN 1 ELSE 0 END) OVER () AS NoShowCount
     FROM dbo.BOOKINGS b
     JOIN dbo.CUSTOMERS c ON c.CUSTOMER_ID = b.CUSTOMER_ID
     JOIN dbo.USERS cu ON cu.USER_ID = c.USER_ID
     JOIN dbo.SERVICE_PROVIDERS sp ON sp.PROVIDER_ID = b.PROVIDER_ID
     LEFT JOIN dbo.REVIEWS r ON r.BOOKING_ID = b.BOOKING_ID AND r.STATUS <> N'Removed'
+    -- what the row is about: 0 = a review or a passed date, 1 = a late start, 2 = a provider no-show
+    CROSS APPLY (SELECT CASE WHEN r.REVIEW_ID IS NOT NULL AND (r.STATUS = N'Flagged' OR r.RATING <= 2) THEN 0
+                             WHEN b.STATUS = N'Cancelled' THEN 2
+                             WHEN b.MINUTES_LATE IS NOT NULL THEN 1
+                             ELSE 0 END AS KIND) k
     WHERE (r.REVIEW_ID IS NOT NULL AND (r.STATUS = N'Flagged' OR r.RATING <= 2))
        OR (b.STATUS IN (N'Pending', N'Accepted') AND b.BOOKING_DATE < @Today)
+       OR (b.BOOKING_DATE >= @WeekAgo AND b.MINUTES_LATE IS NOT NULL)
+       OR (b.BOOKING_DATE >= @WeekAgo AND b.STATUS = N'Cancelled'
+           AND EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL p WHERE p.BOOKING_ID = b.BOOKING_ID))
     ORDER BY b.BOOKING_DATE DESC, b.BOOKING_ID DESC;
 END
 GO
@@ -2366,10 +2485,16 @@ CREATE OR ALTER TRIGGER dbo.trg_Bookings_StatusFlow ON dbo.BOOKINGS
 AFTER UPDATE
 AS
 BEGIN
-    /* SERVISYO-DB-V2
+    /* SERVISYO-DB-V2  (v2.12: the start window and the provider no-show)
        The booking life cycle from the project document, enforced by the database itself:
-         Pending -> Accepted | Rejected | Cancelled,  Accepted -> In Progress,  In Progress -> Completed.
+         Pending -> Accepted | Rejected | Cancelled,  Accepted -> In Progress,  In Progress -> Completed,
+         and (v2.12) Accepted -> Cancelled, only for a provider no-show.
        A booking can only start (In Progress) once the customer has paid or chosen cash on completion.
+       v2.12: starting writes STARTED_AT = now (UTC). CHECK CK_BOOKINGS_START allows a start only from the scheduled
+       time to 2 hours after it, with a LATE_REASON when it is more than 15 minutes late. STARTED_AT and LATE_REASON
+       are written once, when the job starts. A booking that was paid (or cash promised) but not started within
+       2 hours of its scheduled time (Cebu time) is cancelled as a provider no-show; a test e-wallet payment is
+       refunded in the same change (PAYMENT_STATUS Refunded).
        Any other status change is refused and the whole statement is rolled back.
        Development scripts that must jump a sample booking to any state can first run:
          EXEC sp_set_session_context @key = N'servisyo_dev_override', @value = 1;   (that connection only) */
@@ -2382,9 +2507,9 @@ BEGIN
                JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
                WHERE i.STATUS <> d.STATUS
                  AND NOT (   (d.STATUS = N'Pending'     AND i.STATUS IN (N'Accepted', N'Rejected', N'Cancelled'))
-                          OR (d.STATUS = N'Accepted'    AND i.STATUS = N'In Progress')
+                          OR (d.STATUS = N'Accepted'    AND i.STATUS IN (N'In Progress', N'Cancelled'))
                           OR (d.STATUS = N'In Progress' AND i.STATUS = N'Completed')))
-        THROW 50160, N'That booking status change is not allowed. Allowed: Pending -> Accepted / Rejected / Cancelled, Accepted -> In Progress, In Progress -> Completed.', 1;
+        THROW 50160, N'That booking status change is not allowed. Allowed: Pending -> Accepted / Rejected / Cancelled, Accepted -> In Progress (or Cancelled for a provider no-show), In Progress -> Completed.', 1;
 
     IF EXISTS (SELECT 1
                FROM inserted i
@@ -2394,6 +2519,35 @@ BEGIN
                  AND NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL p
                                  WHERE p.BOOKING_ID = i.BOOKING_ID AND p.PAYMENT_STATUS = N'PendingCollection'))
         THROW 50161, N'A booking can start only after the customer has paid or chosen cash on completion.', 1;
+
+    -- v2.12: an accepted booking is cancelled only as a provider no-show: never started, the customer had paid or
+    -- chosen cash, more than 2 hours after its scheduled time (Cebu time), a test e-wallet payment refunded
+    IF EXISTS (SELECT 1
+               FROM inserted i
+               JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
+               WHERE d.STATUS = N'Accepted' AND i.STATUS = N'Cancelled'
+                 AND (   i.STARTED_AT IS NOT NULL
+                      OR i.PAYMENT_STATUS = N'Paid'
+                      OR NOT EXISTS (SELECT 1 FROM dbo.PAYMENTS_DTL p WHERE p.BOOKING_ID = i.BOOKING_ID)
+                      OR DATEDIFF(MINUTE, CAST(i.BOOKING_DATE AS DATETIME) + CAST(i.BOOKING_TIME AS DATETIME), dbo.fn_ManilaNow()) <= 120))
+        THROW 50162, N'An accepted booking can only be cancelled as a provider no-show: not started within 2 hours of its scheduled time, with any test e-wallet payment refunded.', 1;
+
+    -- v2.12: a job starts NOW: STARTED_AT is the current time (5 minutes allowed between the app's and this clock)
+    IF EXISTS (SELECT 1
+               FROM inserted i
+               JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
+               WHERE d.STATUS = N'Accepted' AND i.STATUS = N'In Progress'
+                 AND (i.STARTED_AT IS NULL OR ABS(DATEDIFF(SECOND, i.STARTED_AT, SYSUTCDATETIME())) > 300))
+        THROW 50163, N'A booking starts now: STARTED_AT must be the current time (UTC).', 1;
+
+    -- v2.12: the start time and the late reason are written once, when the job starts
+    IF EXISTS (SELECT 1
+               FROM inserted i
+               JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
+               WHERE NOT (d.STATUS = N'Accepted' AND i.STATUS = N'In Progress')
+                 AND (   ISNULL(i.STARTED_AT, '19000101') <> ISNULL(d.STARTED_AT, '19000101')
+                      OR ISNULL(i.LATE_REASON, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(d.LATE_REASON, N'') COLLATE Latin1_General_100_BIN2))
+        THROW 50164, N'The start time and the late reason are saved once, when the job starts, and cannot be changed.', 1;
 END
 GO
 
@@ -2657,9 +2811,17 @@ CREATE OR ALTER TRIGGER dbo.trg_Bookings_Audit ON dbo.BOOKINGS
 AFTER INSERT, UPDATE, DELETE
 AS
 BEGIN
-    /* SERVISYO-DB-V2 (v2.10: the standard SYSTEM_LOGS format, one line per changed field)
+    /* SERVISYO-DB-V2 (v2.12: the start of the job; v2.11: the job's proof; v2.10: one line per changed field)
        New booking requests; every change of status, payment status, date, time, duration, fee, location or request
-       description (old -> new); deleted bookings. */
+       description (old -> new); deleted bookings.
+       v2.11: completing a job WITH its proof (COMPLETION_MESSAGE, COMPLETION_PHOTO_URL) writes ONE line:
+         "... updated Booking #31: status 'In Progress' -> 'Completed' (proof photo and completion message saved)."
+       v2.12: starting a job says on the status line whether it was on time, or how late and why:
+         "... updated Booking #33: status 'Accepted' -> 'In Progress' (late start: 25 minutes late, reason 'Flat tire')."
+       and a booking cancelled because it was not started in time says so (the actor is System, the no-show job):
+         "System updated Booking #33: status 'Accepted' -> 'Cancelled' (Provider No-Show - missed scheduled start window)."
+       The message and the reason are not copied elsewhere (one fact, one place: they are in BOOKINGS). COMPLETED_AT
+       and STARTED_AT are the time of that line, so they are not logged as fields when the status changes with them. */
     SET NOCOUNT ON;
     IF TRY_CAST(SESSION_CONTEXT(N'servisyo_audit_off') AS INT) = 1 RETURN;
     DECLARE @ins BIT = CASE WHEN EXISTS (SELECT 1 FROM inserted) THEN 1 ELSE 0 END;
@@ -2685,20 +2847,41 @@ BEGIN
         INSERT INTO dbo.SYSTEM_LOGS (USER_ID, USER_ROLE, ACTION_TYPE, ENTITY_NAME, ENTITY_ID, DESCRIPTION, CREATED_AT)
         SELECT @uid, @role, N'UPDATE', N'Booking', i.BOOKING_ID,
                LEFT(CONCAT(@actor, N' updated Booking #', i.BOOKING_ID, N': ', f.FIELD_NAME, N' ''', dbo.fn_AuditValue(f.OLD_VALUE),
-                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''.'), 500), @now
+                           N''' -> ''', dbo.fn_AuditValue(f.NEW_VALUE), N'''', f.NOTE, N'.'), 500), @now
         FROM inserted i
         JOIN deleted d ON d.BOOKING_ID = i.BOOKING_ID
+        -- v2.11: completed together with its proof (the photo was empty before); v2.12: started (STARTED_AT was
+        -- empty before), or cancelled from Accepted (only a provider no-show may do that)
+        CROSS APPLY (SELECT CASE WHEN d.STATUS <> N'Completed' AND i.STATUS = N'Completed'
+                                      AND d.COMPLETION_PHOTO_URL IS NULL AND i.COMPLETION_PHOTO_URL IS NOT NULL
+                                 THEN 1 ELSE 0 END AS WITH_PROOF,
+                            CASE WHEN d.STATUS = N'Accepted' AND i.STATUS = N'In Progress'
+                                      AND d.STARTED_AT IS NULL AND i.STARTED_AT IS NOT NULL
+                                 THEN 1 ELSE 0 END AS STARTED,
+                            CASE WHEN d.STATUS = N'Accepted' AND i.STATUS = N'Cancelled' THEN 1 ELSE 0 END AS NO_SHOW) x
         CROSS APPLY (VALUES
-            (1, N'status', d.STATUS, i.STATUS),
-            (2, N'payment status', d.PAYMENT_STATUS, i.PAYMENT_STATUS),
-            (3, N'date', CONVERT(NVARCHAR(10), d.BOOKING_DATE, 23), CONVERT(NVARCHAR(10), i.BOOKING_DATE, 23)),
-            (4, N'time', CONVERT(NVARCHAR(5), d.BOOKING_TIME, 108), CONVERT(NVARCHAR(5), i.BOOKING_TIME, 108)),
-            (5, N'duration', CONCAT(d.TOTAL_DURATION_MINUTES, N' min'), CONCAT(i.TOTAL_DURATION_MINUTES, N' min')),
-            (6, N'total fee', N'PHP ' + CONVERT(NVARCHAR(30), CAST(d.TOTAL_FEE AS MONEY), 1), N'PHP ' + CONVERT(NVARCHAR(30), CAST(i.TOTAL_FEE AS MONEY), 1)),
-            (7, N'location', d.SERVICE_LOCATION, i.SERVICE_LOCATION),
-            (8, N'request description', d.SERVICE_DESCRIPTION, i.SERVICE_DESCRIPTION)
-        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE)
+            (1, N'status', d.STATUS, i.STATUS,
+                CASE WHEN x.WITH_PROOF = 1 THEN N' (proof photo and completion message saved)'
+                     WHEN x.STARTED = 1 AND i.LATE_REASON IS NOT NULL
+                          THEN CONCAT(N' (late start: ', i.MINUTES_LATE, N' minutes late, reason ''', dbo.fn_AuditValue(i.LATE_REASON), N''')')
+                     WHEN x.STARTED = 1 THEN N' (started on time)'
+                     WHEN x.NO_SHOW = 1 THEN N' (Provider No-Show ' + NCHAR(8212) + N' missed scheduled start window)'
+                     ELSE N'' END),
+            (2, N'payment status', d.PAYMENT_STATUS, i.PAYMENT_STATUS, N''),
+            (3, N'date', CONVERT(NVARCHAR(10), d.BOOKING_DATE, 23), CONVERT(NVARCHAR(10), i.BOOKING_DATE, 23), N''),
+            (4, N'time', CONVERT(NVARCHAR(5), d.BOOKING_TIME, 108), CONVERT(NVARCHAR(5), i.BOOKING_TIME, 108), N''),
+            (5, N'duration', CONCAT(d.TOTAL_DURATION_MINUTES, N' min'), CONCAT(i.TOTAL_DURATION_MINUTES, N' min'), N''),
+            (6, N'total fee', N'PHP ' + CONVERT(NVARCHAR(30), CAST(d.TOTAL_FEE AS MONEY), 1), N'PHP ' + CONVERT(NVARCHAR(30), CAST(i.TOTAL_FEE AS MONEY), 1), N''),
+            (7, N'location', d.SERVICE_LOCATION, i.SERVICE_LOCATION, N''),
+            (8, N'request description', d.SERVICE_DESCRIPTION, i.SERVICE_DESCRIPTION, N''),
+            (9, N'completion message', d.COMPLETION_MESSAGE, i.COMPLETION_MESSAGE, N''),
+            (10, N'proof photo', d.COMPLETION_PHOTO_URL, i.COMPLETION_PHOTO_URL, N''),
+            (11, N'start time (Cebu)', CONVERT(NVARCHAR(16), DATEADD(HOUR, 8, d.STARTED_AT), 120), CONVERT(NVARCHAR(16), DATEADD(HOUR, 8, i.STARTED_AT), 120), N''),
+            (12, N'late reason', d.LATE_REASON, i.LATE_REASON, N'')
+        ) f (SEQ, FIELD_NAME, OLD_VALUE, NEW_VALUE, NOTE)
         WHERE ISNULL(f.OLD_VALUE, N'') COLLATE Latin1_General_100_BIN2 <> ISNULL(f.NEW_VALUE, N'') COLLATE Latin1_General_100_BIN2
+          AND NOT (x.WITH_PROOF = 1 AND f.SEQ IN (9, 10))          -- said once, on the status line
+          AND NOT (x.STARTED = 1 AND f.SEQ IN (11, 12))            -- v2.12: the same for the start
         ORDER BY i.BOOKING_ID, f.SEQ;
 
     IF @ins = 0 AND @del = 1
@@ -3046,6 +3229,24 @@ BEGIN
     INSERT INTO dbo.PROVIDER_BREAKS (AVAILABILITY_ID, BREAK_START, BREAK_END) VALUES (@availId, '12:00', '13:00');
 END
 GO
+IF OBJECT_ID(N'tempdb..#svMoveBooking') IS NOT NULL DROP PROCEDURE #svMoveBooking;
+GO
+CREATE PROCEDURE #svMoveBooking
+    @BookingId  INT,
+    @MinutesAgo INT
+AS
+BEGIN
+    -- v2.12: a job can only start from its scheduled time to 2 hours after it, but the sample bookings are for next week
+    -- (the provider's minimum notice). This moves one booking to "now minus @MinutesAgo minutes" (Cebu time, whole
+    -- minutes), without System Logs lines. Only inside a test's transaction, which is rolled back.
+    SET NOCOUNT ON;
+    DECLARE @base DATETIME2(0) = '20000101';
+    DECLARE @at DATETIME2(0) = DATEADD(MINUTE, DATEDIFF(MINUTE, @base, dbo.fn_ManilaNow()) - @MinutesAgo, @base);
+    EXEC sp_set_session_context @key = N'servisyo_audit_off', @value = 1;
+    UPDATE dbo.BOOKINGS SET BOOKING_DATE = CAST(@at AS DATE), BOOKING_TIME = CAST(@at AS TIME(0)) WHERE BOOKING_ID = @BookingId;
+    EXEC sp_set_session_context @key = N'servisyo_audit_off', @value = 0;
+END
+GO
 
 SET NOCOUNT ON;
 DECLARE @R TABLE (N INT IDENTITY(1,1), TEST NVARCHAR(200), RESULT NVARCHAR(4), DETAIL NVARCHAR(1000));
@@ -3053,8 +3254,8 @@ DECLARE @A INT, @C INT, @C2 INT, @PU INT, @P INT, @S INT, @D DATE, @B INT, @B2 I
         @ref NVARCHAR(50), @ids NVARCHAR(20), @t NVARCHAR(200), @email NVARCHAR(155), @kw NVARCHAR(100);
 DECLARE @Note TABLE (Kind NVARCHAR(30), Message NVARCHAR(400), CreatedAt DATETIME2, BookingId INT, IsUnread BIT);
 DECLARE @Attn TABLE (BookingId INT, Status NVARCHAR(50), BookingDate DATE, Reason NVARCHAR(100), CustomerName NVARCHAR(255),
-                     ProviderName NVARCHAR(255), TotalCount INT);
-DECLARE @seen DATETIME2, @biz NVARCHAR(155), @P2 INT, @PU2 INT, @k INT;
+                     ProviderName NVARCHAR(255), TotalCount INT, LateStartCount INT, NoShowCount INT);
+DECLARE @seen DATETIME2, @biz NVARCHAR(155), @P2 INT, @PU2 INT, @k INT, @q INT, @dd DATE;
 DECLARE @Found TABLE (SERVICE_ID INT, SERVICE_NAME NVARCHAR(100), DESCRIPTION NVARCHAR(255), PRICE DECIMAL(10,2), DURATION_MINUTES INT,
                       CATEGORY_ID INT, CATEGORY_NAME NVARCHAR(100), PROVIDER_ID INT, BUSINESS_NAME NVARCHAR(155),
                       AVG_RATING DECIMAL(2,1), REVIEW_COUNT INT);
@@ -3238,6 +3439,7 @@ BEGIN TRY
                       AND Message = CONCAT(N'Booking #', @B, N' was approved. The customer will pay ', NCHAR(8369), N'650 in cash when the job is done. It is now scheduled.'))
         THROW 59001, N'After choosing cash: the payment row or the provider''s bell is not as expected.', 1;
 
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 5;          -- v2.12: started 5 minutes after its time
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Completed';
     EXEC dbo.usp_ConfirmCashReceived @ProviderUserId = @PU, @BookingId = @B;
@@ -3356,6 +3558,7 @@ BEGIN TRY
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
     EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'MockEWallet', @Wallet = N'Maya',
          @MobileNumber = N'+639170000000', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 5;          -- v2.12: started 5 minutes after its time
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Completed';
     EXEC dbo.usp_AddReview @CustomerUserId = @C, @BookingId = @B, @Rating = 4, @Comment = N'Quick and clean.', @NewReviewId = @RevId OUTPUT;
@@ -3813,6 +4016,7 @@ BEGIN TRY
          @ServiceLocation = N'Lahug', @ServiceDescription = N'Unhappy customer', @NewBookingId = @B OUTPUT;
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
     EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 5;          -- v2.12: started 5 minutes after its time
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';
     EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Completed';
     EXEC dbo.usp_AddReview @CustomerUserId = @C, @BookingId = @B, @Rating = 2, @Comment = N'Late and messy', @NewReviewId = @RevId OUTPUT;
@@ -3984,6 +4188,293 @@ BEGIN CATCH
     INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
 END CATCH;
 
+------------------------------------------------------------------ 37
+SET @t = N'37 Completing a job with proof: the CHECK refuses half or early proof; ONE System Logs line (v2.11)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Proof job', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 5;          -- v2.12: started 5 minutes after its time
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';
+
+    SET @k = 0;     -- wrong proof refused (CHECK CK_BOOKINGS_COMPLETION)
+    BEGIN TRY   -- proof on a booking that is still In Progress
+        UPDATE dbo.BOOKINGS SET COMPLETION_MESSAGE = N'Done', COMPLETION_PHOTO_URL = N'/uploads/completions/x.jpg', COMPLETED_AT = SYSUTCDATETIME()
+        WHERE BOOKING_ID = @B;
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @k += 1; END CATCH;
+    BEGIN TRY   -- completed with a message but no photo
+        UPDATE dbo.BOOKINGS SET STATUS = N'Completed', COMPLETION_MESSAGE = N'Done', COMPLETED_AT = SYSUTCDATETIME() WHERE BOOKING_ID = @B;
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @k += 1; END CATCH;
+    BEGIN TRY   -- a blank message
+        UPDATE dbo.BOOKINGS SET STATUS = N'Completed', COMPLETION_MESSAGE = N'   ', COMPLETION_PHOTO_URL = N'/uploads/completions/x.jpg',
+               COMPLETED_AT = SYSUTCDATETIME() WHERE BOOKING_ID = @B;
+    END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @k += 1; END CATCH;
+    IF @k <> 3
+        THROW 59037, N'Not every wrong completion proof was refused.', 1;
+
+    -- the provider completes it the way the app does: status, message, photo and time together
+    SET @n = (SELECT MAX(SYSTEM_LOG_ID) FROM dbo.SYSTEM_LOGS);
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = @PU;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = N'Service Provider';
+    UPDATE dbo.BOOKINGS SET STATUS = N'Completed', COMPLETION_MESSAGE = N'Fixed the leak and tested it for 30 minutes.',
+           COMPLETION_PHOTO_URL = N'/uploads/completions/x.jpg', COMPLETED_AT = SYSUTCDATETIME(), UPDATED_AT = SYSUTCDATETIME()
+    WHERE BOOKING_ID = @B;
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = NULL;
+    IF (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n) <> 1
+       OR NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B
+                      AND ACTION_TYPE = N'UPDATE' AND USER_ID = @PU
+                      AND DESCRIPTION = CONCAT(N'Service Provider Mary Cruz Selftest updated Booking #', @B,
+                                               N': status ''In Progress'' -> ''Completed'' (proof photo and completion message saved).'))
+        THROW 59037, N'Completing with proof did not write exactly one standard System Logs line.', 1;
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = NULL;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 38
+SET @t = N'38 Start window: starting before the scheduled date and time is refused (50156) (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Too early', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress';     -- next week
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50156, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 39
+SET @t = N'39 Start window: more than 15 minutes late without a reason is refused (50158) (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Late, no reason', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 40;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress', @LateReason = N'   ';
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50158, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 40
+SET @t = N'40 Start window: more than 2 hours after the scheduled time is refused, the window has expired (50157) (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Missed', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 180;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress', @LateReason = N'Overslept';
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50157, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 41
+SET @t = N'41 An on-time start: STARTED_AT is now, no reason kept, IS_LATE 0, "(started on time)" in System Logs (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'On time', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 5;
+    SET @n = ISNULL((SELECT MAX(SYSTEM_LOG_ID) FROM dbo.SYSTEM_LOGS), 0);
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress', @LateReason = N'Not needed';
+    IF EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'In Progress' AND IS_LATE = 0 AND MINUTES_LATE IS NULL
+               AND LATE_REASON IS NULL AND ABS(DATEDIFF(SECOND, STARTED_AT, SYSUTCDATETIME())) < 60)
+       AND (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B) = 1
+       AND EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B
+                   AND DESCRIPTION = CONCAT(N'System updated Booking #', @B, N': status ''Accepted'' -> ''In Progress'' (started on time).'))
+        INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ELSE
+        INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'The on-time start was not saved or logged as expected.');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 42
+SET @t = N'42 A late start with a reason: MINUTES_LATE calculated, ONE System Logs line, admin list, the CHECK; the reason is set once (50164) (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Late with a reason', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 40;
+
+    -- the provider starts it, as the app does (who: SESSION_CONTEXT)
+    SET @n = ISNULL((SELECT MAX(SYSTEM_LOG_ID) FROM dbo.SYSTEM_LOGS), 0);
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = @PU;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = N'Service Provider';
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'In Progress', @LateReason = N'  Traffic on the bridge  ';
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = NULL;
+
+    SET @k = (SELECT MINUTES_LATE FROM dbo.BOOKINGS WHERE BOOKING_ID = @B);
+    IF @k IS NULL OR @k NOT BETWEEN 39 AND 41
+       OR NOT EXISTS (SELECT 1 FROM dbo.BOOKINGS WHERE BOOKING_ID = @B AND STATUS = N'In Progress' AND IS_LATE = 1
+                      AND LATE_REASON = N'Traffic on the bridge' AND ABS(DATEDIFF(SECOND, STARTED_AT, SYSUTCDATETIME())) < 60)
+        THROW 59042, N'The late start was not saved as expected (MINUTES_LATE about 40, IS_LATE 1, the reason trimmed).', 1;
+    IF (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B) <> 1
+       OR NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B AND USER_ID = @PU
+                      AND DESCRIPTION = CONCAT(N'Service Provider Mary Cruz Selftest updated Booking #', @B,
+                                               N': status ''Accepted'' -> ''In Progress'' (late start: ', @k, N' minutes late, reason ''Traffic on the bridge'').'))
+        THROW 59042, N'The late start did not write exactly one standard System Logs line.', 1;
+    DELETE @Attn; INSERT @Attn EXEC dbo.usp_GetBookingsNeedingAttention;
+    IF NOT EXISTS (SELECT 1 FROM @Attn WHERE BookingId = @B AND Reason = CONCAT(N'Late start (', @k, N' min late)') AND LateStartCount >= 1)
+        THROW 59042, N'The late start is not on the administrator''s list.', 1;
+
+    SET @q = 0;     -- the CHECK refuses a late start without its reason, and a start more than 2 hours after the time
+    BEGIN TRY UPDATE dbo.BOOKINGS SET LATE_REASON = NULL WHERE BOOKING_ID = @B; END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @q += 1; END CATCH;
+    BEGIN TRY UPDATE dbo.BOOKINGS SET STARTED_AT = DATEADD(HOUR, 3, STARTED_AT) WHERE BOOKING_ID = @B; END TRY BEGIN CATCH IF ERROR_NUMBER() = 547 SET @q += 1; END CATCH;
+    IF @q <> 2
+        THROW 59042, N'CK_BOOKINGS_START did not refuse a late start without a reason, or a start more than 2 hours late.', 1;
+
+    -- the reason is written once, when the job starts: another text is refused by trg_Bookings_StatusFlow
+    UPDATE dbo.BOOKINGS SET LATE_REASON = N'A better excuse' WHERE BOOKING_ID = @B;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'Changing the late reason was not refused.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    EXEC sp_set_session_context @key = N'servisyo_user_id', @value = NULL;
+    EXEC sp_set_session_context @key = N'servisyo_user_role', @value = NULL;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50164, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 43
+SET @t = N'43 A job starts NOW: a STARTED_AT in the past is refused by the trigger (50163) (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Backdated', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 30;
+    -- "I started at the scheduled time" written 30 minutes later: inside the window for the CHECK, but not now
+    UPDATE dbo.BOOKINGS SET STATUS = N'In Progress', STARTED_AT = DATEADD(MINUTE, -29, SYSUTCDATETIME()), UPDATED_AT = SYSUTCDATETIME()
+    WHERE BOOKING_ID = @B;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50163, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 44
+SET @t = N'44 An accepted booking cannot be cancelled within 2 hours of its scheduled time (50162) (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Too soon to call it', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'CashOnCompletion', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 60;
+    UPDATE dbo.BOOKINGS SET STATUS = N'Cancelled', UPDATED_AT = SYSUTCDATETIME() WHERE BOOKING_ID = @B;
+    ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', N'No error was raised.');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, IIF(ERROR_NUMBER() = 50162, N'PASS', N'FAIL'), CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
+------------------------------------------------------------------ 45
+SET @t = N'45 A provider no-show: cancelled 2+ hours after its time, payment refunded, ONE status line, both bells, the admin list (v2.12)';
+BEGIN TRY
+    BEGIN TRANSACTION;
+    EXEC #svSetup @A OUTPUT, @C OUTPUT, @C2 OUTPUT, @PU OUTPUT, @P OUTPUT, @S OUTPUT, @D OUTPUT;
+    SET @ids = CAST(@S AS NVARCHAR(20));
+    EXEC dbo.usp_CreateBooking @CustomerUserId = @C, @ProviderId = @P, @ServiceIds = @ids, @BookingDate = @D, @BookingTime = '09:00',
+         @ServiceLocation = N'Lahug', @ServiceDescription = N'Nobody came', @NewBookingId = @B OUTPUT;
+    EXEC dbo.usp_UpdateBookingStatus @ProviderUserId = @PU, @BookingId = @B, @NewStatus = N'Accepted';
+    EXEC dbo.usp_ApproveAndPay @CustomerUserId = @C, @BookingId = @B, @PaymentMethod = N'MockEWallet', @Wallet = N'GCash',
+         @MobileNumber = N'+639170000000', @TransactionReference = @ref OUTPUT;
+    EXEC #svMoveBooking @BookingId = @B, @MinutesAgo = 180;
+    SET @dd = (SELECT BOOKING_DATE FROM dbo.BOOKINGS WHERE BOOKING_ID = @B);
+
+    -- what the website's no-show check does (no web request, so the audit actor is "System")
+    SET @n = ISNULL((SELECT MAX(SYSTEM_LOG_ID) FROM dbo.SYSTEM_LOGS), 0);
+    UPDATE dbo.BOOKINGS SET STATUS = N'Cancelled', PAYMENT_STATUS = N'Refunded', UPDATED_AT = SYSUTCDATETIME() WHERE BOOKING_ID = @B;
+    UPDATE dbo.PAYMENTS_DTL SET PAYMENT_STATUS = N'Refunded' WHERE BOOKING_ID = @B;
+
+    IF (SELECT COUNT(*) FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B
+                                              AND DESCRIPTION LIKE N'%: status %') <> 1
+       OR NOT EXISTS (SELECT 1 FROM dbo.SYSTEM_LOGS WHERE SYSTEM_LOG_ID > @n AND ENTITY_NAME = N'Booking' AND ENTITY_ID = @B
+                      AND USER_ID IS NULL AND USER_ROLE = N'System'
+                      AND DESCRIPTION = CONCAT(N'System updated Booking #', @B, N': status ''Accepted'' -> ''Cancelled'' (Provider No-Show ',
+                                               NCHAR(8212), N' missed scheduled start window).'))
+        THROW 59045, N'The no-show did not write its System Logs status line.', 1;
+
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @C;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Kind = N'booking-cancelled'
+                   AND Message = CONCAT(N'Your booking #', @B, N' on ', FORMAT(@dd, 'MMM d, yyyy', 'en-US'),
+                                        N' was cancelled because the provider did not start it within 2 hours of the scheduled time. Your ',
+                                        NCHAR(8369), N'650 test payment was refunded. Please book another provider.'))
+        THROW 59045, N'The customer''s bell does not say that the provider did not start the job.', 1;
+
+    DELETE @Note; INSERT @Note EXEC dbo.usp_GetNotifications @UserId = @PU;
+    IF NOT EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Kind = N'booking-cancelled'
+                   AND Message = CONCAT(N'Booking #', @B, N' was cancelled automatically (Provider No-Show): it was not started within ',
+                                        N'2 hours of its scheduled time. The test payment was refunded to the customer.'))
+       OR EXISTS (SELECT 1 FROM @Note WHERE BookingId = @B AND Message LIKE N'%cancelled by the customer%')
+        THROW 59045, N'The provider''s bell does not show the no-show (or says the customer cancelled).', 1;
+
+    DELETE @Attn; INSERT @Attn EXEC dbo.usp_GetBookingsNeedingAttention;
+    IF NOT EXISTS (SELECT 1 FROM @Attn WHERE BookingId = @B AND Reason = N'Provider no-show (not started within 2 hours)' AND NoShowCount >= 1)
+        THROW 59045, N'The no-show is not on the administrator''s list.', 1;
+
+    INSERT @R (TEST, RESULT) VALUES (@t, N'PASS');
+    ROLLBACK TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT @R (TEST, RESULT, DETAIL) VALUES (@t, N'FAIL', CONCAT(ERROR_NUMBER(), N': ', ERROR_MESSAGE()));
+END CATCH;
+
 ------------------------------------------------------------------ results
 SELECT N AS [#], TEST, RESULT, DETAIL FROM @R ORDER BY N;
 
@@ -3995,6 +4486,7 @@ ELSE
     PRINT CONCAT(N'SELF-TEST: ', @Failed, N' of ', @Total, N' tests FAILED. Nothing was saved. Send the result grid to Claude.');
 GO
 DROP PROCEDURE #svSetup;
+DROP PROCEDURE #svMoveBooking;
 GO
 
 /* =====================================================================================================

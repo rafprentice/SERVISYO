@@ -53,6 +53,12 @@ builder.Services.Configure<InactiveAccountOptions>(builder.Configuration.GetSect
 builder.Services.AddScoped<IInactiveAccountService, InactiveAccountService>();
 builder.Services.AddHostedService<InactiveAccountCleanupService>();
 builder.Services.AddScoped<IProviderBookingsService, ProviderBookingsService>();
+// database v2.12: a paid booking not started within 2 hours of its time is cancelled as a provider no-show (every 5 minutes)
+builder.Services.AddScoped<INoShowService, NoShowService>();
+builder.Services.AddHostedService<NoShowCancellationService>();
+// database v2.11: the proof photos of completed jobs (wwwroot/uploads/completions)
+builder.Services.AddSingleton<ICompletionPhotoStore>(sp =>
+    CompletionPhotoStore.ForWebRoot(sp.GetRequiredService<IWebHostEnvironment>(), sp.GetService<ILogger<CompletionPhotoStore>>()));
 builder.Services.AddScoped<IProviderOfferingsService, ProviderOfferingsService>();
 builder.Services.AddScoped<IProviderProfileService, ProviderProfileService>();
 builder.Services.AddScoped<IReviewModerationService, ReviewModerationService>();

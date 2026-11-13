@@ -11,9 +11,20 @@ public interface IProviderBookingsService
     /// The Booking Requests page for the signed-in provider: tab counts plus one page of bookings for the chosen tab.
     Task<ProviderBookingsResult> GetAsync(int userId, string? tab, int page, CancellationToken ct = default);
 
-    /// Accept / reject / start / complete one booking of the signed-in provider (same status rules as
-    /// usp_UpdateBookingStatus in the PDF). The customer is told about the new status.
+    /// Accept / reject / start one booking of the signed-in provider (same status rules as usp_UpdateBookingStatus in
+    /// the PDF). The customer is told about the new status. Complete is refused here (ProofMissing): use CompleteAsync.
+    /// Start is StartAsync without a late reason (so a late start is refused: LateReasonRequired).
     Task<BookingActionResult> ChangeStatusAsync(int userId, int bookingId, BookingAction action, CancellationToken ct = default);
+
+    /// Database v2.12: Accepted -> In Progress inside the start window (Philippine time): not before the scheduled date
+    /// and time (TooEarly), not more than 2 hours after it (StartWindowExpired), and more than 15 minutes late only
+    /// with a reason (LateReasonRequired, at most 500 characters). Saves STARTED_AT (now, UTC) and the reason.
+    Task<BookingActionResult> StartAsync(int userId, int bookingId, string? lateReason, CancellationToken ct = default);
+
+    /// Database v2.11: In Progress -> Completed WITH proof: a completion message (required, at most 1000 characters)
+    /// and a photo (JPG / PNG / WebP, at most 5 MB). Saves the photo, then BOOKINGS (message, photo, COMPLETED_AT,
+    /// status) in one transaction; if the booking cannot be saved, the photo is deleted again.
+    Task<BookingActionResult> CompleteAsync(int userId, int bookingId, string? completionMessage, IFormFile? proofPhoto, CancellationToken ct = default);
 }
 
 public class ProviderBookingsService : IProviderBookingsService
@@ -23,11 +34,14 @@ public class ProviderBookingsService : IProviderBookingsService
     private readonly ILogger<ProviderBookingsService> _logger;
 
     private readonly IBookingLiveUpdates? _live;
+    private readonly ICompletionPhotoStore? _photos;
 
-    public ProviderBookingsService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<ProviderBookingsService>? logger = null, IBookingLiveUpdates? live = null)
+    public ProviderBookingsService(ServisyoDbContext db, TimeProvider? clock = null, ILogger<ProviderBookingsService>? logger = null,
+        IBookingLiveUpdates? live = null, ICompletionPhotoStore? photos = null)
     {
         _db = db;
         _live = live;
+        _photos = photos;
         _clock = clock ?? TimeProvider.System;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<ProviderBookingsService>.Instance;
     }
@@ -69,6 +83,11 @@ public class ProviderBookingsService : IProviderBookingsService
         public string? PayMethod { get; set; }
         public string? PayStatus { get; set; }
         public string? PayReference { get; set; }
+        public string? CompletionMessage { get; set; }
+        public string? CompletionPhotoUrl { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public DateTime? StartedAt { get; set; }
+        public string? LateReason { get; set; }
     }
 
     public async Task<ProviderBookingsResult> GetAsync(int userId, string? tab, int page, CancellationToken ct = default)
@@ -116,7 +135,12 @@ public class ProviderBookingsService : IProviderBookingsService
                 TotalFee = b.TotalFee,
                 PayMethod = b.PaymentDetail != null ? (b.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
                 PayStatus = b.PaymentDetail != null ? b.PaymentDetail.PaymentStatus : null,
-                PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null
+                PayReference = b.PaymentDetail != null ? b.PaymentDetail.TransactionReference : null,
+                CompletionMessage = b.CompletionMessage,
+                CompletionPhotoUrl = b.CompletionPhotoUrl,
+                CompletedAt = b.CompletedAt,
+                StartedAt = b.StartedAt,
+                LateReason = b.LateReason
             })
             .ToListAsync(ct);
 
@@ -136,6 +160,7 @@ public class ProviderBookingsService : IProviderBookingsService
             .ToDictionary(g => g.Key, g => string.Join(", ", g.Select(x => x.Name).Distinct()));
 
         var fullName = who.FullName;
+        var manilaNow = PhilippineTime.Now(_clock);       // database v2.12: the start windows are in Philippine time
         var vm = new ProviderBookingsPageViewModel
         {
             Shell = new PortalShellViewModel
@@ -156,6 +181,16 @@ public class ProviderBookingsService : IProviderBookingsService
             {
                 var pay = new PaymentFacts(r.Status, r.PaymentStatus, r.PayMethod, r.PayStatus, r.PayReference, r.TotalFee);
                 var customerName = r.CustomerName.Trim();
+
+                // database v2.12: a scheduled booking only offers its start button inside the start window
+                var actions = BookingActionInfo.ForBooking(r.Status, pay.Effective);
+                StartWindowViewModel? window = null;
+                if (r.Status == BookingStatuses.Accepted && PaymentProgress.IsArranged(pay.Effective))
+                {
+                    window = StartWindowViewModel.For(r.BookingDate, r.BookingTime, manilaNow);
+                    actions = BookingActionInfo.ForStart(window.State);
+                }
+
                 return new ProviderBookingCardViewModel
                 {
                     BookingId = r.BookingId,
@@ -170,9 +205,13 @@ public class ProviderBookingsService : IProviderBookingsService
                     Notes = string.IsNullOrWhiteSpace(r.ServiceDescription) ? null : r.ServiceDescription.Trim(),
                     PaymentStatus = pay.Effective,
                     Fee = r.TotalFee,
-                    Actions = BookingActionInfo.ForBooking(r.Status, pay.Effective),
+                    Actions = actions,
                     Payment = PaymentNotes.ForProvider(pay, customerName),
-                    CanConfirmCash = r.Status == BookingStatuses.Completed && pay.CashToCollect
+                    CanConfirmCash = r.Status == BookingStatuses.Completed && pay.CashToCollect,
+                    Proof = CompletionProofViewModel.From(r.Status, r.CompletionMessage, r.CompletionPhotoUrl, r.CompletedAt),
+                    StartWindow = window,
+                    StartInfo = StartInfoViewModel.From(r.Status, r.BookingDate, r.BookingTime, r.StartedAt, r.LateReason),
+                    IsNoShow = StartRules.IsNoShow(r.Status, r.PayStatus is not null)
                 };
             }).ToList()
         };
@@ -204,6 +243,9 @@ public class ProviderBookingsService : IProviderBookingsService
 
     public async Task<BookingActionResult> ChangeStatusAsync(int userId, int bookingId, BookingAction action, CancellationToken ct = default)
     {
+        // database v2.12: starting has its own rules (the start window, a reason when late)
+        if (action == BookingAction.Start) return await StartAsync(userId, bookingId, lateReason: null, ct);
+
         // 1. who is asking: found from the sign-in cookie, and only an Active + Approved provider may change anything
         var (access, who) = await FindAsync(userId, ct);
         if (who is null) return new(access, BookingActionOutcome.NotFound, string.Empty);
@@ -243,15 +285,11 @@ public class ProviderBookingsService : IProviderBookingsService
                 $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}, so it can't be {Done(action)}.");
         }
 
-        // 4b. the job can only start once the customer has approved the quotation and paid it, or chosen
-        //     cash on completion (Paid -> Scheduled -> In Progress)
+        // 4a. database v2.11: a job is only completed WITH its proof (the "Confirm Service Completion" window, CompleteAsync)
+        if (action == BookingAction.Complete)
+            return new(access, BookingActionOutcome.ProofMissing, CompletionRules.ProofRequired);
+
         var payment = PaymentProgress.Effective(booking.PaymentStatus, booking.PaymentDetail?.PaymentStatus);
-        if (action == BookingAction.Start && !PaymentProgress.IsArranged(payment))
-        {
-            _logger.LogInformation("Booking {BookingId} is not paid yet; start refused.", bookingId);
-            return new(access, BookingActionOutcome.InvalidTransition,
-                $"Booking #{bookingId} is waiting for the customer to approve and pay the quotation, so it can't start yet.");
-        }
 
         // 5. accepting must not clash with a job the provider already accepted or started that day
         if (action == BookingAction.Accept)
@@ -309,5 +347,204 @@ public class ProviderBookingsService : IProviderBookingsService
             await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, payment, action.ToString().ToLowerInvariant()),
                 booking.Customer.UserId, userId);
         return new(access, BookingActionOutcome.Success, SuccessText(bookingId, action, booking.PaymentDetail, booking.TotalFee));
+    }
+
+    // ------------------------------------------------- database v2.12: start inside the start window
+
+    public async Task<BookingActionResult> StartAsync(int userId, int bookingId, string? lateReason, CancellationToken ct = default)
+    {
+        // 1. who is asking: found from the sign-in cookie, and only an Active + Approved provider may change anything
+        var (access, who) = await FindAsync(userId, ct);
+        if (who is null) return new(access, BookingActionOutcome.NotFound, string.Empty);
+
+        // 2. the booking must belong to THIS provider; someone else's booking looks exactly like a missing one
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(ct) : null;
+        var booking = await _db.Bookings
+            .Include(b => b.Customer)
+            .Include(b => b.PaymentDetail)
+            .FirstOrDefaultAsync(b => b.BookingId == bookingId && b.ProviderId == who.ProviderId, ct);
+        if (booking is null)
+        {
+            _logger.LogWarning("Provider {ProviderId} tried to start booking {BookingId}, which is not theirs or does not exist.", who.ProviderId, bookingId);
+            return new(access, BookingActionOutcome.NotFound, "That booking could not be found.");
+        }
+
+        // 3. only Accepted -> In Progress, and only once the customer has approved the quotation and paid it, or chosen
+        //    cash on completion (Paid -> Scheduled -> In Progress)
+        if (booking.Status != BookingStatuses.Accepted)
+        {
+            _logger.LogInformation("Booking {BookingId} is {Status}; start refused.", bookingId, booking.Status);
+            return new(access, BookingActionOutcome.InvalidTransition,
+                $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}, so it can't be {Done(BookingAction.Start)}.");
+        }
+        var payment = PaymentProgress.Effective(booking.PaymentStatus, booking.PaymentDetail?.PaymentStatus);
+        if (!PaymentProgress.IsArranged(payment))
+        {
+            _logger.LogInformation("Booking {BookingId} is not paid yet; start refused.", bookingId);
+            return new(access, BookingActionOutcome.InvalidTransition,
+                $"Booking #{bookingId} is waiting for the customer to approve and pay the quotation, so it can't start yet.");
+        }
+
+        // 4. the start window, in Philippine time. ONE reading of the clock: the same moment is checked and saved.
+        var nowUtc = _clock.GetUtcNow().UtcDateTime;
+        var minutes = StartRules.MinutesAfter(booking.BookingDate, booking.BookingTime, PhilippineTime.FromUtc(nowUtc));
+        var state = StartRules.StateAt(minutes);
+        if (state == StartWindowState.TooEarly)
+        {
+            _logger.LogWarning("Provider {ProviderId} tried to start booking {BookingId} {Minutes} minutes before its scheduled time.",
+                who.ProviderId, bookingId, -minutes);
+            return new(access, BookingActionOutcome.TooEarly, StartRules.TooEarlyMessage);
+        }
+        if (state == StartWindowState.Expired)
+        {
+            _logger.LogWarning("Provider {ProviderId} tried to start booking {BookingId} {Minutes} minutes after its scheduled time (window expired).",
+                who.ProviderId, bookingId, minutes);
+            return new(access, BookingActionOutcome.StartWindowExpired, StartRules.ExpiredMessage);
+        }
+
+        // 5. more than 15 minutes late: the reason is required (the customer and the administrators see it)
+        var reason = StartRules.CleanReason(lateReason);
+        if (state == StartWindowState.Late)
+        {
+            if (reason is null)
+                return new(access, BookingActionOutcome.LateReasonRequired, StartRules.LateReasonRequired);
+            if (reason.Length > StartRules.MaxLateReasonLength)
+                return new(access, BookingActionOutcome.LateReasonRequired, StartRules.LateReasonTooLong);
+        }
+        else
+        {
+            reason = null;          // on time: nothing to explain (CK_BOOKINGS_START allows no reason then)
+        }
+
+        // 6. the start. The audit trigger writes the System Logs line, with "(late start: N minutes late, reason
+        //    '...')" or "(started on time)"; the customer's bell says "Your booking #N is now In Progress."
+        booking.Status = BookingStatuses.InProgress;
+        booking.StartedAt = nowUtc;
+        booking.LateReason = reason;
+        booking.UpdatedAt = nowUtc;
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _db.ChangeTracker.Clear();
+            _logger.LogWarning("Booking {BookingId} changed while provider {ProviderId} was starting it.", bookingId, who.ProviderId);
+            return new(access, BookingActionOutcome.Changed, $"Booking #{bookingId} was just changed by someone else. Review it and try again.");
+        }
+
+        if (reason is null)
+            _logger.LogInformation("Provider {ProviderId} started booking {BookingId} on time ({Minutes} minutes after the scheduled time).",
+                who.ProviderId, bookingId, minutes);
+        else
+            _logger.LogWarning("Provider {ProviderId} started booking {BookingId} {Minutes} minutes late. Reason given.", who.ProviderId, bookingId, minutes);
+
+        // live: the customer's open dashboard / My Bookings page updates itself (and the provider's other tabs)
+        if (_live is not null)
+            await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, payment, "start"),
+                booking.Customer.UserId, userId);
+
+        return new(access, BookingActionOutcome.Success, reason is null
+            ? $"Booking #{bookingId} is now in progress."
+            : $"Booking #{bookingId} is now in progress. It started {Plural.Of(minutes, "minute")} late; your reason was saved and the customer can see it.");
+    }
+
+    // ------------------------------------------------- database v2.11: complete with proof
+
+    public async Task<BookingActionResult> CompleteAsync(int userId, int bookingId, string? completionMessage, IFormFile? proofPhoto,
+        CancellationToken ct = default)
+    {
+        // 1. who is asking: found from the sign-in cookie, and only an Active + Approved provider may change anything
+        var (access, who) = await FindAsync(userId, ct);
+        if (who is null) return new(access, BookingActionOutcome.NotFound, string.Empty);
+
+        // 2. the proof itself: checked here whatever the browser did (both problems are reported at once)
+        var message = completionMessage?.Replace("\r\n", "\n").Trim();      // one kind of line break: 1,000 in the box = 1,000 saved
+        var messageError = string.IsNullOrEmpty(message) ? CompletionRules.MessageRequired
+            : message.Length > CompletionRules.MaxMessageLength ? CompletionRules.MessageTooLong
+            : null;
+        var photo = await ReadPhotoAsync(proofPhoto, ct);
+        var errors = new CompletionErrors(messageError, photo.Error);
+        if (errors.Any)
+            return new(access, BookingActionOutcome.ProofMissing, messageError ?? photo.Error!, errors);
+        if (_photos is null) throw new InvalidOperationException("No ICompletionPhotoStore is registered.");
+
+        // 3. the booking must belong to THIS provider and be In Progress (the same rules as every status change)
+        var relational = _db.Database.IsRelational();
+        await using var tx = relational ? await _db.Database.BeginTransactionAsync(ct) : null;
+        var booking = await _db.Bookings
+            .Include(b => b.Customer)
+            .Include(b => b.PaymentDetail)
+            .FirstOrDefaultAsync(b => b.BookingId == bookingId && b.ProviderId == who.ProviderId, ct);
+        if (booking is null)
+        {
+            _logger.LogWarning("Provider {ProviderId} tried to complete booking {BookingId}, which is not theirs or does not exist.", who.ProviderId, bookingId);
+            return new(access, BookingActionOutcome.NotFound, "That booking could not be found.");
+        }
+        if (booking.Status != BookingStatuses.InProgress)
+        {
+            _logger.LogInformation("Booking {BookingId} is {Status}; complete refused.", bookingId, booking.Status);
+            return new(access, BookingActionOutcome.InvalidTransition,
+                $"Booking #{bookingId} is {booking.Status.ToLowerInvariant()}, so it can't be marked completed.");
+        }
+
+        // 4. the photo first; if the booking cannot be saved, the photo is deleted again (nothing half-done is kept)
+        var url = await _photos.SaveAsync(bookingId, photo.Bytes!, photo.Extension!, ct);
+        var now = _clock.GetUtcNow().UtcDateTime;
+        booking.Status = BookingStatuses.Completed;
+        booking.CompletionMessage = message;
+        booking.CompletionPhotoUrl = url;
+        booking.CompletedAt = now;
+        booking.UpdatedAt = now;
+
+        try
+        {
+            // the audit trigger writes the System Logs line: "... status 'In Progress' -> 'Completed' (proof photo and
+            // completion message saved)." (database v2.11)
+            await _db.SaveChangesAsync(ct);
+            if (tx is not null) await tx.CommitAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _photos.Delete(url);
+            _db.ChangeTracker.Clear();
+            _logger.LogWarning("Booking {BookingId} changed while provider {ProviderId} was completing it.", bookingId, who.ProviderId);
+            return new(access, BookingActionOutcome.Changed, $"Booking #{bookingId} was just changed by someone else. Review it and try again.");
+        }
+        catch
+        {
+            _photos.Delete(url);
+            throw;
+        }
+
+        _logger.LogInformation("Provider {ProviderId} completed booking {BookingId} with proof ({Bytes} bytes).", who.ProviderId, bookingId, photo.Bytes!.Length);
+
+        // live: the customer's open dashboard / My Bookings page updates itself (and the provider's other tabs)
+        var payment = PaymentProgress.Effective(booking.PaymentStatus, booking.PaymentDetail?.PaymentStatus);
+        if (_live is not null)
+            await _live.BookingChangedAsync(new BookingChange(booking.BookingId, booking.Status, payment, "complete"),
+                booking.Customer.UserId, userId);
+        return new(access, BookingActionOutcome.Success, SuccessText(bookingId, BookingAction.Complete, booking.PaymentDetail, booking.TotalFee));
+    }
+
+    private sealed record PhotoUpload(byte[]? Bytes, string? Extension, string? Error);
+
+    /// Required; at most 5 MB; the name must end in .jpg / .jpeg / .png / .webp AND the file's first bytes must really
+    /// be a JPG, PNG or WebP (the saved extension comes from the bytes, not from the name).
+    private static async Task<PhotoUpload> ReadPhotoAsync(IFormFile? file, CancellationToken ct)
+    {
+        if (file is null || file.Length == 0) return new(null, null, CompletionRules.PhotoRequired);
+        if (file.Length > CompletionRules.MaxPhotoBytes) return new(null, null, CompletionRules.PhotoTooLarge);
+        var nameExtension = Path.GetExtension(file.FileName ?? string.Empty).ToLowerInvariant();
+        if (!CompletionRules.AllowedExtensions.Contains(nameExtension)) return new(null, null, CompletionRules.PhotoNotAnImage);
+
+        using var buffer = new MemoryStream();
+        await file.CopyToAsync(buffer, ct);
+        var bytes = buffer.ToArray();
+        var extension = ProfilePhotoService.DetectImage(bytes);
+        return extension is null ? new(null, null, CompletionRules.PhotoNotAnImage) : new(bytes, extension, null);
     }
 }

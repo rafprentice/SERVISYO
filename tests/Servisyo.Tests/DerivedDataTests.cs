@@ -147,15 +147,15 @@ public class DerivedDataTests
     public void TheDesignFile_HasTheV23Objects()
     {
         var design = DesignFile();
-        Assert.Contains("DATABASE DESIGN v2.10", design);                        // v2.4-v2.10: columns, an index, the 20-job limit, day-off and name change requests, the audit standard
+        Assert.Contains("DATABASE DESIGN v2.12", design);                        // later versions came after (v2.12 is the newest)
         Assert.Contains("WHAT CHANGED IN v2.3 (EF migration \"DerivedData\")", design);
         Assert.Contains("CREATE OR ALTER PROCEDURE dbo.usp_GetNotifications", design);
         Assert.Contains("CREATE OR ALTER PROCEDURE dbo.usp_GetBookingsNeedingAttention", design);
         Assert.Contains("CREATE TABLE PAYMENTS_DTL", design);
         Assert.DoesNotContain("CREATE TABLE NOTIFICATIONS", design);
-        Assert.Contains("MigrationId LIKE N'%[_]AuditStandard'", design);        // PART 0: the newest migration must be there first
-        // the same SQL as the migration (the migration only wraps it in EXEC); v2.7 and v2.8 added parts to usp_GetNotifications
-        var proc = NameChangeRequestsSql.GetNotifications28;
+        Assert.Contains("MigrationId LIKE N'%[_]StartWindow'", design);   // PART 0: the newest migration (v2.12)
+        // the same SQL as the migration (the migration only wraps it in EXEC); v2.7, v2.8 and v2.12 added parts to usp_GetNotifications
+        var proc = StartWindowSql.GetNotifications212;
         var body = proc["EXEC(N'".Length..proc.LastIndexOf("')", StringComparison.Ordinal)].Replace("''", "'");
         Assert.Contains(body.Replace("\r\n", "\n").Trim(), design.Replace("\r\n", "\n"));
     }

@@ -31,9 +31,12 @@ public sealed record PaymentNote(string Text, string Tone, string Icon, string? 
 /// The payment details of one booking, read together with the booking (null fields = no PAYMENTS row yet).
 public sealed record PaymentFacts(string BookingStatus, string BookingPaymentStatus, string? Method, string? RecordStatus, string? Reference, decimal Amount)
 {
-    public string Effective => PaymentProgress.Effective(BookingPaymentStatus, RecordStatus);
+    public string Effective => PaymentProgress.Effective(BookingStatus, BookingPaymentStatus, RecordStatus);
     public bool IsCash => Method == PaymentMethods.CashOnCompletion;
-    public bool CashToCollect => IsCash && RecordStatus == PaymentRecordStatuses.PendingCollection;
+    /// Cash promised and not collected yet (database v2.12: never on a cancelled booking, a provider no-show).
+    public bool CashToCollect => IsCash && RecordStatus == PaymentRecordStatuses.PendingCollection && BookingStatus != BookingStatuses.Cancelled;
+    /// Database v2.12: cash had been promised, but the booking was cancelled (a provider no-show): nothing to pay.
+    public bool CashCancelled => IsCash && RecordStatus == PaymentRecordStatuses.PendingCollection && BookingStatus == BookingStatuses.Cancelled;
     public string? WalletName => MockWallets.FromReference(Reference);
 }
 
@@ -49,6 +52,8 @@ public static class PaymentNotes
         var amount = Money(f.Amount);
         if (f.RecordStatus == PaymentRecordStatuses.Refunded)
             return new($"Refunded · {amount}", "ok", "check", f.Reference);
+        if (f.CashCancelled)
+            return new("Cash on completion · nothing to pay (the booking was cancelled)", "ok", "check", f.Reference);
         if (f.CashToCollect)
             return f.BookingStatus == BookingStatuses.Completed
                 ? new($"Cash on completion · Please pay {amount} in cash to {providerName}.", "wait", "banknote", f.Reference)
@@ -72,6 +77,8 @@ public static class PaymentNotes
             return new("Quotation sent — waiting for the customer to approve and pay.", "wait", "clock", null);
         if (f.RecordStatus == PaymentRecordStatuses.Refunded)
             return new($"Refunded · {amount}", "ok", "check", f.Reference);
+        if (f.CashCancelled)
+            return new("Cash on completion · nothing to collect (the booking was cancelled)", "wait", "banknote", f.Reference);
 
         if (f.CashToCollect)
         {

@@ -51,7 +51,8 @@ public class BookingMonitorService : IBookingMonitorService
                 PayAmount = x.PaymentDetail != null ? (decimal?)x.TotalFee : null,     // v2.3: the payment's amount IS the booking fee
                 PayMethod = x.PaymentDetail != null ? (x.PaymentDetail.PaymentId == PaymentIds.Cash ? PaymentMethods.CashOnCompletion : PaymentMethods.MockEWallet) : null,
                 PayReference = x.PaymentDetail != null ? x.PaymentDetail.TransactionReference : null,
-                PayStatus = x.PaymentDetail != null ? x.PaymentDetail.PaymentStatus : null
+                PayStatus = x.PaymentDetail != null ? x.PaymentDetail.PaymentStatus : null,
+                x.CompletionMessage, x.CompletionPhotoUrl, x.CompletedAt, x.StartedAt, x.LateReason
             })
             .FirstOrDefaultAsync(ct);
         if (b is null) return new(true, null);
@@ -77,6 +78,10 @@ public class BookingMonitorService : IBookingMonitorService
             Services = services,
             RequestDescription = string.IsNullOrWhiteSpace(b.ServiceDescription) ? null : b.ServiceDescription.Trim(),
             QuotedTotal = b.TotalFee,
+            IsCompleted = b.Status == BookingStatuses.Completed,
+            Proof = CompletionProofViewModel.From(b.Status, b.CompletionMessage, b.CompletionPhotoUrl, b.CompletedAt),
+            StartInfo = StartInfoViewModel.From(b.Status, b.BookingDate, b.BookingTime, b.StartedAt, b.LateReason),
+            IsNoShow = StartRules.IsNoShow(b.Status, b.PayStatus is not null),
             CustomerName = $"{b.CustomerFirst} {b.CustomerLast}".Trim(),
             CustomerEmail = b.CustomerEmail,
             CustomerPhone = string.IsNullOrWhiteSpace(b.CustomerPhone) ? null : b.CustomerPhone,
@@ -88,7 +93,7 @@ public class BookingMonitorService : IBookingMonitorService
             TotalAmount = b.PayAmount ?? b.TotalFee,
             PaymentMethod = BookingDetailsViewModel.PaymentMethodText(b.PayMethod, b.PayReference),
             TransactionReference = string.IsNullOrWhiteSpace(b.PayReference) ? null : b.PayReference,
-            Payment = PaymentDisplay.For(PaymentProgress.Effective(b.PaymentStatus, b.PayStatus))
+            Payment = PaymentDisplay.For(PaymentProgress.Effective(b.Status, b.PaymentStatus, b.PayStatus))
         });
     }
 
@@ -166,8 +171,9 @@ public class BookingMonitorService : IBookingMonitorService
                 ProviderName = $"{r.ProviderFirst} {r.ProviderLast}".Trim(),
                 Date = r.BookingDate,
                 Time = r.BookingTime,
-                Payment = PaymentDisplay.For(PaymentProgress.Effective(r.PaymentStatus, r.PayStatus)),
-                Status = AdminBookingDisplay.For(r.Status)
+                Payment = PaymentDisplay.For(PaymentProgress.Effective(r.Status, r.PaymentStatus, r.PayStatus)),
+                Status = AdminBookingDisplay.For(r.Status),
+                IsNoShow = StartRules.IsNoShow(r.Status, r.PayStatus is not null)
             }).ToList()
         };
     }

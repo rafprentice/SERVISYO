@@ -111,6 +111,20 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("time")
                         .HasColumnName("BOOKING_TIME");
 
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("COMPLETED_AT");
+
+                    b.Property<string>("CompletionMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("COMPLETION_MESSAGE");
+
+                    b.Property<string>("CompletionPhotoUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("COMPLETION_PHOTO_URL");
+
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("datetime2")
@@ -126,6 +140,23 @@ namespace Servisyo.Web.Migrations
                         .HasColumnType("time")
                         .HasColumnName("END_TIME")
                         .HasComputedColumnSql("DATEADD(MINUTE, [TOTAL_DURATION_MINUTES], [BOOKING_TIME])");
+
+                    b.Property<bool>("IsLate")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("bit")
+                        .HasColumnName("IS_LATE")
+                        .HasComputedColumnSql("ISNULL(CAST(CASE WHEN DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) > 15 THEN 1 ELSE 0 END AS BIT), CAST(0 AS BIT))", false);
+
+                    b.Property<string>("LateReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("LATE_REASON");
+
+                    b.Property<int?>("MinutesLate")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("int")
+                        .HasColumnName("MINUTES_LATE")
+                        .HasComputedColumnSql("CASE WHEN DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) > 15 THEN DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) END", false);
 
                     b.Property<string>("PaymentStatus")
                         .IsRequired()
@@ -153,6 +184,10 @@ namespace Servisyo.Web.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)")
                         .HasColumnName("SERVICE_LOCATION");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("STARTED_AT");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -196,11 +231,15 @@ namespace Servisyo.Web.Migrations
 
                             t.HasTrigger("trg_Bookings_StatusFlow");
 
+                            t.HasCheckConstraint("CK_BOOKINGS_COMPLETION", "([COMPLETION_MESSAGE] IS NULL AND [COMPLETION_PHOTO_URL] IS NULL AND [COMPLETED_AT] IS NULL) OR ([STATUS] = 'Completed' AND [COMPLETION_MESSAGE] IS NOT NULL AND LEN([COMPLETION_MESSAGE]) > 0 AND [COMPLETION_PHOTO_URL] IS NOT NULL AND [COMPLETED_AT] IS NOT NULL)");
+
                             t.HasCheckConstraint("CK_BOOKINGS_DURATION", "[TOTAL_DURATION_MINUTES] > 0");
 
                             t.HasCheckConstraint("CK_BOOKINGS_FEE", "[TOTAL_FEE] >= 0");
 
                             t.HasCheckConstraint("CK_BOOKINGS_PAYMENT", "[PAYMENT_STATUS] IN ('Unpaid','Paid','Refunded')");
+
+                            t.HasCheckConstraint("CK_BOOKINGS_START", "([STARTED_AT] IS NULL AND [LATE_REASON] IS NULL) OR ([STARTED_AT] IS NOT NULL AND [STATUS] IN ('In Progress','Completed') AND DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) BETWEEN 0 AND 120 AND ((DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) > 15 AND [LATE_REASON] IS NOT NULL AND LEN([LATE_REASON]) > 0) OR (DATEDIFF(MINUTE, CAST([BOOKING_DATE] AS DATETIME) + CAST([BOOKING_TIME] AS DATETIME), DATEADD(HOUR, 8, [STARTED_AT])) <= 15 AND [LATE_REASON] IS NULL)))");
 
                             t.HasCheckConstraint("CK_BOOKINGS_STATUS", "[STATUS] IN ('Pending','Accepted','Rejected','In Progress','Completed','Cancelled')");
                         });

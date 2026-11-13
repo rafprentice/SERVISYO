@@ -63,6 +63,10 @@ public sealed record AdminAttentionCounts
     public int FlaggedReviews { get; init; }
     /// Database v2.3: dbo.usp_GetBookingsNeedingAttention (a flagged or 1-2 star review, or a passed date still open).
     public int BookingsNeedingAttention { get; init; }
+    /// Database v2.12, the same procedure, bookings of the last 7 days: started more than 15 minutes late (with the
+    /// provider's reason), and cancelled because the provider did not start them within 2 hours (no-shows).
+    public int LateStarts { get; init; }
+    public int NoShows { get; init; }
     /// Database v2.10 (replaces the v2.9 REPORT lines): while automatic deletion is OFF, the accounts the daily clean-up
     /// would warn (335+ days without a sign-in) and how many of them are past a year. 0 when deletion is on.
     public int InactiveAccounts { get; init; }
@@ -156,6 +160,21 @@ public static class AdminAttention
                 ActionLabel = c.BookingsNeedingAttention == 1 ? "View Booking" : "View Bookings",
                 Action = AdminAttentionAction.BookingList
             });
+
+        if (c.LateStarts > 0 || c.NoShows > 0)
+        {
+            var parts = new List<string>();
+            if (c.NoShows > 0) parts.Add(Plural.Of(c.NoShows, "provider no-show"));
+            if (c.LateStarts > 0) parts.Add(Plural.Of(c.LateStarts, "late start"));
+            rows.Add(new()
+            {
+                Key = "late-start",
+                Tone = c.NoShows > 0 ? "danger" : "warning",
+                Text = string.Join(" and ", parts) + " in the last 7 days",
+                ActionLabel = "View Bookings",
+                Action = AdminAttentionAction.BookingList
+            });
+        }
 
         if (c.InactiveAccounts > 0)
             rows.Add(new()

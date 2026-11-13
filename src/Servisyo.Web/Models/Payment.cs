@@ -124,6 +124,13 @@ public static class PaymentProgress
             ? PaymentRecordStatuses.PendingCollection
             : bookingPaymentStatus;
 
+    /// Database v2.12: the same, knowing the booking's status. A cash promise on a CANCELLED booking (a provider
+    /// no-show) is nothing to collect any more: it counts as Unpaid (the payment row is kept as it was, rule 2).
+    public static string Effective(string bookingStatus, string bookingPaymentStatus, string? paymentRecordStatus) =>
+        bookingStatus == BookingStatuses.Cancelled && paymentRecordStatus == PaymentRecordStatuses.PendingCollection
+            ? bookingPaymentStatus
+            : Effective(bookingPaymentStatus, paymentRecordStatus);
+
     /// The customer approved the quotation and either paid or promised cash on completion.
     public static bool IsArranged(string effectivePaymentStatus) =>
         effectivePaymentStatus is PaymentStatuses.Paid or PaymentRecordStatuses.PendingCollection;

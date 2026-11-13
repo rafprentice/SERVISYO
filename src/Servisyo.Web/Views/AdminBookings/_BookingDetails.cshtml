@@ -79,6 +79,38 @@
         </dl>
     </section>
 
+    @* database v2.12: when the job started (and why it was late), or that it was cancelled as a provider no-show *@
+    @if (Model.StartInfo is not null || Model.IsNoShow)
+    {
+        <section class="sv-pd__section" aria-labelledby="bd-start">
+            <h3 class="sv-pd__h" id="bd-start">Job Start</h3>
+            @if (Model.StartInfo is not null)
+            {
+                <partial name="_StartInfo" model="Model.StartInfo" />
+            }
+            @if (Model.IsNoShow)
+            {
+                <partial name="_NoShowNote" model="@("Cancelled automatically by the system: the provider did not start the job within 2 hours of its scheduled time. A test e-wallet payment was refunded; a cash promise needs nothing.")" />
+            }
+        </section>
+    }
+
+    @* database v2.11: the provider's proof of the finished job *@
+    @if (Model.IsCompleted)
+    {
+        <section class="sv-pd__section" aria-labelledby="bd-proof">
+            <h3 class="sv-pd__h" id="bd-proof">Completion Proof</h3>
+            @if (Model.Proof is not null)
+            {
+                <partial name="_CompletionProof" model="Model.Proof" />
+            }
+            else
+            {
+                <p class="sv-rv__none">No proof recorded: this job was completed before a photo and a message were required.</p>
+            }
+        </section>
+    }
+
     @* 3. customer *@
     <section class="sv-pd__section" aria-labelledby="bd-customer">
         <h3 class="sv-pd__h" id="bd-customer">Customer Details</h3>

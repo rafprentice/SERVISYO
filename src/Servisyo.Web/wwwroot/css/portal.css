@@ -1338,3 +1338,73 @@ a.sv-act { display: inline-block; text-decoration: none; }
 /* keyboard users still see where they are */
 .sv-pwfield .sv-eye:focus-visible { color: #4B5563; box-shadow: inset 0 0 0 2px var(--color-primary); }
 @media (prefers-reduced-motion: reduce) { .sv-pwfield .sv-eye { transition: none; } }
+
+/* ---------------------------------------------------------------------------------------------------------
+   Database v2.11: "Confirm Service Completion" (Provider > Booking Requests > Mark Completed)
+   --------------------------------------------------------------------------------------------------------- */
+.sv-cmp { width: min(520px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
+.sv-cmp[open] { animation: sv-dialog-in .16s ease-out; }
+.sv-cmp::backdrop { background: rgba(0, 0, 0, .5); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.sv-cmp__form { display: grid; gap: 16px; padding: 22px; }
+.sv-cmp__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sv-cmp__head .sv-dialog__text { margin-top: 4px; }
+.sv-cmp__x { flex: none; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #9CA3AF; font-size: 1rem; line-height: 1; cursor: pointer; }
+.sv-cmp__x:hover { color: #4B5563; background: #F3F4F6; }
+.sv-cmp__x:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.sv-cmp__field { display: grid; gap: 6px; min-width: 0; }
+.sv-cmp__label { font-size: .8125rem; font-weight: 600; }
+.sv-cmp__req { color: #DC2626; }
+.sv-cmp__drop { display: grid; place-items: center; min-height: 150px; border: 1.5px dashed var(--color-border); border-radius: 10px; background: #F8FAFC; overflow: hidden; }
+.sv-cmp__drop.is-invalid { border-color: #DC2626; background: #FEF2F2; }
+.sv-cmp__preview { display: block; width: 100%; max-height: 240px; object-fit: contain; background: #0F172A; }
+.sv-cmp__preview[hidden], .sv-cmp__empty[hidden], .sv-cmp__err[hidden] { display: none; }
+.sv-cmp__empty { display: grid; justify-items: center; gap: 6px; padding: 24px; color: #94A3B8; font-size: .8125rem; }
+.sv-cmp__pickrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sv-cmp__file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; color: var(--color-text-muted); }
+.sv-cmp__help, .sv-cmp__count { margin: 0; font-size: .6875rem; color: var(--color-text-muted); }
+.sv-cmp__count { text-align: right; }
+.sv-cmp textarea { width: 100%; min-height: 104px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; font: .875rem/1.5 var(--font-body); color: var(--color-text); resize: vertical; }
+.sv-cmp textarea:focus { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.sv-cmp textarea[aria-invalid="true"] { border-color: #DC2626; }
+.sv-cmp__err { margin: 0; font-size: .75rem; font-weight: 500; color: #B91C1C; }
+.sv-cmp__err--box { padding: 8px 10px; border-radius: 6px; background: #FEF2F2; }
+.sv-cmp .sv-dialog__buttons { margin-top: 0; padding-top: 14px; border-top: 1px solid var(--color-border); }
+.sv-cmp [data-complete-submit]:disabled { opacity: .7; cursor: progress; }
+@media (prefers-reduced-motion: reduce) { .sv-cmp[open] { animation: none; } }
+
+/* Database v2.11: the proof of a completed job (customer My Bookings, provider card, Admin > Bookings > View) */
+.sv-proof { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 12px; padding: 12px; border: 1px solid #BBF7D0; border-radius: 8px; background: #F0FDF4; }
+.sv-proof--nophoto { grid-template-columns: minmax(0, 1fr); }
+.sv-proof__img { display: block; width: 96px; height: 96px; border-radius: 6px; overflow: hidden; background: #E2E8F0; }
+.sv-proof__img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.sv-proof__img:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.sv-proof__label { margin: 0 0 4px; font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #166534; }
+.sv-proof__msg { margin: 0; font-size: .8125rem; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+.sv-proof__when { margin: 6px 0 0; font-size: .6875rem; color: var(--color-text-muted); }
+.sv-bd .sv-proof { margin-top: 0; }
+@media (max-width: 480px) { .sv-proof { grid-template-columns: 72px minmax(0, 1fr); } .sv-proof__img { width: 72px; height: 72px; } }
+
+/* Database v2.12: the start window of a scheduled booking (Provider > Booking Requests), the start of a job and a no-show */
+.sv-btn--late { background: #B45309; color: #fff; border-color: #B45309; }
+.sv-btn--late:hover { background: #92400E; border-color: #92400E; color: #fff; }
+.sv-btn--late:focus-visible { outline: 2px solid #B45309; outline-offset: 2px; }
+.sv-late-chip { align-self: center; padding: 2px 8px; border-radius: 999px; background: #FEF3C7; color: #92400E; font-size: .6875rem; font-weight: 600; }
+.sv-startwin { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; padding: 9px 12px; border-radius: 6px; font-size: .8125rem; line-height: 1.45; }
+.sv-startwin--early { background: #F8FAFC; color: #64748B; border: 1px dashed #CBD5E1; }
+.sv-startwin--missed { background: #FEF2F2; color: #991B1B; border: 1px solid #FECACA; }
+.sv-startwin__ico, .sv-start__ico, .sv-noshow__ico { flex: none; display: inline-flex; margin-top: 2px; }
+.sv-start { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 9px 12px; border-radius: 6px; font-size: .8125rem; line-height: 1.45; }
+.sv-start--ok { background: #EEF2FF; color: #3730A3; }
+.sv-start--late { background: #FFFBEB; color: #92400E; border: 1px solid #FDE68A; }
+.sv-start__line, .sv-start__reason { margin: 0; overflow-wrap: anywhere; }
+.sv-start__reason { margin-top: 4px; color: #78350F; white-space: pre-line; }
+.sv-start__label { font-weight: 600; }
+.sv-noshow { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; padding: 10px 12px; border: 1px solid #FECACA; border-radius: 6px; background: #FEF2F2; color: #991B1B; font-size: .8125rem; line-height: 1.45; }
+.sv-noshow__title { margin: 0; font-weight: 600; }
+.sv-noshow__text { margin: 2px 0 0; color: #7F1D1D; }
+.sv-start-err { flex-basis: 100%; margin: 0; font-size: .75rem; font-weight: 500; color: #B91C1C; }
+.sv-start-err[hidden] { display: none; }
+.sv-late__badge { display: inline-flex; align-items: center; gap: 6px; justify-self: start; margin: 0; padding: 4px 10px; border-radius: 999px; background: #FEF3C7; color: #92400E; font-size: .75rem; font-weight: 600; }
+.sv-late [data-late-submit]:disabled { opacity: .7; cursor: progress; }
+.sv-bd .sv-start, .sv-bd .sv-noshow { margin-top: 0; }
+.sv-tag--gap { margin-left: 4px; }

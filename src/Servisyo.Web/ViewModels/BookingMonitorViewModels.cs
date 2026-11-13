@@ -56,6 +56,8 @@ public class BookingRowViewModel
     public TimeOnly Time { get; set; }
     public PaymentDisplay Payment { get; set; } = PaymentDisplay.For(string.Empty);
     public AdminBookingDisplay Status { get; set; } = AdminBookingDisplay.For(string.Empty);
+    /// Database v2.12: cancelled because the provider did not start it within 2 hours (a "No-show" tag in the list).
+    public bool IsNoShow { get; set; }
 }
 
 public class BookingsPageViewModel
@@ -94,6 +96,12 @@ public class BookingDetailsViewModel
     public IReadOnlyList<BookingDetailsServiceLine> Services { get; set; } = Array.Empty<BookingDetailsServiceLine>();
     public string? RequestDescription { get; set; }                 // what the customer wrote when booking
     public decimal QuotedTotal { get; set; }                        // BOOKINGS.TOTAL_FEE
+
+    // database v2.11: the provider's proof of the finished job
+    public bool IsCompleted { get; set; }
+    public CompletionProofViewModel? Proof { get; set; }            // null = not completed, or completed before v2.11
+    public StartInfoViewModel? StartInfo { get; set; }              // database v2.12: when the job started (and how late, why)
+    public bool IsNoShow { get; set; }                               // database v2.12: cancelled, not started within 2 hours
 
     // 3. customer
     public string CustomerName { get; set; } = string.Empty;

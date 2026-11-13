@@ -68,7 +68,9 @@ public class AdminDashboardService : IAdminDashboardService
         // database v2.8: name change requests still waiting
         var nameChanges = await _db.NameChangeRequests.CountAsync(r => r.Status == NameChangeStatuses.Pending, ct);
         // database v2.3: worked out by dbo.usp_GetBookingsNeedingAttention (TotalCount = all of them, not only the 25 rows)
-        var needAttention = (await _db.GetBookingsNeedingAttentionAsync(ct)).Select(r => r.TotalCount).FirstOrDefault();
+        var attention = (await _db.GetBookingsNeedingAttentionAsync(ct)).FirstOrDefault();
+        // database v2.12: the late starts and no-shows of the last 7 days have their own row (counted once, not twice)
+        var needAttention = attention is null ? 0 : attention.TotalCount - attention.LateStartCount - attention.NoShowCount;
 
         // database v2.10: while automatic deletion is off, the accounts the daily clean-up WOULD warn (counted now,
         // nothing stored; this replaces the v2.9 REPORT lines in System Logs)
@@ -144,6 +146,8 @@ public class AdminDashboardService : IAdminDashboardService
                 SuspendedProviders = suspendedProviders,
                 FlaggedReviews = flagged,
                 BookingsNeedingAttention = needAttention,
+                LateStarts = attention?.LateStartCount ?? 0,
+                NoShows = attention?.NoShowCount ?? 0,
                 InactiveAccounts = inactive,
                 InactiveOverOneYear = inactiveOverOneYear
             }),
