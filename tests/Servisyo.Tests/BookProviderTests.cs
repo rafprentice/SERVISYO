@@ -107,11 +107,12 @@ public class BookingSlotRulesTests
     }
 
     [Fact]
-    public void Slots_StartOnTheHalfHourEvenWhenTheScheduleStartsAtAnOddTime()
+    public void Slots_StartAtTheExactShiftStart_ThenEveryHalfHour()
     {
+        // the provider starts at 8:10: that exact time first (not rounded), then the :00 / :30 times
         var window = new BookingSlotRules.Window(T(8, 10), T(11), Array.Empty<(TimeOnly, TimeOnly)>());
         var slots = BookingSlotRules.Slots(Tuesday, 60, Today, Now, 1, false, One(window), NoBusy, 5);
-        Assert.Equal(new[] { T(8, 30), T(9), T(9, 30), T(10) }, slots.ToArray());
+        Assert.Equal(new[] { T(8, 10), T(8, 30), T(9), T(9, 30), T(10) }, slots.ToArray());
     }
 
     [Fact]
@@ -139,7 +140,8 @@ public class BookingSlotRulesTests
     public void Slots_Today_OnlyShowTheFuture()
     {
         var slots = BookingSlotRules.Slots(Today, 60, Today, Now, 0, false, One(Day(lunch: false)), NoBusy, 5);
-        Assert.Equal(T(10, 30), slots.First());                 // it is 10:00 now
+        Assert.Equal(T(10, 1), slots.First());                  // it is 10:00 now: the soonest start is the next minute
+        Assert.Equal(T(10, 30), slots[1]);                      // then the usual half hours
     }
 
     [Fact]
@@ -774,14 +776,27 @@ public class BookProviderServiceTests
     }
 
     [Fact]
-    public async Task Create_RefusesATimeThatIsNotOneOfTheOfferedStarts()
+    public async Task Create_AcceptsAnExactMinute_ThatFollowsTheRules()
     {
+        // "Enter exact time": 9:10 is not one of the buttons, but it fits the working hours and nothing overlaps it
         var (svc, db) = Create();
         var (c, p, s) = await StandardAsync(db);
 
         var result = await svc.CreateAsync(c.UserId, p.ProviderId, Form(s, new TimeOnly(9, 10)));
 
-        Assert.Equal("Please choose one of the available times.", result.FieldErrors["Time"]);
+        Assert.True(result.Succeeded);
+        Assert.Equal(new TimeOnly(9, 10), db.Bookings.Single().BookingTime);
+    }
+
+    [Fact]
+    public async Task Create_RefusesATimeWithSeconds()
+    {
+        var (svc, db) = Create();
+        var (c, p, s) = await StandardAsync(db);
+
+        var result = await svc.CreateAsync(c.UserId, p.ProviderId, Form(s, new TimeOnly(9, 10, 30)));
+
+        Assert.Equal(BookingSlotRules.Explain(SlotCheck.NotWholeMinute, 1), result.FieldErrors["Time"]);
         Assert.Empty(db.Bookings);
     }
 

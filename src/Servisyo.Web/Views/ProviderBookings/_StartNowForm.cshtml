@@ -1,0 +1,13 @@
+@using Servisyo.Web.Helpers
+@model Servisyo.Web.ViewModels.StartButtonViewModel
+@* Database v2.12: the blue "Mark In Progress" (0 to 15 minutes after the scheduled time). booking-start.js sends it with
+   fetch; without JavaScript it is a plain form. The server checks the start window again. *@
+<form method="post" asp-controller="ProviderBookings" asp-action="Start" asp-route-id="@Model.BookingId"
+      class="sv-inline-form" data-sv-once data-start-form>
+    <input type="hidden" name="tab" value="@Model.Tab" />
+    <input type="hidden" name="page" value="@Model.Page" />
+    <button type="submit" class="sv-btn sv-btn--primary sv-btn--sm" aria-label="Mark In Progress booking #@Model.BookingId">
+        <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+        Mark In Progress
+    </button>
+</form>

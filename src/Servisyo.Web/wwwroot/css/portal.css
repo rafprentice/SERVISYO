@@ -1408,3 +1408,23 @@ a.sv-act { display: inline-block; text-decoration: none; }
 .sv-late [data-late-submit]:disabled { opacity: .7; cursor: progress; }
 .sv-bd .sv-start, .sv-bd .sv-noshow { margin-top: 0; }
 .sv-tag--gap { margin-left: 4px; }
+
+/* Book this Provider: the soonest start (today, the next whole minute) and "Enter exact time" */
+.sv-bp__soon { margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: #DCFCE7; color: #166534; font-size: .625rem; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; vertical-align: 1px; }
+.sv-bp__slot input:checked + span .sv-bp__soon { background: rgba(255, 255, 255, .22); color: #fff; }
+.sv-bp__exact-toggle { justify-self: start; margin: 2px 0 0; padding: 0; border: 0; background: none; color: var(--color-primary); font: inherit; font-size: .75rem; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.sv-bp__exact-toggle[hidden], .sv-bp__exact[hidden] { display: none; }
+.sv-bp__exact-toggle:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 2px; }
+.sv-bp__exact { display: grid; gap: 6px; max-width: 320px; padding: 12px; border: 1px dashed var(--color-border); border-radius: 8px; background: #F8FAFC; }
+.sv-bp__exact label { font-size: .8125rem; font-weight: 600; }
+.sv-bp__exact input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; font: inherit; font-size: .875rem; background: #fff; }
+.sv-bp__exact input:focus { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+.sv-bp__exact input[aria-invalid="true"] { border-color: #B42318; }
+.sv-bp__hint.is-ok { color: #166534; font-weight: 600; }
+
+/* Provider > Booking Requests: the live countdown until the start button unlocks */
+.sv-countdown { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border: 1px solid #C7D2FE; border-radius: 999px; background: #EEF2FF; color: #3730A3; font-size: .8125rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sv-countdown::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #6366F1; }
+[data-start-unlock][hidden], [data-start-wait][hidden] { display: none; }
+@media (prefers-reduced-motion: no-preference) { .sv-countdown::before { animation: sv-pulse 1s ease-in-out infinite; } }
+@keyframes sv-pulse { 50% { opacity: .35; } }

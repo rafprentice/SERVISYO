@@ -21,6 +21,26 @@ public sealed class StartWindowViewModel
 
     public bool CanStart => State is StartWindowState.OnTime or StartWindowState.Late;
 
+    /// The scheduled start and the server's clock as ISO times with the Philippine offset
+    /// ("2026-11-27T09:30:00+08:00"): booking-start.js counts down from the difference, so a phone whose clock is
+    /// wrong still unlocks the button at the right second.
+    public string ScheduledIso { get; init; } = string.Empty;
+    public string ServerNowIso { get; init; } = string.Empty;
+    /// Whole seconds until the scheduled time (0 once it has come).
+    public int SecondsUntilStart { get; init; }
+    /// "Starts in 00:54" (too early only).
+    public string CountdownText => Countdown(SecondsUntilStart);
+
+    /// "Starts in 00:54", "Starts in 3:05:12", "Starts in 2d 03:05:12" (the same as booking-start.js).
+    public static string Countdown(int seconds)
+    {
+        if (seconds <= 0) return "Starting now";
+        var t = TimeSpan.FromSeconds(seconds);
+        if (seconds < 3600) return $"Starts in {t.Minutes:00}:{t.Seconds:00}";
+        if (seconds < 86400) return $"Starts in {t.Hours}:{t.Minutes:00}:{t.Seconds:00}";
+        return $"Starts in {t.Days}d {t.Hours:00}:{t.Minutes:00}:{t.Seconds:00}";
+    }
+
     /// The muted line shown instead of a button (null while a button is shown).
     public string? Notice => State switch
     {
@@ -37,8 +57,12 @@ public sealed class StartWindowViewModel
     {
         var minutes = StartRules.MinutesAfter(date, time, manilaNow);
         var next = StartRules.NextChange(date, time, manilaNow);
+        var scheduled = StartRules.Scheduled(date, time);
         return new StartWindowViewModel
         {
+            ScheduledIso = scheduled.ToString("yyyy-MM-dd'T'HH:mm:ss", Inv) + "+08:00",
+            ServerNowIso = manilaNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff", Inv) + "+08:00",
+            SecondsUntilStart = (int)Math.Max(0, Math.Ceiling((scheduled - manilaNow).TotalSeconds)),
             State = StartRules.StateAt(minutes),
             ScheduledText = $"{date.ToString("MMM dd, yyyy", Inv)} · {time.ToString("hh:mm tt", Inv)}",
             MinutesAfter = minutes,
@@ -47,6 +71,9 @@ public sealed class StartWindowViewModel
         };
     }
 }
+
+/// The blue "Mark In Progress" form of one card (shown at once inside the window, or hidden until the countdown ends).
+public sealed record StartButtonViewModel(int BookingId, string Title, string Tab, int Page);
 
 /// Database v2.12: when a job started, shown on In Progress / Completed bookings to the provider, the customer and the
 /// administrators (Views/Shared/_StartInfo.cshtml). Null for a job that started before v2.12 (no STARTED_AT).

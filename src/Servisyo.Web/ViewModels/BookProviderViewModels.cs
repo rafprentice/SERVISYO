@@ -72,6 +72,9 @@ public class BookProviderPageViewModel
 
     public IReadOnlyList<BookServiceOptionViewModel> Services { get; set; } = Array.Empty<BookServiceOptionViewModel>();
 
+    /// Today in the Philippines: on this date the soonest start is the next whole minute (when no notice is needed).
+    public DateOnly Today { get; set; }
+
     /// The first and last date the date box allows (the server checks again on send).
     public DateOnly EarliestDate { get; set; }
     public DateOnly LatestDate { get; set; }
@@ -98,9 +101,16 @@ public enum BookPageOutcome
 
 public record BookProviderPageResult(BookPageOutcome Outcome, BookProviderPageViewModel? Page, PortalShellViewModel? Shell);
 
-public record SlotViewModel(string Value, string Text);
+/// One start-time button: "04:05" / "4:05 AM". Soon = the "as soon as possible" one (the next whole minute, today).
+public record SlotViewModel(string Value, string Text, bool Soon = false);
 
-public record BookSlotsResult(bool Allowed, bool ProviderAvailable, string? Message, IReadOnlyList<SlotViewModel> Slots);
+/// Hours = the provider's working hours that day ("4:04 AM – 5:00 PM, break 12:00 PM – 1:00 PM"), shown with
+/// "Enter exact time"; EarliestTime = "HH:mm" of the first minute that can still be booked today (null for other days).
+public record BookSlotsResult(bool Allowed, bool ProviderAvailable, string? Message, IReadOnlyList<SlotViewModel> Slots,
+    string? Hours = null, string? EarliestTime = null);
+
+/// The answer for one exact time typed by the customer: Ok, or the reason it cannot be booked.
+public record BookTimeCheckResult(bool Allowed, bool Ok, string? Message);
 
 public enum BookOutcome
 {

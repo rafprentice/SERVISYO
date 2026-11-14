@@ -9,7 +9,8 @@ public enum SlotCheck
     DayOff,           // the provider marked this date as unavailable
     NotWorking,       // the provider has no schedule on this day of the week
     DayFull,          // the provider already has their maximum number of jobs on this date
-    TimePassed,       // today, but that time is already over
+    TimePassed,       // today, but that time is already over (the earliest start today is the next whole minute)
+    NotWholeMinute,   // a time with seconds: start times are whole minutes
     OutsideHours,     // the whole job does not fit inside the provider's working hours
     InBreak,          // the job would run into one of the provider's breaks
     Clash             // another active booking (Pending / Accepted / In Progress) overlaps
@@ -22,7 +23,7 @@ public enum SlotCheck
 public static class BookingSlotRules
 {
     public const int MaxAdvanceDays = 90;
-    public const int StepMinutes = 30;           // start times are offered every 30 minutes
+    public const int StepMinutes = 30;           // start times are offered every 30 minutes (plus the exact ones below)
 
     /// One working window of the chosen weekday, with its breaks.
     public sealed record Window(TimeOnly Start, TimeOnly End, IReadOnlyList<(TimeOnly Start, TimeOnly End)> Breaks);
@@ -44,11 +45,20 @@ public static class BookingSlotRules
         return SlotCheck.Ok;
     }
 
-    /// Everything that depends on the START TIME and the length of the job.
+    /// The earliest start time today: the next whole minute (at 4:04:30 AM it is 4:05 AM). Null in the last minute of the day.
+    public static TimeOnly? NextMinute(TimeOnly nowTime)
+    {
+        var m = M(nowTime) + 1;
+        return m >= 24 * 60 ? null : new TimeOnly(m / 60, m % 60);
+    }
+
+    /// Everything that depends on the START TIME and the length of the job. Any whole minute may be asked for (the
+    /// customer's "Enter exact time"); the same rules apply as for the offered buttons.
     public static SlotCheck CheckTime(TimeOnly time, int durationMinutes, DateOnly date, DateOnly today, TimeOnly nowTime,
         IReadOnlyList<Window> windows, IReadOnlyList<Busy> busy)
     {
-        if (date == today && time <= nowTime) return SlotCheck.TimePassed;
+        if (time.Second != 0 || time.Millisecond != 0 || time.Microsecond != 0) return SlotCheck.NotWholeMinute;
+        if (date == today && (NextMinute(nowTime) is not { } earliest || time < earliest)) return SlotCheck.TimePassed;
 
         var start = M(time);
         var end = start + durationMinutes;
@@ -70,7 +80,11 @@ public static class BookingSlotRules
         return day != SlotCheck.Ok ? day : CheckTime(time, durationMinutes, date, today, nowTime, windows, busy);
     }
 
-    /// Every start time (every 30 minutes) at which a job of this length can be booked on that date, oldest first.
+    /// Every offered start time at which a job of this length can be booked on that date, earliest first:
+    ///   - today, when the provider needs no notice: the soonest one, the next whole minute (4:05 AM when it is 4:04 AM);
+    ///   - the provider's exact shift start (4:04 AM), not rounded;
+    ///   - then every :00 and :30 (4:30 AM, 5:00 AM ...).
+    /// Every one of them passes CheckTime (working hours, breaks, other bookings, not in the past).
     public static IReadOnlyList<TimeOnly> Slots(DateOnly date, int durationMinutes, DateOnly today, TimeOnly nowTime,
         int minNoticeDays, bool dateUnavailable, IReadOnlyList<Window> windows, IReadOnlyList<Busy> busy, int maxJobsPerDay)
     {
@@ -78,17 +92,27 @@ public static class BookingSlotRules
             return Array.Empty<TimeOnly>();
 
         var found = new SortedSet<TimeOnly>();
+        void Try(int m)
+        {
+            if (m < 0 || m >= 24 * 60) return;
+            var t = new TimeOnly(m / 60, m % 60);
+            if (CheckTime(t, durationMinutes, date, today, nowTime, windows, busy) == SlotCheck.Ok) found.Add(t);
+        }
+
+        if (SoonestSlot(date, today, nowTime, minNoticeDays) is { } soon) Try(M(soon));
         foreach (var w in windows)
         {
+            Try(M(w.Start));                                                                    // the exact shift start
             var first = (int)Math.Ceiling(M(w.Start) / (double)StepMinutes) * StepMinutes;     // 8:10 -> 8:30
-            for (var m = first; m < 24 * 60 && m + durationMinutes <= M(w.End); m += StepMinutes)
-            {
-                var t = new TimeOnly(m / 60, m % 60);
-                if (CheckTime(t, durationMinutes, date, today, nowTime, windows, busy) == SlotCheck.Ok) found.Add(t);
-            }
+            for (var m = first; m < 24 * 60 && m + durationMinutes <= M(w.End); m += StepMinutes) Try(m);
         }
         return found.ToList();
     }
+
+    /// The "as soon as possible" start: the next whole minute, only for today and only when the provider needs no
+    /// notice days. Null otherwise.
+    public static TimeOnly? SoonestSlot(DateOnly date, DateOnly today, TimeOnly nowTime, int minNoticeDays) =>
+        date == today && minNoticeDays <= 0 ? NextMinute(nowTime) : null;
 
     /// The sentence shown to the customer.
     public static string Explain(SlotCheck check, int minNoticeDays) => check switch
@@ -100,7 +124,8 @@ public static class BookingSlotRules
         SlotCheck.DayOff => "The provider is not available on that date.",
         SlotCheck.NotWorking => "The provider does not work on that day of the week.",
         SlotCheck.DayFull => "The provider is fully booked on that date.",
-        SlotCheck.TimePassed => "That time has already passed. Please pick a later time.",
+        SlotCheck.TimePassed => "That time has already passed. Please pick a later time (at least 1 minute from now).",
+        SlotCheck.NotWholeMinute => "Please choose a start time in whole minutes (for example 4:05 AM).",
         SlotCheck.OutsideHours => "That time does not fit the provider's working hours for the services you chose.",
         SlotCheck.InBreak => "That time overlaps the provider's break.",
         SlotCheck.Clash => "That time is already taken. Please choose another.",

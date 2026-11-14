@@ -19,6 +19,9 @@ public interface IBookProviderService
     /// The start times that are free on a date for the chosen services (the form shows them as buttons).
     Task<BookSlotsResult> GetSlotsAsync(int userId, int providerId, DateOnly date, IReadOnlyCollection<int> serviceIds, CancellationToken ct = default);
 
+    /// "Enter exact time": whether one exact start time can be booked (the same rules as sending the form).
+    Task<BookTimeCheckResult> CheckTimeAsync(int userId, int providerId, DateOnly date, TimeOnly time, IReadOnlyCollection<int> serviceIds, CancellationToken ct = default);
+
     /// Creates a Pending booking. Everything is checked again here (never trusting what the page showed), inside a transaction.
     Task<BookProviderResult> CreateAsync(int userId, int providerId, BookProviderForm form, CancellationToken ct = default);
 }
@@ -187,6 +190,7 @@ public class BookProviderService : IBookProviderService
                 Description = string.IsNullOrWhiteSpace(s.Description) ? null : s.Description.Trim(),
                 DurationMinutes = s.DurationMinutes, Price = s.Price
             }).ToList(),
+            Today = today,
             EarliestDate = today.AddDays(Math.Max(0, provider.MinNoticeDays)),
             LatestDate = today.AddDays(BookingSlotRules.MaxAdvanceDays),
             // the service address is chosen from a list; the saved address of the profile is chosen already
@@ -238,15 +242,50 @@ public class BookProviderService : IBookProviderService
         var day = await LoadDayAsync(providerId, date, ct);
 
         var slots = BookingSlotRules.Slots(date, duration, today, nowTime, provider.MinNoticeDays, day.Unavailable, day.Windows, day.Busy, provider.MaxJobsPerDay);
+        var soon = BookingSlotRules.SoonestSlot(date, today, nowTime, provider.MinNoticeDays);
+        var hours = HoursText(day.Windows);
+        var earliest = date == today ? BookingSlotRules.NextMinute(nowTime)?.ToString("HH:mm", CultureInfo.InvariantCulture) : null;
         if (slots.Count > 0)
             return new(true, true, null, slots.Select(t => new SlotViewModel(
-                t.ToString("HH:mm", CultureInfo.InvariantCulture), t.ToString("h:mm tt", CultureInfo.InvariantCulture))).ToList());
+                t.ToString("HH:mm", CultureInfo.InvariantCulture), t.ToString("h:mm tt", CultureInfo.InvariantCulture), t == soon)).ToList(),
+                hours, earliest);
 
         var dayProblem = BookingSlotRules.CheckDay(date, today, provider.MinNoticeDays, day.Unavailable, day.Windows, day.Busy.Count, provider.MaxJobsPerDay);
         var message = dayProblem != SlotCheck.Ok
             ? BookingSlotRules.Explain(dayProblem, provider.MinNoticeDays)
             : "No free times on that date for the services you chose. Try another date or fewer services.";
-        return new(true, true, message, Array.Empty<SlotViewModel>());
+        return new(true, true, message, Array.Empty<SlotViewModel>(), dayProblem == SlotCheck.Ok ? hours : null, earliest);
+    }
+
+    /// "4:04 AM – 5:00 PM, break 12:00 PM – 1:00 PM" (several shifts are joined with "; "). Null when not working.
+    private static string? HoursText(IReadOnlyList<BookingSlotRules.Window> windows)
+    {
+        static string T(TimeOnly t) => t.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        if (windows.Count == 0) return null;
+        return string.Join("; ", windows.OrderBy(w => w.Start).Select(w =>
+            $"{T(w.Start)} – {T(w.End)}" + (w.Breaks.Count == 0 ? "" : ", break " + string.Join(", ", w.Breaks.Select(b => $"{T(b.Start)} – {T(b.End)}")))));
+    }
+
+    public async Task<BookTimeCheckResult> CheckTimeAsync(int userId, int providerId, DateOnly date, TimeOnly time, IReadOnlyCollection<int> serviceIds,
+        CancellationToken ct = default)
+    {
+        var who = await FindCustomerAsync(userId, ct);
+        if (who is null) return new(false, false, null);
+
+        var provider = await FindProviderAsync(providerId, ct);
+        if (provider is null) return new(true, false, ProviderGone);
+
+        var ids = serviceIds.Distinct().Take(BookingFormRules.MaxServices + 1).ToList();
+        var services = ids.Count == 0 ? new List<ServiceRow>() : await LoadServicesAsync(providerId, ids, ct);
+        if (services.Count == 0 || services.Count != ids.Count) return new(true, false, "Choose at least one service first.");
+
+        var (today, nowTime) = ManilaNow();
+        var day = await LoadDayAsync(providerId, date, ct);
+        var problem = BookingSlotRules.Check(date, time, services.Sum(s => s.DurationMinutes), today, nowTime, provider.MinNoticeDays,
+            day.Unavailable, day.Windows, day.Busy, provider.MaxJobsPerDay);
+        return problem == SlotCheck.Ok
+            ? new(true, true, null)
+            : new(true, false, BookingSlotRules.Explain(problem, provider.MinNoticeDays));
     }
 
     // ------------------------------------------------------------------ creating the booking
@@ -314,16 +353,11 @@ public class BookProviderService : IBookProviderService
             var (today, nowTime) = ManilaNow();
             var day = await LoadDayAsync(providerId, date, ct);
 
+            // any whole minute may be asked for ("Enter exact time", or the next minute today when the provider needs no
+            // notice): the same rules as the offered buttons - working hours, breaks, other bookings, at least the next
+            // whole minute in Philippine time. Nothing else is required of it.
             var problem = BookingSlotRules.Check(date, time, duration, today, nowTime, provider.MinNoticeDays,
                 day.Unavailable, day.Windows, day.Busy, provider.MaxJobsPerDay);
-
-            if (problem == SlotCheck.Ok
-                && !BookingSlotRules.Slots(date, duration, today, nowTime, provider.MinNoticeDays, day.Unavailable, day.Windows, day.Busy, provider.MaxJobsPerDay).Contains(time))
-            {
-                // a time that is not one of the offered start times (for example typed by hand)
-                errors["Time"] = "Please choose one of the available times.";
-                return new(BookOutcome.Invalid, errors, FixFields);
-            }
 
             if (problem != SlotCheck.Ok)
             {

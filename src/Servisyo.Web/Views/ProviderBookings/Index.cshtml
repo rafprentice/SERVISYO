@@ -98,9 +98,29 @@ else
                    the state changes (booking-start.js reads data-start-refresh-in, in seconds). *@
                 @if (c.StartWindow is { } w)
                 {
-                    if (w.Notice is not null)
+                    if (w.State == StartWindowState.TooEarly)
                     {
-                        <p class="sv-startwin sv-startwin--@(w.State == StartWindowState.Expired ? "missed" : "early")" data-start-state="@w.State">
+                        @* too early: the notice and a live countdown; at the scheduled second booking-start.js swaps them for
+                           the blue button below (no reload). The countdown runs on the server's clock (data-server-now). *@
+                        <div data-start-wait>
+                            <p class="sv-startwin sv-startwin--early" data-start-state="@w.State">
+                                <span class="sv-startwin__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
+                                <span>@w.Notice</span>
+                            </p>
+                            <div class="sv-bk__acts">
+                                <span class="sv-countdown" role="timer" aria-label="Time until booking #@c.BookingId can be started"
+                                      data-countdown data-start-at="@w.ScheduledIso" data-server-now="@w.ServerNowIso">@w.CountdownText</span>
+                            </div>
+                        </div>
+                        <div class="sv-bk__acts" data-start-unlock hidden>
+                            <partial name="_StartNowForm" model="@(new StartButtonViewModel(c.BookingId, c.Title, Model.ActiveTab, Model.Page))" />
+                            <span class="sv-sr-only" data-start-unlocked-text></span>
+                            <p class="sv-start-err" role="alert" data-start-error hidden></p>
+                        </div>
+                    }
+                    else if (w.Notice is not null)
+                    {
+                        <p class="sv-startwin sv-startwin--missed" data-start-state="@w.State">
                             <span class="sv-startwin__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
                             <span>@w.Notice</span>
                         </p>
@@ -158,16 +178,7 @@ else
                                 }
                                 else
                                 {
-                                    @* database v2.12: 0 to 15 minutes after the scheduled time *@
-                                    <form method="post" asp-controller="ProviderBookings" asp-action="Start" asp-route-id="@c.BookingId"
-                                          class="sv-inline-form" data-sv-once data-start-form>
-                                        <input type="hidden" name="tab" value="@Model.ActiveTab" />
-                                        <input type="hidden" name="page" value="@Model.Page" />
-                                        <button type="submit" class="sv-btn @a.Css sv-btn--sm" aria-label="@a.Label booking #@c.BookingId">
-                                            <span class="sv-bk__ico" aria-hidden="true">@Icons.Svg("clock", 14)</span>
-                                            @a.Label
-                                        </button>
-                                    </form>
+                                    <partial name="_StartNowForm" model="@(new StartButtonViewModel(c.BookingId, c.Title, Model.ActiveTab, Model.Page))" />
                                 }
                                 continue;
                             }

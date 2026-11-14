@@ -6,6 +6,9 @@
    The server decides all of this again (ProviderBookingsService.StartAsync) and answers 400 when the time is wrong.
    Each card says in how many seconds its state changes (data-start-refresh-in); the page redraws itself then
    (live-bookings.js, or a reload when that script is not running), so buttons appear and disappear on time.
+   Before the scheduled time a card shows a live countdown ("Starts in 00:54"). It counts on the SERVER's clock
+   (data-start-at minus data-server-now), so a phone with a wrong clock still unlocks at the right second; at 0 the
+   countdown is swapped for the blue "Mark In Progress" that is already on the page (hidden), without a reload.
    Listens on the whole document, so it keeps working after live-bookings.js redraws the cards. */
 (function () {
     "use strict";
@@ -247,6 +250,52 @@
         redraw();
     }
 
+    // ------------------------------------------------------------------ the countdown until the start button unlocks
+
+    function two(n) { return (n < 10 ? "0" : "") + n; }
+
+    // "Starts in 00:54", "Starts in 3:05:12", "Starts in 2d 03:05:12" (the same as StartWindowViewModel.Countdown)
+    function countdownText(seconds) {
+        if (seconds <= 0) return "Starting now";
+        var d = Math.floor(seconds / 86400), h = Math.floor(seconds % 86400 / 3600), m = Math.floor(seconds % 3600 / 60), s = seconds % 60;
+        if (seconds < 3600) return "Starts in " + two(m) + ":" + two(s);
+        if (seconds < 86400) return "Starts in " + h + ":" + two(m) + ":" + two(s);
+        return "Starts in " + d + "d " + two(h) + ":" + two(m) + ":" + two(s);
+    }
+
+    function unlock(el) {
+        el.__svUnlocked = true;
+        var card = el.closest(".sv-bk");
+        if (!card) return;
+        card.querySelectorAll("[data-start-wait]").forEach(function (w) { w.hidden = true; });
+        var open = card.querySelector("[data-start-unlock]");
+        if (!open) return;
+        open.hidden = false;
+        var said = open.querySelector("[data-start-unlocked-text]");
+        if (said) said.textContent = "You can start this booking now.";
+    }
+
+    function tickCountdowns() {
+        var now = Date.now();
+        document.querySelectorAll("[data-countdown]").forEach(function (el) {
+            if (el.__svUnlocked) return;
+            if (!el.__svAt) {
+                var at = Date.parse(el.getAttribute("data-start-at")), server = Date.parse(el.getAttribute("data-server-now"));
+                if (isNaN(at) || isNaN(server)) return;                // leave the server's text as it is
+                el.__svAt = now + (at - server);
+            }
+            var left = el.__svAt - now;
+            if (left <= 0) { unlock(el); return; }
+            var text = countdownText(Math.ceil(left / 1000));
+            if (el.textContent !== text) el.textContent = text;
+        });
+    }
+
     tick();
-    setInterval(tick, 5000);
+    tickCountdowns();
+    var beats = 0;
+    setInterval(function () {
+        tickCountdowns();                                               // every second
+        if (++beats % 5 === 0) tick();                                  // every 5 seconds
+    }, 1000);
 })();

@@ -89,3 +89,11 @@ The rules the database enforces itself (so SSMS or another program cannot get ar
   The install script and `docs\sql\check-monster-before-deploy.sql` show how many first; the backup keeps them as they were.
 - Jobs started before v2.12 have no `STARTED_AT`: they show no start line.
 - Development scripts that use `servisyo_dev_override` can still jump a booking to any status; the CHECK still applies.
+
+## The live countdown (Nov 2026)
+Before the scheduled time an Accepted, paid card shows the notice and a pill **"Starts in 00:54"** that ticks every
+second. It counts on the **server's** clock: the page gets `data-start-at` (the scheduled time, `+08:00`) and
+`data-server-now`, so a phone whose clock is wrong still unlocks at the right second. At 0 the pill and the notice are
+replaced by the blue **Mark In Progress** that is already on the page (hidden), with no reload; a moment later the
+page redraws itself from the server as before. Pressing it early is impossible from the page, and the server refuses
+it anyway (400).

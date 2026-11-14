@@ -33,6 +33,8 @@
         <form method="post" asp-controller="BookProvider" asp-action="Create" asp-route-providerId="@Model.ProviderId"
               class="sv-bp__form" id="bp-form" data-bp-form data-sv-once
               data-slots-url="@Url.Action("Slots", "BookProvider", new { providerId = Model.ProviderId })"
+              data-check-url="@Url.Action("CheckTime", "BookProvider", new { providerId = Model.ProviderId })"
+              data-today="@Model.Today.ToString("yyyy-MM-dd", inv)"
               data-selected-time="@chosenTime">
 
             @if (!string.IsNullOrEmpty(Model.FormError))
@@ -83,6 +85,15 @@
                     <span class="sv-bp__label" id="bp-time-label">Start time</span>
                     <div class="sv-bp__slots" role="radiogroup" aria-labelledby="bp-time-label" data-bp-slots></div>
                     <p class="sv-bp__hint" data-bp-slotmsg>Choose a service and a date to see the available times.</p>
+                    @* An exact start time (any whole minute), checked by the server against the same rules as the buttons *@
+                    <button type="button" class="sv-bp__exact-toggle" data-bp-exact-toggle aria-expanded="false" aria-controls="bp-exact" hidden>Enter exact time</button>
+                    <div class="sv-bp__exact" id="bp-exact" data-bp-exact hidden>
+                        <label for="bp-exact-time">Exact start time</label>
+                        <input id="bp-exact-time" name="Time" type="time" step="60" disabled data-bp-exact-input
+                               aria-describedby="bp-exact-hours bp-exact-msg" />
+                        <p class="sv-bp__hint" id="bp-exact-hours" data-bp-exact-hours></p>
+                        <p class="sv-bp__hint" id="bp-exact-msg" role="status" aria-live="polite" data-bp-exact-msg></p>
+                    </div>
                     @if (timeError is not null) { <p class="sv-fld__err" role="alert" data-bp-timeerr>@timeError</p> }
                 </div>
             </section>

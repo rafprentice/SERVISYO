@@ -96,7 +96,26 @@ public class BookProviderController : Controller
         }
 
         Response.Headers.CacheControl = "no-store";
-        return Json(new { ok = result.ProviderAvailable, message = result.Message, slots = result.Slots });
+        return Json(new { ok = result.ProviderAvailable, message = result.Message, slots = result.Slots, hours = result.Hours, earliest = result.EarliestTime });
+    }
+
+    /// "Enter exact time": whether one exact start time can be booked (the form is checked again when it is sent).
+    [HttpGet("check-time")]
+    public async Task<IActionResult> CheckTime(int providerId, DateOnly? date, TimeOnly? time, [FromQuery] int[]? services, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Unauthorized();
+        if (date is null) return Json(new { ok = false, message = "Choose a date." });
+        if (time is null) return Json(new { ok = false, message = "Enter a start time." });
+
+        var result = await _booking.CheckTimeAsync(userId, providerId, date.Value, time.Value, services ?? Array.Empty<int>(), ct);
+        if (!result.Allowed)
+        {
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return Unauthorized();
+        }
+
+        Response.Headers.CacheControl = "no-store";
+        return Json(new { ok = result.Ok, message = result.Message });
     }
 
     // ------------------------------------------------------------------ helpers
