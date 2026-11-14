@@ -232,7 +232,8 @@ public class NameLockTests
 
         Assert.True(page.NameLocked);
         Assert.False(result.Saved);
-        Assert.Equal(ActiveBookingRules.NameLockedMessage, result.FieldErrors["FullName"]);
+        Assert.True(result.Locked);                                   // the whole profile is locked (CustomerProfileLock)
+        Assert.Equal(CustomerProfileLock.SaveRefusedMessage, result.Message);
         Assert.Equal("Cruz", (await db.Users.AsNoTracking().SingleAsync(u => u.UserId == ana.UserId)).LastName);
     }
 
@@ -251,15 +252,18 @@ public class NameLockTests
     }
 
     [Fact]
-    public async Task Customer_CanStillSaveOtherFields_WhileTheNameIsLocked()
+    public async Task Customer_CannotSaveOtherFieldsEither_DuringAnActiveBooking()
     {
+        // since the profile lock, the phone (and email) are locked too, not only the name
         var (db, ana, vince) = await WorldAsync();
         await BookAsync(db, ana, vince, BookingStatuses.Accepted);
         var svc = new CustomerProfileService(db, new PasswordHasher<User>());
 
         var form = AnaForm(ana, "Ana Cruz");        // same name as now
-        form.PhoneNumber = "09170001111";           // another field may still change
-        Assert.True((await svc.SaveAsync(ana.UserId, form)).Saved);
+        form.PhoneNumber = "09170001111";
+        var result = await svc.SaveAsync(ana.UserId, form);
+        Assert.False(result.Saved);
+        Assert.True(result.Locked);
     }
 
     /// An approved provider's names and business name are locked whether or not there are active bookings

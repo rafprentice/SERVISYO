@@ -59,8 +59,13 @@ public class CustomerProfilePageViewModel
     /// "/uploads/avatars/…" or null (then the initials are shown).
     public string? PhotoUrl { get; set; }
 
-    /// True while the user has an active booking: the name fields are read-only (see ActiveBookingRules).
-    public bool NameLocked { get; set; }
+    /// True while the customer has a booking that is not finished (Data/CustomerProfileLock): the Personal
+    /// Information and Saved Address cards cannot be edited (the password can). Checked again on every save.
+    public bool HasActiveBooking { get; set; }
+    public int ActiveBookingsCount { get; set; }
+
+    /// The name box is read-only while the profile is locked (kept for the page; the same as HasActiveBooking).
+    public bool NameLocked => HasActiveBooking;
 
     // what is SAVED (shown in the summary card; typing in a form does not change it until Save)
     public string FullName { get; set; } = string.Empty;
@@ -106,4 +111,5 @@ public record CustomerProfileSaveResult(
     string Message,
     string FullName = "",
     string Email = "",
-    string? Address = null);
+    string? Address = null,
+    bool Locked = false);           // refused because the customer has an active booking (CustomerProfileLock)

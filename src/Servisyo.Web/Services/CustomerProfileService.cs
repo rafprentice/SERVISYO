@@ -55,6 +55,9 @@ public class CustomerProfileService : ICustomerProfileService
 
     private static CustomerProfileSaveResult NotAllowed() => new(false, false, NoErrors, string.Empty);
 
+    /// The profile lock (CustomerProfileLock): nothing is written while the customer has a booking that is not finished.
+    private static CustomerProfileSaveResult Locked() => new(true, false, NoErrors, CustomerProfileLock.SaveRefusedMessage, Locked: true);
+
     // ------------------------------------------------------------------ read
 
     public async Task<CustomerProfilePageResult> GetAsync(int userId, CancellationToken ct = default)
@@ -73,6 +76,7 @@ public class CustomerProfileService : ICustomerProfileService
 
         var fullName = $"{c.FirstName} {c.LastName}".Trim();
         var address = string.IsNullOrWhiteSpace(c.Address) ? null : c.Address.Trim();
+        var hasActive = await _db.CustomerHasActiveBookingAsync(c.CustomerId, ct);
 
         var vm = new CustomerProfilePageViewModel
         {
@@ -89,7 +93,8 @@ public class CustomerProfileService : ICustomerProfileService
             FullName = fullName,
             Initials = NameFormat.Initials(fullName),
             PhotoUrl = string.IsNullOrWhiteSpace(c.ProfilePhoto) ? null : c.ProfilePhoto,
-            NameLocked = await _db.Bookings.AnyAsync(b => b.CustomerId == c.CustomerId && ActiveBookingRules.Statuses.Contains(b.Status), ct),
+            HasActiveBooking = hasActive,
+            ActiveBookingsCount = hasActive ? await _db.CountCustomerActiveBookingsAsync(c.CustomerId, ct) : 0,
             Email = c.Email,
             // stored in UTC, shown in Philippine time
             MemberSince = c.CreatedAt.AddHours(ManilaOffsetHours).ToString("MMM d, yyyy", CultureInfo.InvariantCulture),
@@ -109,6 +114,13 @@ public class CustomerProfileService : ICustomerProfileService
         var customer = await FindAsync(userId, ct);
         if (customer is null) return NotAllowed();
 
+        // the profile lock comes first: with a booking that is not finished nothing is changed (not even the phone)
+        if (await _db.CustomerHasActiveBookingAsync(customer.CustomerId, ct))
+        {
+            _logger.LogWarning("Customer {CustomerId} tried to change their personal information during an active booking: refused.", customer.CustomerId);
+            return Locked();
+        }
+
         var user = customer.User;
         var errors = new Dictionary<string, string>();
 
@@ -124,8 +136,6 @@ public class CustomerProfileService : ICustomerProfileService
             errors["FullName"] = "Enter your first and last name.";
         else if (nameChanged && !InputRules.IsFullName(fullName))
             errors["FullName"] = InputRules.FullNameMessage;                    // letters only, no numbers or symbols
-        else if (nameChanged && await _db.Bookings.AnyAsync(b => b.CustomerId == customer.CustomerId && ActiveBookingRules.Statuses.Contains(b.Status), ct))
-            errors["FullName"] = ActiveBookingRules.NameLockedMessage;       // the provider must keep seeing the name they were booked by
 
         // ---- phone (REQUIRED: the service provider must be able to contact the customer) ----
         // Only 09XXXXXXXXX (11 characters) or +639XXXXXXXXX (13 characters), digits only; it is always saved as
@@ -192,6 +202,13 @@ public class CustomerProfileService : ICustomerProfileService
     {
         var customer = await FindAsync(userId, ct);
         if (customer is null) return NotAllowed();
+
+        // the profile lock: the provider is on the way to (or working at) the saved address
+        if (await _db.CustomerHasActiveBookingAsync(customer.CustomerId, ct))
+        {
+            _logger.LogWarning("Customer {CustomerId} tried to change their saved address during an active booking: refused.", customer.CustomerId);
+            return Locked();
+        }
 
         var hadAddress = !string.IsNullOrWhiteSpace(customer.Address);
 

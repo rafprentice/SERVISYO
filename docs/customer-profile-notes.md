@@ -77,3 +77,19 @@ dropdown existed keep it until they pick one of the 5 options.
   sign-in layouts; it replaces `auth.js`). Edge's own built-in eye is hidden where ours is, so there are never two.
 - Providers and administrators have no Change Password form yet; any future one gets the eye by wrapping the box in
   `<div class="sv-pwfield">` and adding `<partial name="_PasswordToggle" model="@("the-box-id")" />`.
+
+## The profile lock (Nov 2026)
+While a customer has a booking that is **not finished** (any status except Completed, Cancelled and Rejected: a
+request, a quotation waiting for payment, a paid/scheduled job, a job in progress), their **personal information**
+(name, email, phone) and **saved address** cannot be changed, so the provider keeps the details they were booked with.
+- One definition: `Data/CustomerProfileLock.cs` (`ActiveForCustomer`, `CustomerHasActiveBookingAsync`,
+  `CountCustomerActiveBookingsAsync`, read with AsNoTracking).
+- My Profile shows the amber notice *"Profile editing is currently locked ..."* with the number of active bookings; the
+  **Edit** and **Edit Address / + Add Address** buttons are disabled (faded, not-allowed cursor, tooltip), the boxes are
+  grey and the address form is not on the page. **Change Password** stays open.
+- The server checks again on every save (`CustomerProfileService.SaveAsync` / `SaveAddressAsync`): nothing is written
+  and the answer is **400** with *"Profile information and saved address cannot be modified while you have an active
+  booking."* - the form posts show the page again with that message, `PUT /api/profile/address` returns it as JSON.
+- When the last booking is completed, cancelled or rejected, the page is editable again on the next visit (the
+  existing phone and Cebu City address rules apply as before).
+- Not locked: the password and the profile photo.

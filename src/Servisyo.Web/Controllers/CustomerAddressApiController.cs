@@ -19,7 +19,8 @@ public record SavedAddressResponse(string Message, string Address, string Street
 public record AddressApiMessage(string Message);
 
 /// The customer's saved address as JSON (used by the Saved Address card on "My Profile").
-///   PUT    /api/profile/address  -> changes it to one of the 5 Cebu City options (200, or 400 with a message)
+///   PUT    /api/profile/address  -> changes it to one of the 5 Cebu City options (200, or 400 with a message;
+///                                    400 also while the customer has an active booking: CustomerProfileLock)
 ///   DELETE /api/profile/address  -> always 400: a saved address can be edited but never removed
 /// The customer is always the signed-in user (the cookie), never an id sent by the browser.
 [ApiController]

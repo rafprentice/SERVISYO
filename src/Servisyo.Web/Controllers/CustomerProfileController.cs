@@ -56,6 +56,13 @@ public class CustomerProfileController : Controller
         if (!again.Allowed) return await EndSessionAsync();
 
         var page = again.Page!;
+        if (result.Locked)
+        {
+            // an active booking: nothing was saved; the page shows the saved details again, locked (400 Bad Request)
+            page.FormError = result.Message;
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            return View(nameof(Index), page);
+        }
         page.Form = form;
         page.FieldErrors = result.FieldErrors;
         page.FormError = result.FieldErrors.Count == 0 ? result.Message : null;
@@ -80,6 +87,12 @@ public class CustomerProfileController : Controller
         if (!again.Allowed) return await EndSessionAsync();
 
         var page = again.Page!;
+        if (result.Locked)
+        {
+            page.AddressError = result.Message;                     // an active booking: nothing was saved (400 Bad Request)
+            Response.StatusCode = StatusCodes.Status400BadRequest;
+            return View(nameof(Index), page);
+        }
         page.AddressForm = form;
         page.AddressError = result.FieldErrors.TryGetValue("Address", out var problem) ? problem : result.Message;
         return View(nameof(Index), page);

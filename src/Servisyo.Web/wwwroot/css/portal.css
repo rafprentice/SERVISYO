@@ -1428,3 +1428,12 @@ a.sv-act { display: inline-block; text-decoration: none; }
 [data-start-unlock][hidden], [data-start-wait][hidden] { display: none; }
 @media (prefers-reduced-motion: no-preference) { .sv-countdown::before { animation: sv-pulse 1s ease-in-out infinite; } }
 @keyframes sv-pulse { 50% { opacity: .35; } }
+
+/* Customer > My Profile: the profile lock while a booking is not finished */
+.sv-cp__lock { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 16px; padding: 12px 14px; border: 1px solid #FDE68A; border-left: 4px solid #D97706; border-radius: 8px; background: #FFFBEB; color: #78350F; }
+.sv-cp__lockico { flex: none; display: inline-flex; margin-top: 2px; color: #B45309; }
+.sv-cp__locktext { margin: 0; font-size: .875rem; font-weight: 600; line-height: 1.45; }
+.sv-cp__locksub { margin: 4px 0 0; font-size: .8125rem; color: #92400E; }
+.sv-cp__locksub a { color: #92400E; font-weight: 600; }
+.sv-cp__lockwrap { display: inline-flex; cursor: not-allowed; }
+.sv-cp .sv-btn.is-disabled, .sv-cp .sv-btn.is-disabled:hover { opacity: .5; cursor: not-allowed; pointer-events: none; }
